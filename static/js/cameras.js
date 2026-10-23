@@ -21,6 +21,7 @@
         bulk: "/api/cameras/bulk",
         reach: "/api/cameras/reachability",
         profiles: "/api/camera-profiles",
+        planned: "/api/cameras/planned",
     };
     var REACH_MS = 60000;
 
@@ -87,6 +88,7 @@
             S.cams = res[0];
             S.meta = res[1];
             $("cm-key-banner").hidden = !!S.meta.key_ok;
+            $("cm-privacy-all-btn").hidden = !S.meta.super_admin;
             fillFilters();
             render();
         }).catch(function (e) {
@@ -124,6 +126,8 @@
     /* ---------------- tableau ---------------- */
     function filtered() {
         var f = S.f, q = f.q.toLowerCase();
+        // Mode "En projet" : aucune camera reelle, seules les cameras en projet (carte)
+        if (f.state === "planned") return [];
         return S.cams.filter(function (c) {
             if (f.site && c.site !== f.site) return false;
             if (f.brand && c.brand !== f.brand) return false;
@@ -172,7 +176,13 @@
         var frag = document.createDocumentFragment();
         list.forEach(function (c) { frag.appendChild(row(c)); });
         if (!list.length) {
-            var tr = el("tr"), td = el("td", "cm-empty", "Aucune camera ne correspond.");
+            var planned = S.f.state === "planned";
+            var tr = el("tr"), td = el("td", "cm-empty", planned ? "Les cameras en projet s'affichent sur la carte. " : "Aucune camera ne correspond.");
+            if (planned) {
+                var go = el("button", "cm-btn", "Voir la carte"); go.type = "button";
+                go.addEventListener("click", function () { setView("map"); });
+                td.appendChild(go);
+            }
             td.colSpan = 9; tr.appendChild(td); frag.appendChild(tr);
         }
         tb.appendChild(frag);
@@ -225,16 +235,115 @@
         ign.addTo(M.map);
         L.control.layers({ "Vue aerienne": ign, "Plan": osm, "Plan ACO": aco }, {}, { position: "topright" }).addTo(M.map);
         M.layer = L.layerGroup().addTo(M.map);
+        M.editLayer = L.layerGroup().addTo(M.map);
         M.map.on("click", onMapClick);
         if (window.ResizeObserver) new ResizeObserver(function () { M.map.invalidateSize(); }).observe($("cm-map"));
     }
     function loadMapData() {
-        return getJSON("/api/cameras/map").then(function (r) {
+        return Promise.all([getJSON("/api/cameras/map"), getJSON(API.planned).catch(function () { return []; })]).then(function (res) {
+            var r = res[0];
             M.pos = {};
             r.cameras.forEach(function (c) { M.pos[c._id] = c; });
             M.unplaced = r.unplaced;
+            M.planned = res[1];
+            rebuildPlanned();
             M.loaded = true;
         }).catch(function (e) { toast("error", "Carte indisponible : " + e.message); });
+    }
+
+    /* ---------------- cameras en projet ---------------- */
+    // Emplacements souhaites (travaux a venir) : collection cameras_planned,
+    // jamais melangee aux vraies cameras. Representees comme une camera a un
+    // canal ("p:<id>") pour reutiliser le volet du configurateur (optique, cone).
+    var PLANNED_COLOR = "#8b5cf6";
+    var PLANNED_STATUS = [["souhaitee", "Souhaitee"], ["validee", "Validee"], ["commandee", "Commandee"]];
+    function plannedCam(p) {
+        return { _id: "p:" + p._id, pid: p._id, planned: true, rec: p, name: p.name, enabled: true, channels: plannedChannels(p) };
+    }
+    function plannedChannels(p) {
+        return (p.channels || []).map(function (k) {
+            return { no: k.no, name: "", enabled: true, optics: k.optics, optics_src: k.optics ? "manuel" : "", model: k.model, view: k.view };
+        });
+    }
+    // "1 mobile + 4 fixes"
+    function plannedMix(chs) {
+        var m = chs.filter(function (k) { return k.optics === "mobile"; }).length;
+        var f = chs.filter(function (k) { return k.optics === "fixe"; }).length;
+        var u = chs.length - m - f;
+        return [m ? m + " mobile" + (m > 1 ? "s" : "") : "", f ? f + " fixe" + (f > 1 ? "s" : "") : "",
+            u ? u + " a definir" : ""].filter(Boolean).join(" + ");
+    }
+    function rebuildPlanned() {
+        M.plannedCams = (M.planned || []).map(plannedCam);
+        M.plannedCams.forEach(function (pc) { M.pos[pc._id] = { lat: pc.rec.lat, lng: pc.rec.lng }; });
+    }
+    function plannedById(id) { return (M.plannedCams || []).filter(function (x) { return x._id === id; })[0]; }
+    // Remplace l'enregistrement local par la reponse du serveur
+    function storePlanned(rec) {
+        M.planned = (M.planned || []).filter(function (p) { return p._id !== rec._id; }).concat([rec]);
+        rebuildPlanned();
+        return plannedById("p:" + rec._id);
+    }
+    function statusLabel(s) { return (PLANNED_STATUS.filter(function (x) { return x[0] === s; })[0] || ["", s])[1]; }
+    function plannedTip(pc) {
+        var r = pc.rec, box = el("div", "cm-tip cm-tip-planned");
+        box.appendChild(el("div", "cm-tip-badge", "Camera en projet - " + statusLabel(r.status)));
+        box.appendChild(el("b", "", r.name));
+        if (r.note) box.appendChild(el("div", "cm-tip-line", r.note));
+        var drawn = pc.channels.filter(function (k) { return k.view; }).length;
+        box.appendChild(el("div", "cm-tip-line", plannedMix(pc.channels) + " - " +
+            (drawn === pc.channels.length ? "angle(s) de vue dessine(s)" : drawn + " / " + pc.channels.length + " angle(s) de vue dessine(s)")));
+        box.appendChild(el("div", "cm-tip-line cm-tip-muted", "Ajoutee" + (r.by ? " par " + r.by : "") + (r.at ? " le " + new Date(r.at).toLocaleDateString("fr-FR") : "")));
+        return box;
+    }
+    function drawPlanned() {
+        (M.plannedCams || []).forEach(function (pc) {
+            var p = M.pos[pc._id];
+            var editing = M.coneEdit && M.coneEdit.c._id === pc._id;
+            pc.channels.forEach(function (ch) {
+                if (!ch.view || editing && +M.coneEdit.no === +ch.no) return;
+                coneLayer(p.lat, p.lng, ch.view, "planned", { dashArray: "5 4" }).addTo(M.layer);
+            });
+            var dot = el("div", "cm-pin is-planned" + (editing ? " is-cone-edit is-draggable" : ""));
+            dot.appendChild(icon("add_a_photo"));
+            // Deplacable seulement pendant son edition (volet ouvert)
+            var mk = L.marker([p.lat, p.lng], { icon: L.divIcon({ html: dot, className: "", iconSize: [28, 28], iconAnchor: [14, 14] }),
+                draggable: editing, autoPan: true, zIndexOffset: 500 });
+            mk.bindTooltip(plannedTip(pc), { direction: "top", offset: [0, -14], className: "cm-tip-wrap", opacity: 1 });
+            mk.on("click", function () { if (!M.edit) openPlanned(pc); });
+            mk.on("dragstart", function () { mk.closeTooltip(); });
+            mk.on("dragend", function () { movePlanned(pc, mk.getLatLng()); });
+            mk.addTo(M.layer);
+        });
+    }
+    function openPlanned(pc) {
+        if (!M.cones && !setConeMode(true)) return;
+        M.tour = null;
+        openCone(pc);
+    }
+    function movePlanned(pc, to) {
+        send("PUT", API.planned + "/" + pc.pid, { lat: to.lat, lng: to.lng }).then(function (r) {
+            var p = M.pos[pc._id];
+            p.lat = r.lat; p.lng = r.lng;  // meme objet : le cone en edition suit
+            pc.rec.lat = r.lat; pc.rec.lng = r.lng;
+            if (M.coneEdit && M.coneEdit.c === pc) drawConeEdit();
+            render();
+        }).catch(function (e) { toast("error", e.message); render(); });
+    }
+    function setAddPlanned(on) {
+        if (on && M.edit) setMapEdit(false);
+        M.addPlanned = on;
+        $("cm-map-plan").classList.toggle("is-on", on);
+        $("cm-map-plan").setAttribute("aria-pressed", on ? "true" : "false");
+        $("cm-map").classList.toggle("is-placing", on);
+        if (on) toast("info", "Cliquez sur la carte a l'emplacement de la camera souhaitee");
+    }
+    function addPlannedAt(latlng) {
+        setAddPlanned(false);
+        send("POST", API.planned, { lat: latlng.lat, lng: latlng.lng }).then(function (r) {
+            openPlanned(storePlanned(r));
+            toast("success", r.name + " ajoutee : nommez-la et dessinez son angle de vue");
+        }).catch(function (e) { toast("error", e.message); });
     }
     function placed(list) { return list.filter(function (c) { return M.pos[c._id]; }); }
     function capturable(c) { return c.enabled && c.controllable && c.credential_profile_id; }
@@ -243,7 +352,7 @@
         return (c.channels || []).filter(function (ch) { return ch.enabled !== false; }).length || 1;
     }
     function fitPins() {
-        var pts = placed(filtered()).map(function (c) { return [M.pos[c._id].lat, M.pos[c._id].lng]; });
+        var pts = (S.f.state === "planned" ? (M.plannedCams || []) : placed(filtered())).map(function (c) { return [M.pos[c._id].lat, M.pos[c._id].lng]; });
         // Cadrage sur le site : les cameras lointaines (boutique de Paris)
         // n'ecrasent pas la vue, sauf si elles sont seules dans le filtre
         var near = pts.filter(function (p) { return M.map.distance(p, MAP_CENTER) < 30000; });
@@ -304,31 +413,59 @@
         if (!M.map || !M.loaded) return;
         M.layer.clearLayers();
         var pins = placed(list);
+        // Angles de vue enregistres, sous les pins (sauf celui en cours d'edition)
+        pins.forEach(function (c) {
+            var p = M.pos[c._id];
+            (c.channels || []).forEach(function (ch) {
+                if (ch.enabled === false || !ch.view) return;
+                if (M.coneEdit && M.coneEdit.c._id === c._id && +M.coneEdit.no === +ch.no) return;
+                coneLayer(p.lat, p.lng, ch.view, ch.optics).addTo(M.layer);
+            });
+        });
         pins.forEach(function (c) {
             var p = M.pos[c._id], st = reachOf(c);
             var dot = el("div", "cm-pin is-" + (st === "ko" && c.cellular ? "sleep" : st || "na"));
             dot.appendChild(icon(c.piste ? "lock" : "videocam"));
             if (M.edit) dot.classList.add("is-draggable");
+            if (M.cones && coneTodo(c).length) dot.classList.add("is-todo");
+            if (M.coneEdit && M.coneEdit.c._id === c._id) dot.classList.add("is-cone-edit");
             var mk = L.marker([p.lat, p.lng], { icon: L.divIcon({ html: dot, className: "", iconSize: [28, 28], iconAnchor: [14, 14] }),
                 draggable: !!M.edit, autoPan: true });
             var tip = camTip(c);
             mk.bindTooltip(tip, { direction: "top", offset: [0, -14], className: "cm-tip-wrap", opacity: 1 });
             mk.on("tooltipopen", function () { tip._loadShot(); });
-            mk.on("click", function () { if (!M.edit) openDrawer(c); });
+            mk.on("click", function () {
+                if (M.cones) openCone(c);
+                else if (!M.edit) openDrawer(c);
+            });
             mk.on("dragstart", function () { mk.closeTooltip(); });
             mk.on("dragend", function () { moveCam(c, mk); });
             mk.addTo(M.layer);
         });
+        drawPlanned();
         fillPlaceSelect(list);
         // Recadrage seulement a l'ouverture de la carte et quand les FILTRES
         // changent : placer, deplacer une camera ou un test reseau ne bougent
         // pas la vue (on reste ou l'on vient de poser)
         var key = JSON.stringify(S.f);
         if (key !== M.lastKey) { M.lastKey = key; fitPins(); }
+        if (M.cones) {
+            var mob = 0, mobDone = 0, all = 0;
+            pins.forEach(function (c) {
+                (c.channels || []).forEach(function (ch) {
+                    if (ch.enabled === false) return;
+                    if (ch.view) all++;
+                    if (ch.optics === "mobile") { mob++; if (ch.view) mobDone++; }
+                });
+            });
+            $("cm-map-hint").textContent = "Angles de vue : " + mobDone + " / " + mob + " canaux mobiles dessines (" + all +
+                " au total). Cliquez une camera ; pointilles orange = canal mobile sans angle de vue.";
+        }
         var n = pins.filter(capturable).length;
         var nch = pins.filter(capturable).reduce(function (a, c) { return a + activeChannels(c); }, 0);
-        $("cm-map-count").textContent = pins.length + " camera(s) sur la carte" +
-            (list.length > pins.length ? ", " + (list.length - pins.length) + " sans position" : "");
+        $("cm-map-count").textContent = S.f.state === "planned" ? (M.planned || []).length + " camera(s) en projet" : pins.length + " camera(s) sur la carte" +
+            (list.length > pins.length ? ", " + (list.length - pins.length) + " sans position" : "") +
+            ((M.planned || []).length ? ", " + M.planned.length + " en projet" : "");
         if (!M.job || !M.job.running) {
             $("cm-capture-all-label").textContent = "Capturer les " + n + " camera(s)" + (nch > n ? " (" + nch + " canaux)" : "");
             $("cm-capture-all").disabled = !n || !S.meta.key_ok;
@@ -340,6 +477,8 @@
     // points de l'IP), relue par la page Detection (PUT /api/cameras/<id>/geo)
     var HINT_EDIT = "Faites glisser un pin : la position est enregistree dans la couche GPS des cameras.";
     function setMapEdit(on) {
+        if (on && M.cones) { if (!setConeMode(false)) return; }
+        if (on && M.addPlanned) setAddPlanned(false);
         M.edit = on;
         M.placing = null;
         $("cm-map-edit").classList.toggle("is-on", on);
@@ -367,6 +506,7 @@
         $("cm-map").classList.toggle("is-placing", !!c);
     }
     function onMapClick(e) {
+        if (M.addPlanned) { addPlannedAt(e.latlng); return; }
         if (!M.edit || !M.placing) return;
         var c = S.cams.filter(function (x) { return x._id === M.placing; })[0];
         if (!c) return;
@@ -397,6 +537,702 @@
                 toast("error", e.message);
             });
         });
+    }
+
+    /* ---------------- angles de vue ---------------- */
+    // Un cone par canal, dessine a la main d'apres la capture : az = degres
+    // depuis le nord (sens horaire), fov = ouverture, range = portee en m.
+    // Enregistre dans cockpit_cameras (PUT /channels/<no>/view) : rien n'est
+    // envoye aux cameras ni a la couche GPS.
+    var CONE_COLORS = { mobile: "#f97316", fixe: "#3b82f6", planned: "#8b5cf6" };
+    function destPoint(lat, lng, az, dist) {
+        var r = az * Math.PI / 180;
+        return [lat + dist * Math.cos(r) / 111320, lng + dist * Math.sin(r) / (111320 * Math.cos(lat * Math.PI / 180))];
+    }
+    function bearingDist(lat, lng, to) {
+        var dy = (to.lat - lat) * 111320;
+        var dx = (to.lng - lng) * 111320 * Math.cos(lat * Math.PI / 180);
+        return { az: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360, d: Math.sqrt(dx * dx + dy * dy) };
+    }
+    function conePoints(lat, lng, v) {
+        var pts = v.fov >= 360 ? [] : [[lat, lng]];
+        var n = Math.max(8, Math.round(v.fov / 4));
+        for (var i = 0; i <= n; i++) pts.push(destPoint(lat, lng, v.az - v.fov / 2 + v.fov * i / n, v.range));
+        return pts;
+    }
+    function coneLayer(lat, lng, v, optics, extra) {
+        var col = CONE_COLORS[optics] || "#64748b";
+        var opts = { color: col, weight: 1.5, fillColor: col, fillOpacity: .18, interactive: false };
+        Object.keys(extra || {}).forEach(function (k) { opts[k] = extra[k]; });
+        return L.polygon(conePoints(lat, lng, v), opts);
+    }
+    function liveChannels(c) {
+        var chs = (c.channels || []).filter(function (ch) { return ch.enabled !== false; });
+        return chs.length ? chs : (c.channels || []);
+    }
+    // Canaux mobiles sans angle de vue (pin entoure en mode Angles de vue)
+    function coneTodo(c) {
+        return liveChannels(c).filter(function (ch) { return ch.optics === "mobile" && !ch.view; });
+    }
+    function optLabel(ch) {
+        return ch.optics === "mobile" ? "mobile" : ch.optics === "fixe" ? "fixe" : "optique ?";
+    }
+
+    // Renvoie false si l'utilisateur garde ses modifications en cours
+    function setConeMode(on) {
+        if (!on && M.coneEdit && M.coneEdit.dirty) {
+            confirmToast("Abandonner l'angle de vue en cours de dessin ?", "Abandonner").then(function (ok) {
+                if (ok) { M.coneEdit.dirty = false; setConeMode(false); }
+            });
+            return false;
+        }
+        if (on && M.edit) setMapEdit(false);
+        M.cones = on;
+        $("cm-map-cones").classList.toggle("is-on", on);
+        $("cm-map-cones").setAttribute("aria-pressed", on ? "true" : "false");
+        $("cm-map-hint").hidden = !on;
+        if (!on) { M.tour = null; closeCone(true); }
+        render();
+        return true;
+    }
+
+    /* Configurateur : parcours camera par camera, canal par canal. Pour chaque
+       canal : capture fraiche automatique (la suivante est preparee pendant
+       qu'on dessine), optique Fixe / Mobile enregistree d'un clic, cone a
+       regler, "Enregistrer et suivant". Raccourcis : Entree, F, M, fleches, C. */
+    function camById(id) { return S.cams.filter(function (x) { return x._id === id; })[0]; }
+    function chOf(c, no) { return (c.channels || []).filter(function (x) { return +x.no === +no; })[0]; }
+    function startTour() {
+        var cams = placed(filtered()).filter(function (c) { return c.enabled; }).sort(function (a, b) {
+            return a.name.localeCompare(b.name, "fr", { numeric: true });
+        });
+        function build(all) {
+            var items = [];
+            cams.forEach(function (c) {
+                liveChannels(c).forEach(function (ch) { if (all || !ch.view) items.push({ id: c._id, no: ch.no }); });
+            });
+            return items;
+        }
+        var items = build(false);
+        var go = function (list, label) {
+            if (!list.length) { toast("info", "Aucun canal a parcourir (filtres de la liste appliques)"); return; }
+            if (!M.cones && !setConeMode(true)) return;
+            M.tour = { items: list, i: 0, label: label };
+            openCone(camById(list[0].id), list[0].no);
+        };
+        if (items.length) { go(items, "a dessiner"); return; }
+        confirmToast("Tous les canaux affiches ont deja un angle de vue. Les revoir tous ?", "Revoir").then(function (ok) {
+            if (ok) go(build(true), "revue");
+        });
+    }
+    function tourStep(delta) {
+        var T = M.tour;
+        if (!T) return;
+        var i = T.i + delta;
+        if (i >= T.items.length) {
+            M.tour = null;
+            closeCone(true);
+            toast("success", "Parcours termine");
+            return;
+        }
+        if (i < 0) return;
+        T.i = i;
+        if (M.coneEdit) M.coneEdit.dirty = false;  // "Passer" abandonne le dessin en cours
+        openCone(camById(T.items[i].id), T.items[i].no);
+    }
+
+    function openCone(c, no) {
+        if (!c) return;
+        if (M.coneEdit && M.coneEdit.dirty && !(M.coneEdit.c._id === c._id && +M.coneEdit.no === +no)) {
+            confirmToast("Abandonner l'angle de vue en cours de dessin ?", "Abandonner").then(function (ok) {
+                if (ok) { M.coneEdit.dirty = false; openCone(c, no); }
+            });
+            return;
+        }
+        var chs = liveChannels(c);
+        var ch = (no && chs.filter(function (x) { return +x.no === +no; })[0]) || coneTodo(c)[0]
+            || chs.filter(function (x) { return !x.view; })[0] || chs[0];
+        if (!ch) return;
+        if (M.tour) {
+            var k = -1;
+            M.tour.items.forEach(function (it, j) { if (it.id === c._id && +it.no === +ch.no) k = j; });
+            if (k >= 0) M.tour.i = k;
+        }
+        M.coneEdit = { c: c, no: ch.no, ch: ch, v: defaultView(c, ch), dirty: false };
+        $("cm-map-area").classList.add("is-cone-open");
+        buildConePanel();
+        drawConeEdit();
+        render();
+        frameCone();
+        showShot();
+    }
+    function defaultView(c, ch) {
+        if (ch.view) return { az: ch.view.az, fov: ch.view.fov, range: ch.view.range };
+        // Autre canal deja dessine sur le meme appareil : meme direction de depart
+        var sib = (c.channels || []).filter(function (x) { return x.view; })[0];
+        // Capteurs fixes d'un multi-capteurs : le suivant part 90 degres plus loin
+        var fixes = (c.channels || []).filter(function (x) { return x.view && x.optics === "fixe"; });
+        var az = ch.optics === "fixe" && fixes.length ? (fixes[fixes.length - 1].view.az + 90) % 360 : sib ? sib.view.az : 0;
+        var L0 = lensFor(c, ch);
+        return L0 ? { az: az, fov: L0.fov, range: L0.range }
+            : { az: az, fov: ch.optics === "fixe" ? 80 : 50, range: ch.optics === "fixe" ? 40 : 100 };
+    }
+
+    // Objectifs connus (fiches techniques Hikvision) : ouverture horizontale et
+    // portee = distance DORI "Observer" (63 px/m). PTZ : grand angle, portee
+    // "Observer" ramenee a la focale mini. Cles stockees sur les canaux en
+    // projet (cameras.PLANNED_MODELS).
+    var LENSES = [
+        { k: "2dp-ptz", label: "DS-2DP7D836 (1 + 4) - PTZ", optics: "mobile", fov: 59, range: 48 },
+        // Portee harmonisee a 30 m sur tous les objectifs fixes des 1 + 4 (demande du 21/10/2026, fiche : 22 m)
+        { k: "2dp-pano", label: "DS-2DP7D836 (1 + 4) - objectif fixe", optics: "fixe", fov: 106, range: 30 },
+        { k: "2sf-ptz", label: "DS-2SF8C442 (1 + 1) - PTZ", optics: "mobile", fov: 59, range: 28 },
+        { k: "2sf-pano", label: "DS-2SF8C442 (1 + 1) - panoramique", optics: "fixe", fov: 190, range: 31 },
+        { k: "bullet-wide", label: "iDS-2CD7A87G0 - fixe 2,8 mm", optics: "fixe", fov: 100, range: 37 },
+        { k: "bullet-tele", label: "iDS-2CD7A87G0 - fixe 12 mm", optics: "fixe", fov: 44, range: 81 },
+        { k: "fisheye-360", label: "DS-2CD63C5G1 - 360 au plafond", optics: "fixe", fov: 360, range: 11 },
+        { k: "fisheye-180", label: "DS-2CD63C5G1 - 180 au mur", optics: "fixe", fov: 180, range: 11 },
+        { k: "ptz", label: "PTZ generique", optics: "mobile", fov: 59, range: 50 },
+    ];
+    function lensByKey(k) { return LENSES.filter(function (x) { return x.k === k; })[0]; }
+    function lensLabel(l) { return l.label + " (" + l.fov + " deg, " + l.range + " m)"; }
+    // Objectif d'un canal : choisi (canal en projet ou selecteur du volet),
+    // sinon deduit du modele de l'appareil, sinon profil par defaut de l'optique
+    // (fixe = iDS-2CD7A87G0, le modele de base des fixes)
+    function lensKeyFor(c, ch) {
+        if (ch.model && lensByKey(ch.model)) return ch.model;
+        var m = (c.model || "").toUpperCase(), first = +ch.no === +(liveChannels(c)[0] || {}).no;
+        if (m.indexOf("2DP7D836") >= 0) return first ? "2dp-ptz" : "2dp-pano";
+        if (m.indexOf("2SF8C442") >= 0) return first ? "2sf-ptz" : "2sf-pano";
+        if (m.indexOf("2CD7A87G0") >= 0) return "bullet-wide";
+        if (m.indexOf("2CD63C5G1") >= 0) return "fisheye-360";
+        return ch.optics === "mobile" ? "ptz" : ch.optics === "fixe" ? "bullet-wide" : "";
+    }
+    function lensFor(c, ch) { return lensByKey(lensKeyFor(c, ch)); }
+    function closeCone(force) {
+        if (!force && M.coneEdit && M.coneEdit.dirty) {
+            confirmToast("Abandonner l'angle de vue en cours de dessin ?", "Abandonner").then(function (ok) {
+                if (ok) closeCone(true);
+            });
+            return;
+        }
+        M.coneEdit = null;
+        M.tour = null;
+        if (M.editLayer) M.editLayer.clearLayers();
+        $("cm-cone-panel").hidden = true;
+        $("cm-cone-panel").textContent = "";
+        $("cm-map-area").classList.remove("is-cone-open");
+        if (M.map) { M.map.invalidateSize(); render(); }
+    }
+    // Cadre la carte sur la camera et son cone, dans la partie non couverte par le volet
+    function frameCone() {
+        var E = M.coneEdit, p = M.pos[E.c._id], box = $("cm-cone-panel");
+        var pts = conePoints(p.lat, p.lng, E.v).concat([[p.lat, p.lng]]);
+        var phone = window.innerWidth <= 820;
+        M.map.invalidateSize();
+        M.map.fitBounds(L.latLngBounds(pts), {
+            paddingTopLeft: phone ? [20, 70] : [box.offsetWidth + 50, 70],
+            paddingBottomRight: phone ? [20, box.offsetHeight + 30] : [50, 40],
+            maxZoom: 19, animate: false,
+        });
+    }
+    function coneHandle(cls, title) {
+        return L.divIcon({ html: '<div class="cm-cone-handle ' + cls + '" title="' + title + '"></div>', className: "", iconSize: [22, 22], iconAnchor: [11, 11] });
+    }
+    function drawConeEdit() {
+        var E = M.coneEdit, p = M.pos[E.c._id];
+        M.editLayer.clearLayers();
+        E.poly = coneLayer(p.lat, p.lng, E.v, E.c.planned ? "planned" : E.ch.optics, { weight: 2.5, dashArray: "6 4", fillOpacity: .3 }).addTo(M.editLayer);
+        // Verrou (M.lockFov) : ouverture et portee figees, la poignee ne fait que tourner
+        E.tip = L.marker(destPoint(p.lat, p.lng, E.v.az, E.v.range), { icon: coneHandle("is-tip", M.lockFov ? "Orienter" : "Orienter et allonger"), draggable: true, zIndexOffset: 1000 }).addTo(M.editLayer);
+        E.edge = M.lockFov ? null : L.marker(destPoint(p.lat, p.lng, E.v.az + E.v.fov / 2, E.v.range), { icon: coneHandle("is-edge", "Ouvrir ou fermer l'angle"), draggable: true, zIndexOffset: 1000 }).addTo(M.editLayer);
+        E.tip.on("drag", function () {
+            var b = bearingDist(p.lat, p.lng, E.tip.getLatLng());
+            E.v.az = Math.round(b.az);
+            if (!M.lockFov) E.v.range = Math.max(1, Math.round(b.d));
+            refreshCone("tip");
+        });
+        E.tip.on("dragend", function () { refreshCone(null); });
+        if (!E.edge) return;
+        E.edge.on("drag", function () {
+            var b = bearingDist(p.lat, p.lng, E.edge.getLatLng());
+            var diff = Math.abs(((b.az - E.v.az + 540) % 360) - 180);
+            E.v.fov = Math.min(359, Math.max(1, Math.round(2 * diff)));
+            E.v.range = Math.max(1, Math.round(b.d));
+            refreshCone("edge");
+        });
+        E.edge.on("dragend", function () { refreshCone(null); });
+    }
+    function refreshCone(dragging) {
+        var E = M.coneEdit;
+        if (!E) return;
+        var p = M.pos[E.c._id];
+        E.poly.setLatLngs(conePoints(p.lat, p.lng, E.v));
+        if (dragging !== "tip") E.tip.setLatLng(destPoint(p.lat, p.lng, E.v.az, E.v.range));
+        if (E.edge && dragging !== "edge") E.edge.setLatLng(destPoint(p.lat, p.lng, E.v.az + E.v.fov / 2, E.v.range));
+        if (dragging) E.dirty = true;
+        if (dragging === "input") return;  // ne pas reecrire le champ en cours de saisie
+        E.inAz.value = Math.round(E.v.az);
+        E.inFov.value = Math.round(E.v.fov);
+        E.inRange.value = Math.round(E.v.range);
+    }
+
+    // Captures du configurateur : cache par canal (2 min), une seule capture
+    // a la fois cote navigateur (le serveur refuse deux captures sur une meme IP)
+    var SHOT_FRESH_MS = 120000;
+    M.shots = {};
+    function shotKey(c, no) { return c._id + ":" + no; }
+    function grabShot(c, no) {
+        var key = shotKey(c, no), hit = M.shots[key];
+        if (hit && hit.pending) return hit.pending;
+        if (hit && hit.url && Date.now() - hit.at < SHOT_FRESH_MS) return Promise.resolve(hit);
+        var tries = 0;
+        function once() {
+            return send("POST", API.list + "/" + c._id + "/capture" + (+no !== 1 ? "?channel=" + no : "")).catch(function (e) {
+                // Capture deja en cours sur l'appareil / delai entre deux captures : on reessaie
+                if (++tries < 4 && /en cours|Patienter/i.test(e.message || "")) {
+                    return new Promise(function (r) { setTimeout(r, 1800); }).then(once);
+                }
+                throw e;
+            });
+        }
+        var pr = once().then(function (blob) {
+            M.shots[key] = { url: URL.createObjectURL(blob), at: Date.now() };
+            return M.shots[key];
+        }, function (e) {
+            delete M.shots[key];
+            throw e;
+        });
+        M.shots[key] = { pending: pr };
+        return pr;
+    }
+    function canShoot(c) { return capturable(c) && S.meta.key_ok; }
+    function showShot(force) {
+        var E = M.coneEdit;
+        if (!E || E.c.planned) return;
+        var c = E.c, no = E.no, token = E;
+        var im = E.shotImg, st = E.shotState;
+        if (force) delete M.shots[shotKey(c, no)];
+        var hit = M.shots[shotKey(c, no)];
+        if (hit && hit.url && Date.now() - hit.at < SHOT_FRESH_MS) {
+            im.src = hit.url; im.classList.remove("is-stale");
+            st.textContent = "Capture de " + new Date(hit.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+            prefetchNext();
+            return;
+        }
+        // Derniere capture connue en attendant (grisee)
+        im.src = API.list + "/" + c._id + "/snapshot" + (+no !== 1 ? "?channel=" + no + "&" : "?") + "t=" + Date.now();
+        im.classList.add("is-stale");
+        if (!canShoot(c) || !M.autoShot && !force) {
+            im.classList.remove("is-stale");
+            st.textContent = !canShoot(c) ? (c.piste ? "Camera de piste : pas de capture" : "Capture impossible (marque ou identifiants)") + ", derniere image connue"
+                : "Derniere image connue (capture auto desactivee)";
+            return;
+        }
+        st.textContent = c.cellular ? "Camera 4G : reveil et capture..." : "Capture en cours...";
+        st.classList.add("is-busy");
+        grabShot(c, no).then(function (r) {
+            if (M.coneEdit !== token) return;
+            im.src = r.url; im.classList.remove("is-stale");
+            st.classList.remove("is-busy");
+            st.textContent = "Capture de " + new Date(r.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+            prefetchNext();
+        }).catch(function (e) {
+            if (M.coneEdit !== token) return;
+            st.classList.remove("is-busy");
+            im.classList.remove("is-stale");
+            var msg = e.message || "Camera injoignable";
+            if (/timed out|timeout/i.test(msg)) msg = "delai depasse";
+            st.textContent = "Capture impossible (" + msg + "), derniere image connue";
+        });
+    }
+    // Prepare la capture du canal suivant du parcours pendant qu'on dessine
+    function prefetchNext() {
+        var T = M.tour;
+        if (!T || !M.autoShot) return;
+        var it = T.items[T.i + 1], c = it && camById(it.id);
+        if (!c || !canShoot(c) || M.shots[shotKey(c, it.no)]) return;
+        grabShot(c, it.no).catch(function () {});
+    }
+
+    function setOptics(optics) {
+        var E = M.coneEdit;
+        if (!E || E.ch.optics === optics && E.ch.optics_src === "manuel") return;
+        var c = E.c, ch = E.ch;
+        var req = c.planned
+            ? send("PUT", API.planned + "/" + c.pid, { ch: ch.no, optics: optics }).then(function (r) { patchRec(c, r); })
+            : send("PUT", API.list + "/" + c._id + "/channels/" + ch.no + "/optics", { optics: optics }).then(function (r) {
+                ch.optics = r.optics; ch.optics_src = r.optics_src;
+            });
+        req.then(function () {
+            if (M.coneEdit !== E) return;
+            // Cone par defaut (jamais touche) : reprend les valeurs du nouveau type
+            if (!E.ch.view && !E.dirty) E.v = defaultView(c, E.ch);
+            if (!c.planned) E.poly.setStyle({ color: CONE_COLORS[optics], fillColor: CONE_COLORS[optics] });
+            refreshCone(null);
+            renderOptics();
+            renderChips();
+        }).catch(function (e) { toast("error", e.message); });
+    }
+    function renderOptics() {
+        var E = M.coneEdit;
+        if (!E) return;
+        Array.prototype.forEach.call(E.optBtns, function (b) {
+            b.classList.toggle("is-on", b.dataset.optics === E.ch.optics);
+        });
+        E.optHint.textContent = !E.ch.optics ? "Optique a choisir"
+            : E.ch.optics_src === "modele" ? "Deduite du modele : a confirmer"
+            : E.ch.optics_src === "presets" ? "Deduite des presets de la camera"
+            : "Confirmee";
+        E.optHint.className = "cm-cfg-opt-hint" + (!E.ch.optics || E.ch.optics_src === "modele" ? " is-warn" : "");
+    }
+    function saveCone() {
+        var E = M.coneEdit;
+        if (!E || E.saving) return;
+        var c = E.c, ch = E.ch;
+        if (c.planned) { savePlanned(E); return; }
+        E.saving = true;
+        E.saveBtn.disabled = true;
+        send("PUT", API.list + "/" + c._id + "/channels/" + ch.no + "/view", { az: E.v.az, fov: E.v.fov, range: E.v.range }).then(function (r) {
+            ch.view = r.view;
+            E.dirty = false;
+            toast("success", "Enregistre : " + c.name + (liveChannels(c).length > 1 ? ", canal " + ch.no : ""));
+            if (M.tour) { tourStep(1); return; }
+            // Canal suivant de l'appareil sans angle de vue (toute optique),
+            // d'abord apres celui-ci, sinon en reprenant au debut ; sinon on ferme
+            var rest = liveChannels(c).filter(function (k) { return !k.view && +k.no !== +ch.no; });
+            var next = rest.filter(function (k) { return +k.no > +ch.no; })[0] || rest[0];
+            if (next) openCone(c, next.no);
+            else closeCone(true);
+        }).catch(function (e) {
+            toast("error", e.message);
+            E.saving = false;
+            E.saveBtn.disabled = false;
+        });
+    }
+    function clearCone() {
+        var E = M.coneEdit, c = E.c, ch = E.ch;
+        confirmToast("Effacer l'angle de vue de " + c.name + (liveChannels(c).length > 1 ? ", canal " + ch.no : "") + " ?", "Effacer").then(function (ok) {
+            if (!ok) return;
+            var req = c.planned
+                ? send("PUT", API.planned + "/" + c.pid, { ch: ch.no, clear_view: true }).then(function (r) { patchRec(c, r); })
+                : send("PUT", API.list + "/" + c._id + "/channels/" + ch.no + "/view", { clear: true });
+            req.then(function () {
+                ch.view = null;
+                toast("success", "Angle de vue efface");
+                openCone(c, ch.no);
+            }).catch(function (e) { toast("error", e.message); });
+        });
+    }
+    // Camera en projet : reponse du serveur reportee sur l'objet local (meme
+    // enregistrement que M.planned, l'objet du volet reste valable)
+    function patchRec(c, r) {
+        Object.keys(r).forEach(function (k) { c.rec[k] = r[k]; });
+        c.name = r.name;
+        c.channels = plannedChannels(r);
+        // Le volet pointe sur le canal reconstruit
+        if (M.coneEdit && M.coneEdit.c === c) M.coneEdit.ch = chOf(c, M.coneEdit.no) || c.channels[0];
+    }
+    // Canaux simules d'un emplacement en projet (ex. 1 PTZ + 4 fixes)
+    function addPlannedChannels(c, optics, count, model) {
+        return send("POST", API.planned + "/" + c.pid + "/channels", { optics: optics, count: count || 1, model: model || "" }).then(function (r) {
+            var before = c.channels.map(function (k) { return +k.no; });
+            patchRec(c, r);
+            var added = c.channels.filter(function (k) { return before.indexOf(+k.no) < 0; })[0];
+            if (M.coneEdit) M.coneEdit.dirty = false;
+            openCone(c, added ? added.no : undefined);
+        }).catch(function (e) { toast("error", e.message); });
+    }
+    // Modeles multi-capteurs : canal 1 = PTZ du modele, puis ses objectifs fixes
+    // (DS-2DP7D836 : 1 + 4 ; DS-2SF8C442 : 1 + 1 panoramique)
+    var PLANNED_KITS = {
+        "2dp": { ptz: "2dp-ptz", fixe: "2dp-pano", count: 4 },
+        "2sf": { ptz: "2sf-ptz", fixe: "2sf-pano", count: 1 },
+    };
+    function plannedPreset(c, kit) {
+        var K = PLANNED_KITS[kit], first = c.channels[0];
+        send("PUT", API.planned + "/" + c.pid, { ch: first.no, optics: "mobile", model: K.ptz }).then(function (r) {
+            patchRec(c, r);
+            return addPlannedChannels(c, "fixe", K.count, K.fixe);
+        }).catch(function (e) { toast("error", e.message); });
+    }
+    function removePlannedChannel(c, no) {
+        confirmToast("Retirer le canal " + no + " de " + c.name + " ?", "Retirer").then(function (ok) {
+            if (!ok) return;
+            send("DELETE", API.planned + "/" + c.pid + "/channels/" + no).then(function (r) {
+                patchRec(c, r);
+                if (M.coneEdit) M.coneEdit.dirty = false;
+                openCone(c, c.channels[0].no);
+            }).catch(function (e) { toast("error", e.message); });
+        });
+    }
+    function savePlanned(E) {
+        var c = E.c, ch = E.ch, f = E.form;
+        var name = f.name.value.trim();
+        if (!name) { toast("warning", "Donnez un nom a la camera en projet"); f.name.focus(); return; }
+        var body = { name: name, note: f.note.value, status: f.status.value };
+        // Le cone affiche est toujours enregistre, meme laisse aux valeurs par defaut
+        body.ch = ch.no;
+        body.view = { az: E.v.az, fov: E.v.fov, range: E.v.range };
+        E.saving = true;
+        E.saveBtn.disabled = true;
+        send("PUT", API.planned + "/" + c.pid, body).then(function (r) {
+            patchRec(c, r);
+            E.dirty = false;
+            toast("success", "Camera en projet enregistree : " + r.name + (c.channels.length > 1 ? ", canal " + ch.no : ""));
+            // Canal suivant sans angle de vue, sinon on ferme
+            var rest = c.channels.filter(function (k) { return !k.view && +k.no !== +ch.no; });
+            var next = rest.filter(function (k) { return +k.no > +ch.no; })[0] || rest[0];
+            if (next) openCone(c, next.no);
+            else closeCone(true);
+        }).catch(function (e) {
+            toast("error", e.message);
+            E.saving = false;
+            E.saveBtn.disabled = false;
+        });
+    }
+    function deletePlanned(c) {
+        confirmToast("Supprimer la camera en projet " + c.name + " ?", "Supprimer").then(function (ok) {
+            if (!ok) return;
+            send("DELETE", API.planned + "/" + c.pid).then(function () {
+                M.planned = (M.planned || []).filter(function (p) { return p._id !== c.pid; });
+                delete M.pos[c._id];
+                rebuildPlanned();
+                if (M.coneEdit) M.coneEdit.dirty = false;
+                closeCone(true);
+                toast("success", "Camera en projet supprimee");
+            }).catch(function (e) { toast("error", e.message); });
+        });
+    }
+    // Prereglage d'objectif : ouverture et portee de la fiche technique (la
+    // direction est gardee). Canal en projet : modele (et optique) enregistres.
+    function applyLens(k) {
+        var E = M.coneEdit, l = lensByKey(k);
+        if (!E) return;
+        var c = E.c, ch = E.ch;
+        if (l) {
+            E.v.fov = l.fov;
+            E.v.range = l.range;
+            E.dirty = true;
+            refreshCone(null);
+        }
+        if (c.planned) {
+            var body = { ch: ch.no, model: k };
+            if (l) body.optics = l.optics;
+            send("PUT", API.planned + "/" + c.pid, body).then(function (r) {
+                patchRec(c, r);
+                renderOptics();
+                renderChips();
+            }).catch(function (e) { toast("error", e.message); });
+        } else {
+            ch.model = k;  // session seulement : l'objectif d'une camera reelle vient de son modele
+            if (l && l.optics !== ch.optics) setOptics(l.optics);
+        }
+    }
+    function setLock(on) {
+        M.lockFov = on;
+        try { localStorage.setItem("cockpit-cameras-lockfov", on ? "1" : "0"); } catch (e) {}
+        var E = M.coneEdit;
+        if (!E) return;
+        E.lockBtn.classList.toggle("is-on", on);
+        E.lockBtn.querySelector(".material-symbols-outlined").textContent = on ? "lock" : "lock_open";
+        E.inFov.disabled = E.inRange.disabled = on;
+        drawConeEdit();
+    }
+    // Pastilles des canaux (fait / optique) ; camera en projet : ajout de
+    // canaux simules (+ Mobile, + Fixe, modeles 1 PTZ + 4 fixes / + 1 fixe)
+    function renderChips() {
+        var E = M.coneEdit;
+        if (!E || !E.chipsBox) return;
+        var c = E.c, box = E.chipsBox, chs = liveChannels(c);
+        box.textContent = "";
+        chs.forEach(function (k) {
+            var b = el("button", "cm-cfg-chip" + (+k.no === +E.no ? " is-current" : "") + (k.view ? " is-done" : "") + (k.optics ? " is-" + k.optics : ""));
+            b.type = "button";
+            b.title = (k.name || "Canal " + k.no) + " : " + optLabel(k) + (k.view ? ", angle dessine" : ", angle a dessiner");
+            b.appendChild(el("span", "", String(k.no)));
+            if (k.view) b.appendChild(icon("check"));
+            b.addEventListener("click", function () { openCone(c, k.no); });
+            box.appendChild(b);
+        });
+        if (!c.planned) return;
+        box.appendChild(cfgBtn("add", "Mobile", "cm-cfg-chip-add", function () { addPlannedChannels(c, "mobile", 1, "ptz"); }, "Ajouter un canal mobile (PTZ generique)"));
+        box.appendChild(cfgBtn("add", "Fixe", "cm-cfg-chip-add", function () { addPlannedChannels(c, "fixe", 1, "bullet-wide"); }, "Ajouter un canal fixe (iDS-2CD7A87G0)"));
+        box.appendChild(cfgBtn("add", "360", "cm-cfg-chip-add", function () { addPlannedChannels(c, "fixe", 1, "fisheye-360"); }, "Ajouter une camera 360 (DS-2CD63C5G1 au plafond)"));
+        if (chs.length === 1) {
+            box.appendChild(cfgBtn("view_module", "1 PTZ + 4 fixes", "cm-cfg-chip-add", function () { plannedPreset(c, "2dp"); }, "DS-2DP7D836 : canal 1 PTZ + 4 objectifs fixes"));
+            box.appendChild(cfgBtn("view_agenda", "1 PTZ + 1 fixe", "cm-cfg-chip-add", function () { plannedPreset(c, "2sf"); }, "DS-2SF8C442 : canal 1 PTZ + 1 panoramique"));
+        } else {
+            box.appendChild(cfgBtn("remove", "", "cm-cfg-chip-add cm-btn-danger", function () { removePlannedChannel(c, E.no); }, "Retirer le canal " + E.no));
+        }
+    }
+    function cfgBtn(ic, label, cls, fn, title) {
+        var b = el("button", "cm-btn " + (cls || "")); b.type = "button";
+        if (ic) b.appendChild(icon(ic));
+        if (label) b.appendChild(el("span", "", label));
+        if (title) b.title = title;
+        b.addEventListener("click", fn);
+        return b;
+    }
+    function buildConePanel() {
+        var E = M.coneEdit, c = E.c, ch = E.ch, T = M.tour;
+        var box = $("cm-cone-panel");
+        box.textContent = "";
+        box.hidden = false;
+        box.classList.toggle("is-tour", !!T);
+
+        // En-tete : progression du parcours, camera, fermeture
+        var head = el("div", "cm-cfg-head");
+        var ttl = el("div", "cm-cfg-title");
+        if (T) {
+            ttl.appendChild(el("span", "cm-cfg-step", (T.i + 1) + " / " + T.items.length + " " + T.label));
+        }
+        ttl.appendChild(el("b", "", c.name));
+        head.appendChild(ttl);
+        head.appendChild(cfgBtn("close", "", "cm-cfg-close", function () { closeCone(false); }, "Fermer (Echap)"));
+        box.appendChild(head);
+        if (T) {
+            var bar = el("div", "cm-cfg-progress"), fill = el("i");
+            fill.style.width = Math.round(100 * T.i / T.items.length) + "%";
+            bar.appendChild(fill);
+            box.appendChild(bar);
+        }
+
+        // Canaux de l'appareil : pastilles (fait / optique)
+        var chs = liveChannels(c);
+        E.chipsBox = el("div", "cm-cfg-chips");
+        if (chs.length > 1 || c.planned) box.appendChild(E.chipsBox);
+        renderChips();
+        if (c.planned) {
+            // Camera en projet : pas de photo, fiche du projet a la place
+            box.appendChild(el("div", "cm-cfg-planned-badge", "Camera en projet (travaux a venir) - glissez son pin pour la deplacer"));
+            var pf = el("div", "cm-cfg-planned");
+            E.form = {
+                name: inp(c.rec.name, { maxlength: 120, placeholder: "Ex. Parking P4 - entree nord" }),
+                status: sel(PLANNED_STATUS, c.rec.status || "souhaitee"),
+                note: document.createElement("textarea"),
+            };
+            E.form.note.value = c.rec.note || "";
+            E.form.note.maxLength = 1000;
+            E.form.note.placeholder = "Pourquoi ici, ce qu'elle doit voir, contraintes (mat, reseau, alimentation)...";
+            pf.appendChild(field("Nom", E.form.name));
+            pf.appendChild(field("Statut", E.form.status));
+            pf.appendChild(field("Note", E.form.note, "cm-span2"));
+            box.appendChild(pf);
+            box.appendChild(el("div", "cm-cfg-chname", "Ajoutee" + (c.rec.by ? " par " + c.rec.by : "") +
+                (c.rec.at ? " le " + new Date(c.rec.at).toLocaleDateString("fr-FR") : "")));
+        } else {
+            box.appendChild(el("div", "cm-cfg-chname", (chs.length > 1 ? "Canal " + ch.no + " : " : "") + (ch.name || c.name)));
+
+            // Photo du canal
+            var shot = el("div", "cm-cfg-shot");
+            E.shotImg = document.createElement("img");
+            E.shotImg.alt = "Capture du canal";
+            E.shotImg.addEventListener("error", function () { E.shotImg.removeAttribute("src"); E.shotImg.classList.remove("is-stale"); });
+            E.shotImg.addEventListener("click", function () { if (E.shotImg.src) openLightbox(E.shotImg.src); });
+            shot.appendChild(E.shotImg);
+            E.shotState = el("span", "cm-cfg-shot-state", "");
+            shot.appendChild(E.shotState);
+            if (canShoot(c)) {
+                var rb = cfgBtn("refresh", "", "cm-cfg-shot-btn", function () { showShot(true); }, "Nouvelle capture (C)");
+                shot.appendChild(rb);
+            }
+            box.appendChild(shot);
+        }
+
+        // Optique : un clic = enregistre
+        var opt = el("div", "cm-cfg-opt");
+        var seg = el("div", "cm-cfg-seg");
+        E.optBtns = [
+            cfgBtn("crop_free", "Fixe", "", function () { setOptics("fixe"); }, "Optique fixe (F)"),
+            cfgBtn("360", "Mobile (PTZ)", "", function () { setOptics("mobile"); }, "Optique mobile, PTZ (M)"),
+        ];
+        E.optBtns[0].dataset.optics = "fixe";
+        E.optBtns[1].dataset.optics = "mobile";
+        E.optBtns.forEach(function (b) { seg.appendChild(b); });
+        opt.appendChild(seg);
+        E.optHint = el("span", "cm-cfg-opt-hint");
+        opt.appendChild(E.optHint);
+        box.appendChild(opt);
+        renderOptics();
+
+        // Modele / objectif : prereglage de l'ouverture et de la portee
+        var lensRow = el("div", "cm-cfg-lens");
+        var curKey = lensKeyFor(c, ch);
+        var sLens = sel([["", "Modele / objectif : valeurs libres"]].concat(LENSES.map(function (l) { return [l.k, lensLabel(l)]; })), curKey);
+        sLens.className = "cm-select";
+        sLens.title = "Prereglage d'apres la fiche technique : ouverture horizontale et portee DORI 'Observer'";
+        sLens.addEventListener("change", function () { applyLens(sLens.value); });
+        lensRow.appendChild(field(c.planned || ch.model ? "Modele / objectif" : "Modele / objectif (deduit du modele de l'appareil)", sLens));
+        E.lockBtn = cfgBtn(M.lockFov ? "lock" : "lock_open", "", "cm-cfg-lock" + (M.lockFov ? " is-on" : ""), function () { setLock(!M.lockFov); },
+            "Verrouiller l'ouverture et la portee : la poignee ne fait plus que tourner le cone");
+        lensRow.appendChild(E.lockBtn);
+        box.appendChild(lensRow);
+
+        // Cone
+        var g = el("div", "cm-cone-fields");
+        function num(label, key, min, max) {
+            var i = inp(Math.round(E.v[key]), { inputmode: "numeric" });
+            i.type = "number"; i.min = min; i.max = max;
+            i.addEventListener("input", function () {
+                var n = parseFloat(i.value);
+                if (isNaN(n)) return;
+                E.v[key] = key === "az" ? ((n % 360) + 360) % 360 : Math.min(max, Math.max(min, n));
+                refreshCone("input");
+            });
+            g.appendChild(field(label, i));
+            return i;
+        }
+        E.inAz = num("Direction (0 = nord)", "az", 0, 359);
+        E.inFov = num("Ouverture (degres)", "fov", 1, 360);
+        E.inRange = num("Portee (m)", "range", 1, 5000);
+        E.inFov.disabled = E.inRange.disabled = !!M.lockFov;
+        box.appendChild(g);
+        box.appendChild(el("p", "cm-help", "Sur la carte : point plein = direction et portee, point creux = ouverture. " +
+            (c.planned ? "Dessinez ce que la future camera devra voir."
+                : "Reglez d'apres la photo (vue ACTUELLE : verifiez que c'est la vue principale).") +
+            (ch.view && ch.view.at ? " Dessine" + (ch.view.by ? " par " + ch.view.by : "") + " le " +
+                new Date(ch.view.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) + "." : "")));
+
+        // Actions
+        var acts = el("div", "cm-cfg-actions");
+        if (T) acts.appendChild(cfgBtn("arrow_back", "", "", function () { tourStep(-1); }, "Precedent (fleche gauche)"));
+        if (T) acts.appendChild(cfgBtn("skip_next", "Passer", "", function () { tourStep(1); }, "Passer sans enregistrer l'angle (fleche droite)"));
+        if (c.planned) acts.appendChild(cfgBtn("delete", "", "cm-btn-danger", function () { deletePlanned(c); }, "Supprimer la camera en projet"));
+        else if (ch.view) acts.appendChild(cfgBtn("delete", "", "cm-btn-danger", clearCone, "Effacer l'angle de vue"));
+        E.saveBtn = cfgBtn("check", T ? "Enregistrer et suivant" : "Enregistrer", "cm-btn-primary cm-cfg-save", saveCone, "Entree");
+        acts.appendChild(E.saveBtn);
+        box.appendChild(acts);
+
+        var foot = el("div", "cm-cfg-foot");
+        var auto = el("label", "cm-cfg-auto"), cb = document.createElement("input");
+        cb.type = "checkbox"; cb.checked = !!M.autoShot;
+        cb.addEventListener("change", function () {
+            M.autoShot = cb.checked;
+            try { localStorage.setItem("cockpit-cameras-autoshot", cb.checked ? "1" : "0"); } catch (e) {}
+            if (cb.checked) showShot();
+        });
+        auto.appendChild(cb);
+        auto.appendChild(document.createTextNode("Capture auto"));
+        foot.appendChild(auto);
+        foot.appendChild(el("span", "cm-cfg-keys", "Entree enregistrer - F / M optique - C capture - fleches naviguer - Echap fermer"));
+        box.appendChild(foot);
+    }
+    // Raccourcis du configurateur (volet ouvert, pas de fiche ni de dialogue)
+    function coneKeys(e) {
+        if ($("cm-cone-panel").hidden || !M.coneEdit || !$("cm-drawer").hidden || document.querySelector("dialog[open]")) return false;
+        if (!$("cm-lightbox").hidden) return false;
+        var tag = (e.target && e.target.tagName) || "";
+        if (e.ctrlKey || e.metaKey || e.altKey) return false;
+        if (e.key === "Enter" && tag !== "BUTTON" && tag !== "SELECT" && tag !== "TEXTAREA") { e.preventDefault(); saveCone(); return true; }
+        if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return false;
+        var k = e.key.toLowerCase();
+        if (k === "f") { setOptics("fixe"); return true; }
+        if (k === "m") { setOptics("mobile"); return true; }
+        if (k === "c") { showShot(true); return true; }
+        if (e.key === "ArrowRight" && M.tour) { e.preventDefault(); tourStep(1); return true; }
+        if (e.key === "ArrowLeft" && M.tour) { e.preventDefault(); tourStep(-1); return true; }
+        return false;
     }
 
     function startCaptureAll() {
@@ -753,6 +1589,16 @@
             cbc.type = "checkbox"; cbc.checked = ch.enabled !== false;
             cbc.addEventListener("change", function () { ch.enabled = cbc.checked; box.classList.toggle("is-off", !cbc.checked); });
             lab.appendChild(cbc); lab.appendChild(document.createTextNode("Actif"));
+            // Optique : mobile (PTZ) ou fixe. Pre-remplie par
+            // scripts/cameras_optics_prefill.py, un choix ici devient "manuel"
+            var so = sel([["", "Optique ?"], ["mobile", "Mobile (PTZ)"], ["fixe", "Fixe"]], ch.optics || "");
+            so.className = "cm-optics" + (ch.optics_src === "modele" ? " is-guess" : "");
+            so.title = ch.optics_src === "presets" ? "Deduit des presets lus sur la camera"
+                : ch.optics_src === "modele" ? "Deduit du modele : a verifier"
+                : ch.optics_src === "manuel" ? "Choisi a la main" : "Non renseigne";
+            so.setAttribute("aria-label", "Optique du canal " + ch.no);
+            so.addEventListener("change", function () { ch.optics = so.value; so.classList.remove("is-guess"); });
+            head.appendChild(so);
             head.appendChild(lab);
             if (d.channels.length > 1) {
                 var rm = el("button", "cm-icon-btn"); rm.type = "button"; rm.title = "Retirer ce canal"; rm.appendChild(icon("remove_circle"));
@@ -874,6 +1720,12 @@
                     }).catch(function (e) { toast("error", e.message); gb.disabled = false; });
                 });
             });
+            // Apres une bascule des masques : captures de controle affichees
+            s5.appendChild(privacyRow(c, cap.disabled, function (nos) {
+                nos.forEach(function (no) { setTile(+no, snapUrl(+no) + (+no !== 1 ? "&" : "?") + "t=" + Date.now()); });
+                if (nos.map(Number).indexOf(+sCh.value) >= 0) showLatest();
+                if (S.view === "map") loadMapData().then(render);
+            }));
             var snap = el("div", "cm-snap");
             snap.style.marginTop = "8px";
             function showLatest() {
@@ -961,6 +1813,121 @@
         render();
         // Pas de defilement vers le champ : l'apercu reste visible en haut
         if (!c) iName.focus({ preventScroll: true });
+    }
+
+    // Masques de vie privee (POST/GET /api/cameras/<id>/privacy) : seuls les
+    // masques deja dessines sur la camera sont actives ou desactives.
+    // Hikvision, Hanwha, Dahua, Bosch (domes, RCP+) ; Axis : a regler sur la camera.
+    var PRIVACY_BRANDS = ["hikvision", "hanwha", "dahua", "bosch"];
+    function privacyRow(c, noCreds, onCaptured) {
+        var rowEl = el("div", "cm-privacy");
+        rowEl.appendChild(icon("privacy_tip"));
+        var txt = el("span", "cm-privacy-text", "");
+        rowEl.appendChild(txt);
+        var btn = el("button", "cm-btn"); btn.type = "button"; btn.hidden = true;
+        rowEl.appendChild(btn);
+        if (PRIVACY_BRANDS.indexOf(c.brand) < 0) {
+            txt.textContent = "Masques de vie privee : non pilotables pour cette marque (a regler sur la camera)";
+            rowEl.classList.add("is-na");
+            return rowEl;
+        }
+        if (noCreds) { txt.textContent = "Masques de vie privee : identifiants requis"; rowEl.classList.add("is-na"); return rowEl; }
+        var state = null;
+        function show(st) {
+            state = st;
+            rowEl.className = "cm-privacy";
+            btn.hidden = true;
+            btn.disabled = false;
+            if (!st.supported) { txt.textContent = "Masques de vie privee : " + (st.reason || "non pilotables"); rowEl.classList.add("is-na"); return; }
+            if (!st.configured) { txt.textContent = "Masques de vie privee : aucun masque dessine sur la camera"; rowEl.classList.add("is-na"); return; }
+            var n = st.channels.reduce(function (a, k) { return a + (k.masks || 0); }, 0);
+            var partial = st.enabled && !st.all_enabled;
+            txt.textContent = "Masques de vie privee : " + (st.all_enabled ? "ACTIFS" : partial ? "actifs sur une partie des canaux" : "inactifs") +
+                (n ? " (" + n + " zone(s)" + (st.channels.length > 1 ? " sur " + st.channels.length + " canaux" : "") + ")" : "") +
+                (st.last ? " - derniere bascule Cockpit : " + (st.last.enabled ? "activation" : "desactivation") + (st.last.by ? " par " + st.last.by : "") + ", " + ago(st.last.at) : "");
+            rowEl.classList.add(st.all_enabled ? "is-on" : partial ? "is-partial" : "is-off");
+            btn.textContent = "";
+            btn.appendChild(icon(st.all_enabled ? "visibility" : "visibility_off"));
+            btn.appendChild(document.createTextNode(st.all_enabled ? "Desactiver" : "Activer"));
+            btn.hidden = false;
+        }
+        function load() {
+            txt.textContent = c.cellular ? "Masques de vie privee : lecture (camera 4G, jusqu'a une minute)..." : "Masques de vie privee : lecture...";
+            getJSON(API.list + "/" + c._id + "/privacy").then(show).catch(function (e) {
+                txt.textContent = "Masques de vie privee : lecture impossible (" + e.message + ")";
+                rowEl.className = "cm-privacy is-na";
+                btn.hidden = false; btn.textContent = ""; btn.appendChild(icon("refresh")); btn.appendChild(document.createTextNode("Relire"));
+                state = null;
+            });
+        }
+        btn.addEventListener("click", function () {
+            if (!state) { load(); return; }
+            var on = !state.all_enabled;
+            confirmToast((on ? "Activer" : "Desactiver") + " les masques de vie privee de " + c.name + " ? " +
+                (on ? "Les zones masquees ne seront plus visibles ni enregistrees." : "Les zones masquees redeviennent visibles et enregistrees, pour tous les operateurs."),
+                on ? "Activer" : "Desactiver").then(function (ok) {
+                if (!ok) return;
+                btn.disabled = true;
+                txt.textContent = "Masques de vie privee : " + (on ? "activation" : "desactivation") + " en cours...";
+                txt.textContent += " (puis capture de controle)";
+                send("POST", API.list + "/" + c._id + "/privacy", { enabled: on }).then(function (st) {
+                    show(st);
+                    toast(st.ok ? "success" : "warning", st.ok ? "Masques " + (on ? "actives" : "desactives") + " : " + c.name
+                        : "La camera a repondu mais l'etat relu ne correspond pas : verifiez sur la camera");
+                    if (onCaptured && (st.captured || []).length) onCaptured(st.captured);
+                }).catch(function (e) { toast("error", e.message); load(); });
+            });
+        });
+        load();
+        return rowEl;
+    }
+
+    // Bascule de TOUS les masques (super admin, /api/cameras/privacy-all) :
+    // jauge par camera, captures de controle, vignettes rechargees a la fin
+    var PALL = { poll: null, running: false };
+    function openPrivacyAll() {
+        var dlg = $("cm-privacy-dialog");
+        if (!dlg.open) dlg.showModal();
+        pollPrivacyAll();
+    }
+    function startPrivacyAll(on) {
+        confirmToast((on ? "ACTIVER" : "DESACTIVER") + " les masques de vie privee de TOUTES les cameras pilotables ? " +
+            (on ? "Les zones masquees ne seront plus visibles ni enregistrees."
+                : "Les zones masquees redeviennent visibles et enregistrees, pour tous les operateurs."),
+            on ? "Activer tout" : "Desactiver tout").then(function (ok) {
+            if (!ok) return;
+            send("POST", "/api/cameras/privacy-all", { enabled: on }).then(function (r) {
+                toast("info", "Bascule lancee sur " + r.total + " camera(s)");
+                pollPrivacyAll();
+            }).catch(function (e) { toast("error", e.message); });
+        });
+    }
+    function pollPrivacyAll() {
+        clearTimeout(PALL.poll);
+        getJSON("/api/cameras/privacy-all").then(function (j) {
+            var was = PALL.running;
+            PALL.running = !!j.running;
+            $("cm-pall-on").disabled = $("cm-pall-off").disabled = PALL.running;
+            var box = $("cm-pall-progress");
+            if (!j.total) { box.hidden = true; return; }
+            box.hidden = false;
+            $("cm-pall-title").textContent = (j.running ? (j.enabled ? "Activation" : "Desactivation") + " en cours..."
+                : "Derniere bascule : " + (j.enabled ? "activation" : "desactivation") + " (" + ago(j.finished_at) + ")") +
+                (j.by ? " - " + j.by : "");
+            $("cm-pall-fill").style.width = Math.round(100 * j.done / j.total) + "%";
+            $("cm-pall-stats").textContent = j.done + " / " + j.total + " camera(s) traitee(s) : " +
+                (j.changed || 0) + " basculee(s) et capturee(s), " + (j.unchanged || 0) + " deja dans cet etat, " +
+                (j.nomask || 0) + " sans masque, " + (j.failed || 0) + " echec(s)";
+            var ul = $("cm-pall-fails");
+            ul.textContent = "";
+            (j.failures || []).forEach(function (f) { ul.appendChild(el("li", "", f.name + " : " + f.error)); });
+            if (j.running) PALL.poll = setTimeout(pollPrivacyAll, 1500);
+            else if (was) {
+                toast(j.failed ? "warning" : "success", "Masques " + (j.enabled ? "actives" : "desactives") + " : " +
+                    (j.changed || 0) + " camera(s) basculee(s)" + (j.failed ? ", " + j.failed + " echec(s)" : ""));
+                if (S.view === "map") loadMapData().then(render);
+            }
+        }).catch(function (e) { toast("error", "Progression illisible : " + e.message); });
     }
 
     function closeDrawer() {
@@ -1132,6 +2099,17 @@
         $("cm-map-btn").addEventListener("click", function () { setView(S.view === "map" ? "list" : "map"); });
         $("cm-capture-all").addEventListener("click", startCaptureAll);
         $("cm-map-edit").addEventListener("click", function () { setMapEdit(!M.edit); });
+        $("cm-map-cones").addEventListener("click", function () { setConeMode(!M.cones); });
+        $("cm-map-tour").addEventListener("click", startTour);
+        $("cm-map-plan").addEventListener("click", function () { setAddPlanned(!M.addPlanned); });
+        $("cm-privacy-all-btn").addEventListener("click", openPrivacyAll);
+        $("cm-pall-on").addEventListener("click", function () { startPrivacyAll(true); });
+        $("cm-pall-off").addEventListener("click", function () { startPrivacyAll(false); });
+        Array.prototype.forEach.call(document.querySelectorAll("#cm-privacy-dialog [data-close]"), function (b) {
+            b.addEventListener("click", function () { $("cm-privacy-dialog").close(); });
+        });
+        try { M.autoShot = localStorage.getItem("cockpit-cameras-autoshot") !== "0"; } catch (e) { M.autoShot = true; }
+        try { M.lockFov = localStorage.getItem("cockpit-cameras-lockfov") !== "0"; } catch (e) { M.lockFov = true; }
         $("cm-map-place").addEventListener("change", onPlaceSelect);
         $("cm-profile-add").addEventListener("click", function () { renderProfiles(true); });
         Array.prototype.forEach.call(document.querySelectorAll("#cm-profiles-dialog [data-close]"), function (b) {
@@ -1139,8 +2117,10 @@
         });
         $("cm-lightbox").addEventListener("click", closeLightbox);
         document.addEventListener("keydown", function (e) {
+            if (coneKeys(e)) return;
             if (e.key !== "Escape") return;
             if (!$("cm-lightbox").hidden) closeLightbox();
+            else if (!$("cm-cone-panel").hidden) closeCone(false);
             else if (!$("cm-drawer").hidden && !document.querySelector("dialog[open]")) closeDrawer();
         });
         document.addEventListener("visibilitychange", function () { if (!document.hidden) loadReach(); });

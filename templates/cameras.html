@@ -44,6 +44,9 @@
       <button class="cm-btn" id="cm-map-btn" type="button" title="Afficher les cameras sur une carte" aria-pressed="false">
         <span class="material-symbols-outlined">map</span><span class="cm-btn-label">Carte</span>
       </button>
+      <button class="cm-btn" id="cm-privacy-all-btn" type="button" hidden title="Super admin : activer ou desactiver les masques de vie privee de toutes les cameras">
+        <span class="material-symbols-outlined">privacy_tip</span><span class="cm-btn-label">Masques</span>
+      </button>
       <button class="cm-btn" id="cm-profiles-btn" type="button" title="Profils d'identifiants (mots de passe chiffres)">
         <span class="material-symbols-outlined">key</span><span class="cm-btn-label">Identifiants</span>
       </button>
@@ -78,6 +81,7 @@
             <option value="offline">Hors ligne</option>
             <option value="disabled">Desactivees</option>
             <option value="noprofile">Sans identifiants</option>
+            <option value="planned">En projet (seulement)</option>
           </select>
           <button type="button" class="cm-btn cm-filters-reset" id="cm-filters-reset"><span class="material-symbols-outlined">filter_alt_off</span>Effacer</button>
           <button type="button" class="cm-btn cm-btn-primary cm-filters-done" id="cm-filters-done">OK</button>
@@ -132,6 +136,15 @@
             <button class="cm-btn" id="cm-map-edit" type="button" aria-pressed="false" title="Corriger la position des cameras (ecrit dans la couche GPS)">
               <span class="material-symbols-outlined">open_with</span><span>Deplacer</span>
             </button>
+            <button class="cm-btn" id="cm-map-cones" type="button" aria-pressed="false" title="Dessiner l'angle de vue de chaque canal (enregistre dans Cockpit, rien n'est envoye aux cameras)">
+              <span class="material-symbols-outlined">camera_outdoor</span><span>Angles de vue</span>
+            </button>
+            <button class="cm-btn" id="cm-map-tour" type="button" title="Configurateur : chaque canal des cameras affichees a la suite (capture, optique fixe / mobile, angle de vue)">
+              <span class="material-symbols-outlined">play_circle</span><span>Configurateur</span>
+            </button>
+            <button class="cm-btn" id="cm-map-plan" type="button" aria-pressed="false" title="Ajouter une camera en projet (travaux a venir) : cliquez ensuite sur la carte">
+              <span class="material-symbols-outlined">add_location_alt</span><span>Projet</span>
+            </button>
             <select class="cm-select" id="cm-map-place" hidden aria-label="Placer une camera sans position"></select>
             <span class="cm-map-hint" id="cm-map-hint" hidden>Faites glisser un pin : la position est enregistree dans la couche GPS des cameras.</span>
             <div class="cm-map-progress" id="cm-map-progress" hidden>
@@ -139,6 +152,7 @@
               <span id="cm-map-progress-text"></span>
             </div>
           </div>
+          <div class="cm-cone-panel" id="cm-cone-panel" hidden></div>
         </div>
       </section>
 
@@ -196,6 +210,30 @@
   </div>
   <div class="cm-dialog-foot">
     <button type="button" class="cm-btn" id="cm-profile-add"><span class="material-symbols-outlined">add</span>Nouveau profil</button>
+    <span style="flex:1"></span>
+    <button type="button" class="cm-btn" data-close>Fermer</button>
+  </div>
+</dialog>
+
+<dialog class="cm-dialog" id="cm-privacy-dialog" aria-labelledby="cm-privacy-title">
+  <div class="cm-dialog-head">
+    <h3 id="cm-privacy-title"><span class="material-symbols-outlined">privacy_tip</span> Masques de vie privee : toutes les cameras</h3>
+    <button type="button" class="cm-icon-btn" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+  </div>
+  <div class="cm-dialog-body">
+    <p class="cm-help">Active ou desactive les masques DEJA dessines sur chaque camera pilotable (Hikvision, Hanwha, Dahua, domes Bosch ; jamais les cameras de piste). Les cameras basculees sont capturees pour controle. Chaque bascule est tracee. La fenetre peut etre fermee : la manoeuvre continue.</p>
+    <div class="cm-pall-actions">
+      <button type="button" class="cm-btn cm-pall-on" id="cm-pall-on"><span class="material-symbols-outlined">visibility_off</span>Activer tous les masques</button>
+      <button type="button" class="cm-btn cm-btn-danger" id="cm-pall-off"><span class="material-symbols-outlined">visibility</span>Desactiver tous les masques</button>
+    </div>
+    <div class="cm-pall-progress" id="cm-pall-progress" hidden>
+      <div class="cm-pall-title" id="cm-pall-title"></div>
+      <div class="cm-pall-bar"><i id="cm-pall-fill"></i></div>
+      <div class="cm-pall-stats" id="cm-pall-stats"></div>
+      <ul class="cm-pall-fails" id="cm-pall-fails"></ul>
+    </div>
+  </div>
+  <div class="cm-dialog-foot">
     <span style="flex:1"></span>
     <button type="button" class="cm-btn" data-close>Fermer</button>
   </div>

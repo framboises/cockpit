@@ -11,8 +11,25 @@ la page LAPI renvoie ici (`/cameras?usage=anpr`).
   `name, ip, port, protocol, brand, model, firmware, site, location, notes,
   enabled, vms_server, group_path, credential_profile_id, camera_path,
   channels[], source.seetec`.
-  - `channels[]` : `{no, name, enabled, roles[]}`. Un canal = une source video
-    (multi-capteurs : 10.34.1.171 a 5 canaux ; `/portehoux` = canal 4).
+  - `channels[]` : `{no, name, enabled, roles[], optics, optics_src, view}`.
+    Un canal = une source video (multi-capteurs : 10.34.1.171 a 5 canaux ;
+    `/portehoux` = canal 4).
+  - `optics` : `mobile` (PTZ) ou `fixe` ; `optics_src` : `presets` (lu sur
+    la camera), `modele` (deduit, a verifier : pointilles orange dans la
+    fiche), `manuel` (choisi dans la fiche, jamais ecrase). Pre-rempli par
+    `scripts/cameras_optics_prefill.py [--apply]` (LECTURE SEULE des presets,
+    piste exclue). Regle : presets presents (meme le seul 90 "Wiper" des Hik
+    2SF / 2DF) = mobile ; aucun = fixe, sauf canal 1 d'un modele de dome
+    (`_PTZ_MODEL_RE`) = mobile d'apres le modele. Pieges verifies le
+    17/10/2026 : les Hik DS-2DP multi-capteurs (001, 009, 025, 119, 137, 165,
+    178, 901) ont la PTZ sur le canal 1 et 4 fixes ; `_geo_type` (TYPE de la
+    couche GPS) se trompe sur elles, il ne lit pas `optics`.
+  - `view` : angle de vue dessine sur la carte `{az, fov, range, by, at}`
+    (az en degres depuis le nord, sens horaire ; fov ouverture ; range en m).
+    Ecrit UNIQUEMENT par `PUT /api/cameras/<id>/channels/<no>/view`
+    (`{clear: true}` pour effacer) ; `_clean_channels` le reprend du canal de
+    meme numero a chaque enregistrement de fiche (le formulaire ne l'envoie
+    pas). Rien n'est envoye aux cameras ni a la couche GPS.
   - `camera_path` : chemin d'URL sur lequel l'appareil pousse ses evenements
     au recepteur (`http://10.24.0.251:8000/<chemin>`, ecoutehik2.py). Unique.
     Chaque evenement porte son `channelID`.
@@ -110,6 +127,56 @@ generiques sont geres (inventaire, identifiants, usages) mais pas pilotes.
 - Toute action de pilotage passe par `call_camera` + `camera_error` : une
   camera injoignable est journalisee sur UNE ligne (warning), sans trace ;
   seules les erreurs inattendues gardent `logger.exception`.
+- **Masques de vie privee** (`GET / POST /api/cameras/<id>/privacy`,
+  ligne "Masques de vie privee" de l'Apercu de la fiche, lue a l'ouverture) :
+  bascule GLOBALE des masques deja dessines sur la camera, jamais de
+  creation / modification de zone. Releve lecture seule du 21/10/2026 :
+  - Hikvision : `/ISAPI/System/Video/inputs/channels/<n>/privacyMask` sur
+    chaque canal ayant des `PrivacyMaskRegion` (premier `<enabled>` du XML).
+    32 cameras ont des masques, TOUS desactives ce jour-la.
+  - Hanwha : `image.cgi?msubmenu=privacy&action=view|set&Channel=0&Enable=`
+    (interrupteur global ; les zones ne sont listees que masques actifs sur
+    certains firmwares : nombre inconnu sinon). `media.cgi
+    msubmenu=privacymask` de hik_control.py repond "Submenu Not Found".
+  - Dahua (domes SD) : `configManager.cgi name=PrivacyMasking`, 24
+    emplacements `[canal][i]` sans interrupteur global ; seuls les
+    emplacements dessines (Rect / Polygon non nuls) sont bascules. Ceux
+    sondes (015, 016) n'ont aucun masque. `VideoWidget.EncodeBlend` de
+    hik_control.py ne concerne pas ces domes.
+  - Bosch : PAS en ONVIF (Media2 n'annonce pas les masques, `GetMasks` =
+    "Action Failed" meme avec ConfigurationToken). Par RCP+ en DIGEST :
+    `rcp.xml?command=0x0bd8&type=P_OCTET&direction=READ|WRITE&num=1`
+    (CONF_PRIV_MSK_POLY, base de connaissances Bosch / Keenfinity). Contenu =
+    enregistrements [longueur 2][type 2] : type 0x0002 = un masque (1er octet
+    actif, 2e = numero, polygone ensuite ; vide = 12 octets), 0x0003 =
+    reglage global des domes, 1er octet 01 = "Disable Masks". On ne reecrit
+    QUE cet octet (payload `0x000c0003` + contenu conserve) : l'exemple Bosch
+    remet a zero le 3e octet, qui vaut 01 chez nous. Teste le 21/10/2026 sur
+    10.34.1.36 (183, AUTODOME 5000i, 7 masques, camera validee par Ludo) :
+    bandeau noir disparu puis revenu, configuration identique octet pour
+    octet apres retour. Lecture OK en firmwares 6.41 a 7.90 : 12 domes
+    masques actifs, 21 inactifs, 8 sans masque. Fixes Bosch sans 0x0003 :
+    non pilotees.
+  - Axis : pas de groupe PrivacyMask. Non pilotable (message dans la fiche).
+  Etat relu apres chaque bascule (`ok` = etat attendu) ; journal
+  `cameras_privacy_log` {camera_id, name, ip, enabled, ok, channels, by, at,
+  bulk}. Apres une bascule, capture de controle des canaux masques
+  (`_privacy_capture`, 1,5 s d'attente, reservation de l'appareil comme la
+  capture manuelle) : `captured` dans la reponse, la fiche recharge apercu et
+  vignettes. Bosch : une relecture faite juste apres l'ecriture a une fois
+  differe de l'origine, les lectures suivantes etaient identiques
+  (application en cours sur la camera).
+  Bascule de TOUTES les cameras : SUPER ADMIN seulement (`_is_super_admin` =
+  `SUPER_ADMIN_ROLE` dans `global_roles` ; `meta.super_admin` affiche le
+  bouton "Masques" de l'en-tete). `POST /api/cameras/privacy-all {enabled}` :
+  toutes les cameras actives des marques pilotables, avec profil, hors piste ;
+  8 en parallele dans un thread dedie, une seule bascule de masse a la fois
+  (409) ; par camera : lecture, "nomask" / "unchanged" sans ecriture, sinon
+  bascule + journal (`bulk`) + capture de controle. `GET` = progression
+  (total, done, changed, unchanged, nomask, failed, failures, by), jauge du
+  dialogue qui peut etre ferme pendant la manoeuvre.
+  `hik/hik_control.py` (privacy / privacy-all en ligne de commande) n'est
+  pas utilise par Cockpit pour cela.
 - Rappeler un preset change la vue pour TOUS (operateurs SeeTec compris) :
   confirmation dans la page, puis capture automatique 4 s apres.
 
@@ -204,6 +271,76 @@ a la fois), `call_camera` (reveil 4G). Vignette par canal :
 `<id>_latest.jpg` (canal 1) / `<id>_ch<N>_latest.jpg` ; `/api/cameras/map`
 donne `snaps {no: date}` et la bulle de la carte montre une vignette par
 canal capture.
+
+Angles de vue (bouton "Angles de vue" de la carte, exclusif avec Deplacer) :
+cones enregistres dessines sous les pins (orange = mobile, bleu = fixe,
+gris = optique inconnue), pin entoure en pointilles = canal mobile actif sans
+cone, compteur "x / y canaux mobiles dessines" dans la barre. Clic sur un pin
+: volet du configurateur pour cette camera.
+
+Configurateur (bouton "Configurateur" de la carte) : parcours de tous les
+canaux actifs SANS angle de vue des cameras affichees (filtres de la liste,
+cameras actives et placees), tries par nom ; s'il n'en reste aucun, propose de
+tout revoir. Volet en colonne a gauche, carte cadree sur la camera et son
+cone a droite (`fitBounds` avec la largeur du volet en marge). Par canal :
+- capture fraiche AUTOMATIQUE (case "Capture auto", memorisee par poste) ;
+  la derniere image connue s'affiche grisee en attendant ; cache navigateur
+  2 min par canal ; la capture du canal SUIVANT est preparee pendant qu'on
+  dessine ; refus 429 du serveur (capture en cours sur l'IP, delai de 3 s)
+  : 3 nouvelles tentatives. Piste / non pilotable : derniere image seule.
+- optique Fixe / Mobile : un clic = `PUT /channels/<no>/optics` (src "manuel").
+- cone : poignee pleine (direction + portee), creuse (ouverture), champs ;
+  point de depart = direction d'un autre canal deja dessine de l'appareil.
+- "Enregistrer et suivant" (Entree), "Passer" (fleche droite, n'enregistre pas
+  le cone), precedent (fleche gauche), F / M optique, C capture, Echap fermer.
+But : preparer la position de repos des PTZ et reperer les trous de
+couverture ; la remise en position automatique viendra ensuite.
+
+Cameras en projet (bouton "Projet" de la carte, puis clic sur la carte) :
+emplacements souhaites pour des travaux a venir. Collection A PART
+`cameras_planned` `{name, note, status (souhaitee / validee / commandee),
+lat, lng, channels[{no, optics, view}], by, at, updated_by, updatedAt}`
+(canaux simules : 1 PTZ + 4 fixes, 1 PTZ + 1 fixe..., 8 au plus ; les
+premiers enregistrements avaient optics / view a la racine,
+`_planned_channels` les lit encore et la premiere ecriture les convertit) : JAMAIS dans
+`cockpit_cameras` ni dans la couche GPS `titan.cameras`, donc invisibles du
+pilotage, des captures, du LAPI, de la detection et des autres outils
+cartographiques. Routes `GET/POST /api/cameras/planned`,
+`PUT/DELETE /api/cameras/planned/<id>` (PUT : name, note, status, lat/lng,
+et `ch` + optics / view / clear_view pour un canal),
+`POST /api/cameras/planned/<id>/channels {optics, count}`,
+`DELETE /api/cameras/planned/<id>/channels/<no>` (un canal minimum). Pin
+violet en pointilles, cones violets en pointilles ; affichees quels que
+soient les filtres, hors configurateur. Filtre d'etat "En projet
+(seulement)" : masque toutes les cameras reelles (liste vide avec renvoi a la
+carte), cadrage sur les projets. Le clic ouvre le volet du configurateur
+(cote JS : objet `p:<id>`, canaux = `channels`) avec nom / statut / note a la
+place de la photo, pastilles de canaux + "Mobile" / "Fixe" / modeles
+"1 PTZ + 4 fixes" et "1 PTZ + 1 fixe" (canal 1 passe en mobile s'il n'a pas
+d'optique) ; un nouveau capteur fixe part 90 degres apres le dernier fixe
+dessine.
+
+Objectifs (`LENSES` de cameras.js, cles = `cameras.PLANNED_MODELS`) : ouverture
+horizontale et portee DORI "Observer" (63 px/m) des fiches techniques
+fournies le 21/10/2026 ; PTZ au grand angle, portee "Observer" ramenee a la
+focale mini (tele x focale mini / focale maxi).
+- DS-2DP7D836 (1 + 4) : PTZ 59 deg / 48 m ; 4 objectifs fixes 106 deg / 30 m
+  (fiche : 22 m ; portee harmonisee a 30 m a la demande de Ludo le
+  21/10/2026, aussi appliquee en base aux canaux 2 a 5 deja dessines des
+  1 + 4 et aux objectifs "2dp-pano" des cameras en projet).
+- DS-2SF8C442 (1 + 1) : PTZ 59 deg / 28 m ; panoramique 190 deg / 31 m.
+- iDS-2CD7A87G0 (modele de base de TOUTES les fixes) : 2,8 mm 100 deg / 37 m ;
+  12 mm 44 deg / 81 m.
+- DS-2CD63C5G1 (360) : plafond 360 deg / 11 m ; mur 180 deg / 11 m.
+- PTZ generique : 59 deg / 50 m.
+Objectif d'un canal (`lensKeyFor`) : choisi (canal en projet : champ `model`),
+sinon deduit du modele de l'appareil (2DP7D836 / 2SF8C442 : canal 1 = PTZ,
+autres = objectifs), sinon par l'optique (fixe = iDS-2CD7A87G0, mobile = PTZ
+generique). Il donne le cone par defaut. Selecteur "Modele / objectif" du
+volet : applique ouverture et portee (direction gardee) ; enregistre pour un
+canal en projet, session seulement pour une camera reelle. Verrou (cadenas,
+memorise par poste, actif par defaut) : ouverture et portee figees, plus de
+poignee d'ouverture, la poignee pleine ne fait que tourner le cone. Le pin se deplace en le glissant pendant que son volet est ouvert.
 
 Telephone (<= 820 px) : barre du bas `.mobile-bottom-nav` de style.css
 (Liste, Carte, "+" Ajouter, Filtres avec pastille du nombre de filtres

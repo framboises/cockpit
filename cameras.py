@@ -282,6 +282,12 @@ def _profiles_by_id():
     return {p["_id"]: p for p in _col_profiles.find()}
 
 
+def _pub_view(v):
+    if not isinstance(v, dict) or v.get("az") is None:
+        return None
+    return {"az": v.get("az"), "fov": v.get("fov"), "range": v.get("range"), "by": v.get("by", ""), "at": _iso(v.get("at"))}
+
+
 def _pub_device(doc, profiles):
     prof = profiles.get(doc.get("credential_profile_id"))
     brand = doc.get("brand", "generic")
@@ -311,7 +317,8 @@ def _pub_device(doc, profiles):
         "seetec": bool((doc.get("source") or {}).get("seetec")),
         "channels": [
             {"no": c.get("no", i + 1), "name": c.get("name", ""), "enabled": c.get("enabled", True),
-             "roles": c.get("roles") or []}
+             "roles": c.get("roles") or [], "optics": c.get("optics") or "", "optics_src": c.get("optics_src") or "",
+             "view": _pub_view(c.get("view"))}
             for i, c in enumerate(doc.get("channels") or [{"no": 1, "name": doc.get("name", ""), "roles": []}])
         ],
         "updatedAt": _iso(doc.get("updatedAt")),
@@ -435,7 +442,17 @@ def _clean_roles(roles):
     return out
 
 
-def _clean_channels(channels):
+# Optique d'un canal : "mobile" (PTZ, presets) ou "fixe". optics_src : origine
+# ("presets" = lu sur la camera, "modele" = deduit du modele, a verifier,
+# "manuel" = choisi dans la fiche), pose par scripts/cameras_optics_prefill.py
+OPTICS = ("mobile", "fixe")
+
+
+def _clean_channels(channels, old=None):
+    """old : canaux enregistres. L'angle de vue (dessine sur la carte, route
+    /view) et l'origine de l'optique ne viennent jamais du formulaire : repris
+    du canal de meme numero."""
+    prev = {c.get("no"): c for c in (old or []) if isinstance(c, dict)}
     out = []
     used = set()
     for i, c in enumerate(channels or []):
@@ -446,12 +463,20 @@ def _clean_channels(channels):
         if no < 1 or no > 64 or no in used:
             continue
         used.add(no)
-        out.append({"no": no, "name": str(c.get("name") or "Canal %d" % no).strip()[:80],
-                    "enabled": bool(c.get("enabled", True)), "roles": _clean_roles(c.get("roles"))})
+        ch = {"no": no, "name": str(c.get("name") or "Canal %d" % no).strip()[:80],
+              "enabled": bool(c.get("enabled", True)), "roles": _clean_roles(c.get("roles"))}
+        o = prev.get(no) or {}
+        if o.get("view"):
+            ch["view"] = o["view"]
+        optics = c.get("optics", o.get("optics"))
+        if optics in OPTICS:
+            ch["optics"] = optics
+            ch["optics_src"] = o.get("optics_src") if optics == o.get("optics") and o.get("optics_src") else "manuel"
+        out.append(ch)
     return sorted(out, key=lambda c: c["no"]) or [{"no": 1, "name": "Canal 1", "enabled": True, "roles": []}]
 
 
-def _device_fields(data, partial):
+def _device_fields(data, partial, old_channels=None):
     """Valide les champs modifiables d'un appareil. -> (champs, erreur)."""
     f = {}
     if not partial or "name" in data:
@@ -503,7 +528,7 @@ def _device_fields(data, partial):
         else:
             f["credential_profile_id"] = None
     if "channels" in data:
-        f["channels"] = _clean_channels(data.get("channels"))
+        f["channels"] = _clean_channels(data.get("channels"), old_channels)
     return f, None
 
 
@@ -653,6 +678,7 @@ def cameras_meta():
         "sites": sorted(s for s in _col_cameras.distinct("site") if s),
         "lieux": list(VISION_LIEUX),
         "key_ok": camera_secrets.available(),
+        "super_admin": _is_super_admin(),
         "receiver": "http://10.24.0.251:8000",
     })
 
@@ -687,7 +713,7 @@ def update_camera(cam_id):
     if err:
         return err
     data = request.get_json(silent=True) or {}
-    fields, msg = _device_fields(data, partial=True)
+    fields, msg = _device_fields(data, partial=True, old_channels=doc.get("channels"))
     if msg:
         return jsonify({"error": msg}), 400
     conflict = _check_path_conflict(fields.get("camera_path"), doc["_id"])
@@ -940,6 +966,270 @@ def set_geo(cam_id):
     if not (-90 <= lat <= 90 and -180 <= lng <= 180):
         return jsonify({"error": "Position invalide"}), 400
     return jsonify(place_device(doc, lat, lng))
+
+
+def _channel_of(cam_id, no):
+    """-> (doc, canaux, index du canal, erreur). Appareil sans liste de canaux :
+    canal 1 implicite (cree a l'ecriture)."""
+    doc, err = _get_cam_doc(cam_id)
+    if err:
+        return None, None, None, err
+    chans = doc.get("channels") or [{"no": 1, "name": doc.get("name", ""), "enabled": True, "roles": []}]
+    idx = next((i for i, c in enumerate(chans) if c.get("no", i + 1) == no), None)
+    if idx is None:
+        return None, None, None, (jsonify({"error": "Canal introuvable"}), 404)
+    return doc, chans, idx, None
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/channels/<int:no>/optics", methods=["PUT"])
+def set_channel_optics(cam_id, no):
+    """Optique d'un canal choisie dans le parcours des angles de vue :
+    {optics: "mobile" | "fixe"} -> optics_src "manuel". Cockpit seulement."""
+    doc, chans, idx, err = _channel_of(cam_id, no)
+    if err:
+        return err
+    optics = (request.get_json(silent=True) or {}).get("optics")
+    if optics not in OPTICS:
+        return jsonify({"error": "Optique invalide (mobile ou fixe)"}), 400
+    chans[idx]["optics"] = optics
+    chans[idx]["optics_src"] = "manuel"
+    _col_cameras.update_one({"_id": doc["_id"]}, {"$set": {"channels": chans}})
+    return jsonify({"ok": True, "no": no, "optics": optics, "optics_src": "manuel"})
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/channels/<int:no>/view", methods=["PUT"])
+def set_channel_view(cam_id, no):
+    """Angle de vue d'un canal dessine sur la carte : {az (degres depuis le
+    nord, sens horaire), fov (ouverture en degres), range (portee en m)} ou
+    {clear: true}. Ecrit dans cockpit_cameras uniquement : rien n'est envoye
+    a la camera ni a la couche GPS."""
+    doc, chans, idx, err = _channel_of(cam_id, no)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    if data.get("clear"):
+        chans[idx].pop("view", None)
+    else:
+        try:
+            az, fov, rng = float(data["az"]) % 360, float(data["fov"]), float(data["range"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"error": "Angle de vue invalide"}), 400
+        if not (1 <= fov <= 360 and 1 <= rng <= 5000):
+            return jsonify({"error": "Ouverture (1 a 360 degres) ou portee (1 a 5000 m) invalide"}), 400
+        p = getattr(request, "user_payload", {}) or {}
+        who = ("%s %s" % (p.get("firstname", ""), p.get("lastname", ""))).strip() or p.get("email", "")
+        chans[idx]["view"] = {"az": round(az, 1), "fov": round(fov, 1), "range": round(rng),
+                              "by": who, "at": datetime.now(timezone.utc)}
+    _col_cameras.update_one({"_id": doc["_id"]}, {"$set": {"channels": chans}})
+    return jsonify({"ok": True, "no": no, "view": _pub_view(chans[idx].get("view"))})
+
+
+# ---------------------------------------------------------------------------
+# Cameras en projet : emplacements souhaites (travaux a venir), poses sur la
+# carte avec optique et angle de vue prevus. Collection a part
+# `cameras_planned` : JAMAIS dans cockpit_cameras ni dans la couche GPS
+# titan.cameras (aucun pilotage, capture, LAPI ou detection ne les voit).
+# ---------------------------------------------------------------------------
+PLANNED_STATUS = {"souhaitee": "Souhaitee", "validee": "Validee", "commandee": "Commandee"}
+
+
+def _who():
+    p = getattr(request, "user_payload", {}) or {}
+    return ("%s %s" % (p.get("firstname", ""), p.get("lastname", ""))).strip() or p.get("email", "")
+
+
+PLANNED_MAX_CHANNELS = 8
+# Objectif (modele) d'un canal simule : cles de LENSES dans cameras.js
+# (ouverture et portee tirees des fiches techniques Hikvision)
+PLANNED_MODELS = ("2dp-ptz", "2dp-pano", "2sf-ptz", "2sf-pano", "bullet-wide", "bullet-tele",
+                  "fisheye-360", "fisheye-180", "ptz")
+
+
+def _planned_channels(d):
+    """Canaux d'une camera en projet (multi-capteurs simules : 1 PTZ + 4 fixes...).
+    Premiers enregistrements a canal unique : optics / view a la racine."""
+    chans = d.get("channels")
+    if isinstance(chans, list) and chans:
+        return [dict(c) for c in chans]
+    ch = {"no": 1}
+    if d.get("optics"):
+        ch["optics"] = d["optics"]
+    if d.get("view"):
+        ch["view"] = d["view"]
+    return [ch]
+
+
+def _pub_planned(d):
+    return {"_id": str(d["_id"]), "name": d.get("name", ""), "note": d.get("note", ""),
+            "status": d.get("status", "souhaitee"), "lat": d.get("lat"), "lng": d.get("lng"),
+            "channels": [{"no": c.get("no"), "optics": c.get("optics") or "", "model": c.get("model") or "",
+                          "view": _pub_view(c.get("view"))}
+                         for c in _planned_channels(d)],
+            "by": d.get("by", ""), "at": _iso(d.get("at")), "updated_by": d.get("updated_by", ""),
+            "updatedAt": _iso(d.get("updatedAt"))}
+
+
+def _planned_fields(data, chans):
+    """Champs modifiables d'une camera en projet. `ch` (numero de canal, 1 par
+    defaut) cible optics / view / clear_view ; chans = canaux actuels, modifies
+    sur place. -> (champs, a effacer, erreur)."""
+    f, unset = {}, {}
+    if "name" in data:
+        name = str(data.get("name") or "").strip()[:120]
+        if not name:
+            return None, None, "Nom requis"
+        f["name"] = name
+    if "note" in data:
+        f["note"] = str(data.get("note") or "").strip()[:1000]
+    if "status" in data:
+        if data["status"] not in PLANNED_STATUS:
+            return None, None, "Statut inconnu"
+        f["status"] = data["status"]
+    if "lat" in data or "lng" in data:
+        try:
+            lat, lng = float(data["lat"]), float(data["lng"])
+        except (KeyError, TypeError, ValueError):
+            return None, None, "Position invalide"
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return None, None, "Position invalide"
+        f["lat"], f["lng"] = lat, lng
+    if "optics" in data or "view" in data or "model" in data or data.get("clear_view"):
+        try:
+            no = int(data.get("ch") or 1)
+        except (TypeError, ValueError):
+            return None, None, "Canal invalide"
+        ch = next((c for c in chans if c.get("no") == no), None)
+        if ch is None:
+            return None, None, "Canal introuvable"
+        if "optics" in data:
+            if data["optics"] in OPTICS:
+                ch["optics"] = data["optics"]
+            elif not data["optics"]:
+                ch.pop("optics", None)
+            else:
+                return None, None, "Optique invalide (mobile ou fixe)"
+        if "model" in data:
+            if data["model"] in PLANNED_MODELS:
+                ch["model"] = data["model"]
+            elif not data["model"]:
+                ch.pop("model", None)
+            else:
+                return None, None, "Modele inconnu"
+        if data.get("clear_view"):
+            ch.pop("view", None)
+        elif "view" in data:
+            v = data.get("view") or {}
+            try:
+                az, fov, rng = float(v["az"]) % 360, float(v["fov"]), float(v["range"])
+            except (KeyError, TypeError, ValueError):
+                return None, None, "Angle de vue invalide"
+            if not (1 <= fov <= 360 and 1 <= rng <= 5000):
+                return None, None, "Ouverture (1 a 360 degres) ou portee (1 a 5000 m) invalide"
+            ch["view"] = {"az": round(az, 1), "fov": round(fov, 1), "range": round(rng), "by": _who(),
+                          "at": datetime.now(timezone.utc)}
+        f["channels"] = chans
+        # Anciens champs du canal unique : remplaces par channels[]
+        unset.update({"optics": "", "view": ""})
+    return f, unset, None
+
+
+def _planned_doc(pid):
+    _ensure_db()
+    oid = _oid(pid)
+    return _db["cameras_planned"].find_one({"_id": oid}) if oid else None
+
+
+def _planned_save(doc, f, unset=None):
+    f.update({"updated_by": _who(), "updatedAt": datetime.now(timezone.utc)})
+    upd = {"$set": f}
+    if unset:
+        upd["$unset"] = unset
+    _db["cameras_planned"].update_one({"_id": doc["_id"]}, upd)
+    return jsonify(_pub_planned(_db["cameras_planned"].find_one({"_id": doc["_id"]})))
+
+
+@cameras_bp.route("/api/cameras/planned", methods=["GET"])
+def list_planned():
+    _ensure_db()
+    return jsonify([_pub_planned(d) for d in _db["cameras_planned"].find().sort("name", 1)])
+
+
+@cameras_bp.route("/api/cameras/planned", methods=["POST"])
+def create_planned():
+    _ensure_db()
+    data = request.get_json(silent=True) or {}
+    if "lat" not in data or "lng" not in data:
+        return jsonify({"error": "Position requise"}), 400
+    data.setdefault("name", "Projet %d" % (_db["cameras_planned"].count_documents({}) + 1))
+    data.setdefault("status", "souhaitee")
+    chans = [{"no": 1}]
+    f, _unset, err = _planned_fields(data, chans)
+    if err:
+        return jsonify({"error": err}), 400
+    now = datetime.now(timezone.utc)
+    f.update({"channels": chans, "by": _who(), "at": now, "updatedAt": now})
+    res = _db["cameras_planned"].insert_one(f)
+    logger.info("Camera en projet %s creee par %s", f.get("name"), f["by"])
+    return jsonify(_pub_planned(_db["cameras_planned"].find_one({"_id": res.inserted_id}))), 201
+
+
+@cameras_bp.route("/api/cameras/planned/<pid>", methods=["PUT"])
+def update_planned(pid):
+    doc = _planned_doc(pid)
+    if not doc:
+        return jsonify({"error": "Camera en projet introuvable"}), 404
+    f, unset, err = _planned_fields(request.get_json(silent=True) or {}, _planned_channels(doc))
+    if err:
+        return jsonify({"error": err}), 400
+    return _planned_save(doc, f, unset)
+
+
+@cameras_bp.route("/api/cameras/planned/<pid>/channels", methods=["POST"])
+def add_planned_channels(pid):
+    """Ajoute des canaux simules : {optics, count} (ex. 4 fixes autour d'une PTZ)."""
+    doc = _planned_doc(pid)
+    if not doc:
+        return jsonify({"error": "Camera en projet introuvable"}), 404
+    data = request.get_json(silent=True) or {}
+    optics, model = data.get("optics"), data.get("model") or ""
+    if optics not in OPTICS:
+        return jsonify({"error": "Optique invalide (mobile ou fixe)"}), 400
+    if model and model not in PLANNED_MODELS:
+        return jsonify({"error": "Modele inconnu"}), 400
+    try:
+        count = int(data.get("count") or 1)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Nombre invalide"}), 400
+    chans = _planned_channels(doc)
+    if count < 1 or len(chans) + count > PLANNED_MAX_CHANNELS:
+        return jsonify({"error": "%d canaux au plus par emplacement" % PLANNED_MAX_CHANNELS}), 400
+    nxt = max(c.get("no", 0) for c in chans) + 1
+    chans += [dict({"no": nxt + i, "optics": optics}, **({"model": model} if model else {})) for i in range(count)]
+    return _planned_save(doc, {"channels": chans}, {"optics": "", "view": ""})
+
+
+@cameras_bp.route("/api/cameras/planned/<pid>/channels/<int:no>", methods=["DELETE"])
+def delete_planned_channel(pid, no):
+    doc = _planned_doc(pid)
+    if not doc:
+        return jsonify({"error": "Camera en projet introuvable"}), 404
+    chans = _planned_channels(doc)
+    if len(chans) < 2:
+        return jsonify({"error": "Un emplacement garde au moins un canal"}), 400
+    left = [c for c in chans if c.get("no") != no]
+    if len(left) == len(chans):
+        return jsonify({"error": "Canal introuvable"}), 404
+    return _planned_save(doc, {"channels": left}, {"optics": "", "view": ""})
+
+
+@cameras_bp.route("/api/cameras/planned/<pid>", methods=["DELETE"])
+def delete_planned(pid):
+    doc = _planned_doc(pid)
+    if not doc:
+        return jsonify({"error": "Camera en projet introuvable"}), 404
+    _db["cameras_planned"].delete_one({"_id": doc["_id"]})
+    logger.info("Camera en projet %s supprimee par %s", doc.get("name"), _who())
+    return jsonify({"ok": True})
 
 
 def place_device(doc, lat, lng):
@@ -1309,6 +1599,291 @@ def goto_preset(cam_id):
         return jsonify({"error": camera_error(doc, e, "Rappel de preset")}), 502
     logger.info("Camera %s (%s) : preset %d rappele", doc.get("name"), doc.get("ip"), preset)
     return jsonify({"ok": bool(ok)})
+
+
+# ---------------------------------------------------------------------------
+# Masques de vie privee : lecture de l'etat et bascule globale par appareil.
+# Seuls les masques DEJA dessines sur la camera sont actives / desactives :
+# Cockpit n'en cree, n'en deplace ni n'en supprime jamais. Releve du
+# 21/10/2026 : Hikvision (interrupteur par canal, 32 cameras avec masques),
+# Hanwha (image.cgi msubmenu=privacy, interrupteur global), Dahua domes
+# (24 emplacements PrivacyMasking[canal][i], sans interrupteur global :
+# emplacement "dessine" = Rect / Polygon non nuls), Bosch domes (RCP+
+# 0x0bd8, ONVIF GetMasks = "Action Failed"). Axis : non pilotable. Chaque
+# bascule est tracee dans `cameras_privacy_log`.
+# ---------------------------------------------------------------------------
+PRIVACY_BRANDS = {"hikvision", "hanwha", "dahua", "bosch"}
+
+
+def _privacy_hik(cam, set_to=None):
+    """Canaux ayant au moins une zone dessinee ; set_to : bascule leur interrupteur."""
+    xml = re.sub(r'xmlns="[^"]*"', "", cam._get("/ISAPI/System/Video/inputs/channels").text)
+    ids = [int(i) for i in re.findall(r"<VideoInputChannel[^>]*>\s*<id>(\d+)</id>", xml)] or [cam.channel]
+    chans = []
+    for cid in ids:
+        try:
+            raw = cam._get("/ISAPI/System/Video/inputs/channels/%d/privacyMask" % cid).text
+        except requests.exceptions.HTTPError:
+            continue  # canal sans fonction masque
+        regions = len(re.findall(r"<PrivacyMaskRegion\b", raw))
+        if not regions:
+            continue
+        if set_to is not None:
+            body = re.sub(r"(<enabled>)(true|false)(</enabled>)", r"\g<1>%s\3" % ("true" if set_to else "false"), raw, count=1)
+            cam._put("/ISAPI/System/Video/inputs/channels/%d/privacyMask" % cid, data=body.encode("utf-8"))
+            raw = cam._get("/ISAPI/System/Video/inputs/channels/%d/privacyMask" % cid).text
+        m = re.search(r"<enabled>(true|false)</enabled>", re.sub(r'xmlns="[^"]*"', "", raw))
+        chans.append({"no": cid, "masks": regions, "enabled": bool(m and m.group(1) == "true")})
+    return chans
+
+
+def _privacy_hanwha(cam, set_to=None):
+    ch = cam.channel - 1
+    if set_to is not None:
+        r = cam._get("/stw-cgi/image.cgi?msubmenu=privacy&action=set&Channel=%d&Enable=%s" % (ch, "True" if set_to else "False"))
+        if r.text.lstrip().startswith("NG"):
+            raise RuntimeError("Refus de la camera : %s" % " ".join(r.text.split())[:120])
+    r = cam._get("/stw-cgi/image.cgi?msubmenu=privacy&action=view&Channel=%d" % ch)
+    if r.text.lstrip().startswith("NG"):
+        raise RuntimeError("Masques illisibles : %s" % " ".join(r.text.split())[:120])
+    on = re.search(r"Channel\.%d\.Enable=(True|False)" % ch, r.text, re.I)
+    # Masques listes seulement quand l'interrupteur est actif sur certains firmwares
+    masks = len(re.findall(r"MaskIndex=", r.text))
+    return [{"no": cam.channel, "masks": masks if masks else None, "enabled": bool(on and on.group(1).lower() == "true")}]
+
+
+def _privacy_dahua(cam, set_to=None):
+    ch = cam.channel - 1
+    txt = cam._get("/cgi-bin/configManager.cgi?action=getConfig&name=PrivacyMasking").text
+    slots = {}
+    for k, _field, v in re.findall(r"PrivacyMasking\[%d\]\[(\d+)\]\.((?:Rect|Polygon)\[[\d\]\[]+\])=(-?\d+)" % ch, txt):
+        slots.setdefault(int(k), False)
+        if v != "0":
+            slots[int(k)] = True
+    drawn = sorted(i for i, used in slots.items() if used)
+    if set_to is not None and drawn:
+        params = "&".join("PrivacyMasking[%d][%d].Enable=%s" % (ch, i, "true" if set_to else "false") for i in drawn)
+        r = cam._get("/cgi-bin/configManager.cgi?action=setConfig&" + params)
+        if "OK" not in r.text:
+            raise RuntimeError("Refus de la camera : %s" % r.text.strip()[:120])
+        txt = cam._get("/cgi-bin/configManager.cgi?action=getConfig&name=PrivacyMasking").text
+    on = [i for i in drawn if re.search(r"PrivacyMasking\[%d\]\[%d\]\.Enable=true" % (ch, i), txt)]
+    return [{"no": cam.channel, "masks": len(drawn), "enabled": bool(on)}] if drawn else []
+
+
+BOSCH_PRIV_CMD = "0x0bd8"  # RCP+ CONF_PRIV_MSK_POLY (base de connaissances Bosch / Keenfinity)
+
+
+def _bosch_priv_read(cam):
+    r = cam._get("/rcp.xml?command=%s&type=P_OCTET&direction=READ&num=1" % BOSCH_PRIV_CMD)
+    if re.search(r"<err>", r.text):
+        raise RuntimeError("Masques illisibles (RCP+ %s)" % re.search(r"<err>([^<]*)", r.text).group(1))
+    m = re.search(r"<str>(.*?)</str>", r.text, re.S)
+    data = bytes.fromhex(re.sub(r"\s+", "", m.group(1))) if m else b""
+    recs, i = [], 0
+    while i + 4 <= len(data):  # enregistrements [longueur 2 octets][type 2 octets][contenu]
+        ln, tag = int.from_bytes(data[i:i + 2], "big"), int.from_bytes(data[i + 2:i + 4], "big")
+        if ln < 4:
+            break
+        recs.append((tag, data[i + 4:i + ln]))
+        i += ln
+    return recs
+
+
+def _privacy_bosch(cam, set_to=None):
+    """RCP+ (Digest) : type 0x0002 = un masque (polygone si longueur > 8),
+    type 0x0003 = reglage global des domes, 1er octet 01 = masques desactives
+    (case "Disable Masks" de l'interface web). Seul cet octet est reecrit, le
+    reste de l'enregistrement est conserve (l'exemple Bosch remet a zero le
+    3e octet, qui vaut 01 sur nos AUTODOME). Teste le 21/10/2026 sur
+    10.34.1.36 (AUTODOME 5000i, 7 masques) : bascule visible, retour
+    identique octet pour octet. Fixes Bosch sans 0x0003 : non pilotees."""
+    recs = _bosch_priv_read(cam)
+    drawn = sum(1 for tag, body in recs if tag == 2 and len(body) > 8)
+    glob = [body for tag, body in recs if tag == 3]
+    if not drawn or not glob:
+        return []
+    body = glob[0]
+    if set_to is not None:
+        new = bytes([0 if set_to else 1]) + body[1:]
+        r = cam._get("/rcp.xml?command=%s&type=P_OCTET&direction=WRITE&num=1&payload=0x%04x0003%s"
+                     % (BOSCH_PRIV_CMD, len(new) + 4, new.hex()))
+        if re.search(r"<err>", r.text):
+            raise RuntimeError("Refus de la camera (RCP+ %s)" % re.search(r"<err>([^<]*)", r.text).group(1))
+        body = [b for tag, b in _bosch_priv_read(cam) if tag == 3][0]
+    return [{"no": cam.channel, "masks": drawn, "enabled": body[:1] == b"\x00"}]
+
+
+def _privacy_run(doc, set_to=None):
+    cam = make_hik_camera(doc)
+    fn = {"hikvision": _privacy_hik, "hanwha": _privacy_hanwha, "dahua": _privacy_dahua, "bosch": _privacy_bosch}[doc.get("brand")]
+    chans = call_camera(doc, lambda: fn(cam, set_to))
+    known = [c for c in chans if c["masks"] is not False]
+    return {
+        "supported": True,
+        "channels": chans,
+        "configured": bool(chans),
+        "enabled": any(c["enabled"] for c in known),
+        "all_enabled": bool(known) and all(c["enabled"] for c in known),
+    }
+
+
+def _is_super_admin():
+    from app import SUPER_ADMIN_ROLE
+    return SUPER_ADMIN_ROLE in ((getattr(request, "user_payload", {}) or {}).get("global_roles") or [])
+
+
+PRIVACY_SETTLE_S = 1.5  # la camera applique le masque avant la capture de controle
+
+
+def _privacy_log(doc, set_to, ok, state=None, detail="", bulk=False, who=None):
+    entry = {"camera_id": doc["_id"], "name": doc.get("name"), "ip": doc.get("ip"), "enabled": set_to, "ok": ok,
+             "by": who if who is not None else _who(), "at": datetime.now(timezone.utc)}
+    if state is not None:
+        entry["channels"] = state.get("channels")
+    if detail:
+        entry["detail"] = detail
+    if bulk:
+        entry["bulk"] = True
+    _db["cameras_privacy_log"].insert_one(entry)
+
+
+def _privacy_capture(doc, state):
+    """Capture de controle des canaux masques apres une bascule (vignettes a
+    jour). Reserve l'appareil comme la capture manuelle. -> canaux captures."""
+    nos = [c["no"] for c in state.get("channels") or []] or [1]
+    active = set(_capture_channels(doc))
+    nos = [n for n in nos if n in active] or nos[:1]
+    time.sleep(PRIVACY_SETTLE_S)
+    done, ip = [], doc.get("ip")
+    for no in nos:
+        if not _device_acquire(ip, wait=True):
+            continue
+        try:
+            _capture_one(doc, no)
+            done.append(no)
+        except Exception as e:
+            camera_error(doc, e, "Capture apres bascule des masques")
+        finally:
+            _device_release(ip, no)
+    return done
+
+
+# Bascule de TOUS les masques (super admin) : une seule a la fois, dans ses
+# propres threads, progression par appareil (GET)
+PRIVACY_ALL_WORKERS = 8
+_privacy_job = {"running": False}
+_privacy_job_lock = threading.Lock()
+
+
+def _run_privacy_job(docs, set_to, who):
+    def one(doc):
+        res = "failed"
+        err = ""
+        try:
+            state = _privacy_run(doc, None)
+            if not state.get("configured"):
+                res = "nomask"
+            elif (state["all_enabled"] if set_to else not state["enabled"]):
+                res = "unchanged"
+            else:
+                state = _privacy_run(doc, set_to)
+                ok = state["all_enabled"] if set_to else not state["enabled"]
+                _privacy_log(doc, set_to, ok, state, bulk=True, who=who)
+                if ok:
+                    res = "changed"
+                    _privacy_capture(doc, state)
+                else:
+                    err = "etat relu different apres la bascule"
+        except Exception as e:
+            err = camera_error(doc, e, "Masques de vie privee (masse)")
+            _privacy_log(doc, set_to, False, detail=err, bulk=True, who=who)
+        with _privacy_job_lock:
+            _privacy_job["done"] += 1
+            _privacy_job[res] = _privacy_job.get(res, 0) + 1
+            if res == "failed":
+                _privacy_job["failures"].append({"id": str(doc["_id"]), "name": doc.get("name", ""), "error": err})
+            if res == "changed":
+                _privacy_job["captured"].append(str(doc["_id"]))
+
+    try:
+        with ThreadPoolExecutor(max_workers=PRIVACY_ALL_WORKERS) as pool:
+            list(pool.map(one, docs))
+    finally:
+        with _privacy_job_lock:
+            _privacy_job["running"] = False
+            _privacy_job["finished_at"] = _iso(datetime.now(timezone.utc))
+        logger.info("Masques de vie privee (masse, %s) termine : %s", "activation" if set_to else "desactivation",
+                    {k: _privacy_job.get(k, 0) for k in ("changed", "unchanged", "nomask", "failed")})
+
+
+@cameras_bp.route("/api/cameras/privacy-all", methods=["GET", "POST"])
+def privacy_all():
+    """SUPER ADMIN. POST {enabled: bool} : active / desactive les masques deja
+    dessines de toutes les cameras pilotables (Hikvision, Hanwha, Dahua, Bosch
+    domes ; jamais la piste), capture de controle des cameras basculees.
+    GET : progression."""
+    if not _is_super_admin():
+        return jsonify({"error": "Reserve aux super administrateurs"}), 403
+    if request.method == "GET":
+        with _privacy_job_lock:
+            return jsonify(dict(_privacy_job, failures=list(_privacy_job.get("failures") or []),
+                                captured=list(_privacy_job.get("captured") or [])))
+    _ensure_db()
+    set_to = bool((request.get_json(silent=True) or {}).get("enabled"))
+    docs = [d for d in _col_cameras.find({"enabled": {"$ne": False}, "brand": {"$in": sorted(PRIVACY_BRANDS)}})
+            if not is_piste_device(d) and d.get("credential_profile_id")]
+    if not docs:
+        return jsonify({"error": "Aucune camera pilotable"}), 400
+    with _privacy_job_lock:
+        if _privacy_job.get("running"):
+            return jsonify({"error": "Une bascule de masse des masques est deja en cours"}), 409
+        _privacy_job.clear()
+        _privacy_job.update({"running": True, "enabled": set_to, "total": len(docs), "done": 0, "changed": 0,
+                             "unchanged": 0, "nomask": 0, "failed": 0, "failures": [], "captured": [], "by": _who(),
+                             "started_at": _iso(datetime.now(timezone.utc)), "finished_at": None})
+    threading.Thread(target=_run_privacy_job, args=(docs, set_to, _who()), daemon=True,
+                     name="privacy-all").start()
+    logger.warning("Masques de vie privee : %s de masse lancee par %s sur %d camera(s)",
+                   "ACTIVATION" if set_to else "DESACTIVATION", _who(), len(docs))
+    return jsonify({"ok": True, "total": len(docs)}), 202
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/privacy", methods=["GET", "POST"])
+def camera_privacy(cam_id):
+    """GET : etat des masques de vie privee (lu sur la camera). POST
+    {enabled: bool} : active / desactive les masques deja dessines, puis relit."""
+    doc, err = _get_cam_doc(cam_id)
+    if err:
+        return err
+    err = _require_control(doc)
+    if err:
+        return err
+    if doc.get("brand") not in PRIVACY_BRANDS:
+        return jsonify({"supported": False, "reason": "Masques non pilotables pour la marque %s : a regler dans l'interface de la camera"
+                        % BRANDS.get(doc.get("brand"), doc.get("brand"))})
+    set_to = None
+    if request.method == "POST":
+        set_to = bool((request.get_json(silent=True) or {}).get("enabled"))
+    try:
+        state = _privacy_run(doc, set_to)
+    except Exception as e:
+        msg = camera_error(doc, e, "Masques de vie privee")
+        if set_to is not None:
+            _privacy_log(doc, set_to, False, detail=msg)
+        return jsonify({"error": msg}), 502
+    if set_to is not None:
+        ok = state["configured"] and (state["all_enabled"] if set_to else not state["enabled"])
+        _privacy_log(doc, set_to, ok, state)
+        logger.info("Masques de vie privee %s sur %s (%s) par %s : %s", "ACTIVES" if set_to else "DESACTIVES",
+                    doc.get("name"), doc.get("ip"), _who(), "ok" if ok else "etat relu different")
+        state["ok"] = ok
+        # Vignettes a jour : capture des canaux masques
+        state["captured"] = _privacy_capture(doc, state) if state["configured"] else []
+    last = _db["cameras_privacy_log"].find_one({"camera_id": doc["_id"], "ok": True}, sort=[("at", -1)])
+    if last:
+        state["last"] = {"enabled": last["enabled"], "by": last.get("by", ""), "at": _iso(last.get("at"))}
+    return jsonify(state)
 
 
 @cameras_bp.route("/api/cameras/<cam_id>/test", methods=["POST"])

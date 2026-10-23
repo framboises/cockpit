@@ -153,6 +153,8 @@
 .cm-channel-head { display: flex; align-items: center; gap: 8px; }
 .cm-channel-no { flex: none; width: 26px; height: 26px; border-radius: 7px; background: var(--bg); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .78rem; }
 .cm-channel-head input[type="text"] { flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 7px; padding: 0 8px; font: inherit; font-size: .86rem; color: var(--text); background: var(--card); }
+.cm-optics { flex: none; height: 32px; border: 1px solid var(--line); border-radius: 7px; padding: 0 6px; font: inherit; font-size: .8rem; color: var(--text); background: var(--card); }
+.cm-optics.is-guess { border-style: dashed; border-color: #f59e0b; }
 .cm-roles { display: flex; flex-wrap: wrap; gap: 6px; }
 .cm-role-toggle {
   display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 999px;
@@ -165,6 +167,29 @@
 .cm-role-params .cm-role-title { grid-column: 1 / -1; font-size: .72rem; font-weight: 700; color: var(--c); display: flex; align-items: center; gap: 4px; }
 .cm-role-params .cm-role-title .material-symbols-outlined { font-size: 15px; }
 
+/* Bascule de tous les masques (super admin) */
+#cm-privacy-all-btn[hidden] { display: none; }
+.cm-pall-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.cm-pall-actions .cm-btn { height: 42px; }
+.cm-pall-on { color: #15803d; border-color: #bbf7d0; }
+.cm-pall-progress { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--bg); }
+.cm-pall-progress[hidden] { display: none; }
+.cm-pall-title { font-weight: 700; font-size: .9rem; }
+.cm-pall-bar { height: 12px; border-radius: 6px; background: #e2e8f0; overflow: hidden; }
+.cm-pall-bar i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .4s; }
+.cm-pall-stats { font-size: .8rem; color: var(--muted); }
+.cm-pall-fails { margin: 0; padding-left: 18px; max-height: 160px; overflow-y: auto; font-size: .76rem; color: #b91c1c; }
+.cm-privacy { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 8px 6px 10px; border-radius: 9px; background: var(--bg); font-size: .8rem; }
+.cm-privacy > .material-symbols-outlined { font-size: 18px; color: var(--muted); }
+.cm-privacy-text { flex: 1; min-width: 0; }
+.cm-privacy .cm-btn { height: 30px; }
+.cm-privacy .cm-btn[hidden] { display: none; }
+.cm-privacy.is-on { background: #ecfdf5; }
+.cm-privacy.is-on > .material-symbols-outlined { color: #15803d; }
+.cm-privacy.is-off { background: #fff7ed; }
+.cm-privacy.is-off > .material-symbols-outlined { color: #c2410c; }
+.cm-privacy.is-partial { background: #fefce8; }
+.cm-privacy.is-na { color: var(--muted); }
 .cm-snap { position: relative; border-radius: 10px; overflow: hidden; background: #0f172a; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; color: #64748b; }
 .cm-snap img { width: 100%; height: 100%; object-fit: contain; cursor: zoom-in; }
 .cm-snap .material-symbols-outlined { font-size: 34px; }
@@ -310,3 +335,97 @@
 #cm-map.is-placing .leaflet-container, #cm-map.is-placing.leaflet-container { cursor: crosshair; }
 #cm-map-place { max-width: 300px; }
 #cm-map-place[hidden] { display: none; }
+
+/* Angles de vue (cones dessines a la main, cameras.js "angles de vue") */
+#cm-map-cones.is-on { background: #f97316; border-color: #f97316; color: #fff; }
+.cm-pin.is-todo { outline: 2px dashed #f97316; outline-offset: 2px; }
+.cm-pin.is-cone-edit { outline: 3px solid #f97316; outline-offset: 2px; }
+.cm-cone-handle { width: 20px; height: 20px; border-radius: 50%; border: 3px solid #f97316; background: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, .45); cursor: grab; box-sizing: border-box; }
+.cm-cone-handle.is-tip { background: #f97316; border-color: #fff; }
+/* Cameras en projet (travaux a venir) : pin violet en pointilles */
+#cm-map-plan.is-on { background: #8b5cf6; border-color: #8b5cf6; color: #fff; }
+.cm-pin.is-planned { background: #f5f3ff; color: #7c3aed; border: 2px dashed #8b5cf6; box-shadow: 0 2px 8px rgba(124, 58, 237, .45); }
+.cm-pin.is-planned.is-cone-edit { outline-color: #8b5cf6; cursor: move; }
+.cm-tip-planned { padding-top: 10px; }
+.cm-tip-badge { margin: 0 12px 4px; display: inline-block; padding: 1px 8px; border-radius: 999px; background: #ede9fe; color: #6d28d9; font-size: .72rem; font-weight: 700; }
+.cm-cfg-planned-badge { font-size: .76rem; font-weight: 700; color: #6d28d9; background: #f5f3ff; border: 1px dashed #a78bfa; border-radius: 8px; padding: 6px 10px; }
+.cm-cfg-planned { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 8px; }
+.cm-cfg-planned .cm-span2 { grid-column: 1 / -1; }
+.cm-cfg-planned textarea { height: 74px; }
+@media (max-width: 820px) { .cm-cfg-planned { grid-template-columns: 1fr; } }
+
+/* Configurateur : volet en colonne a gauche (photo, optique, cone, navigation),
+   la carte reste visible a droite et se cadre sur la camera */
+.cm-map-area { --cfg-w: min(560px, 44vw); }
+.cm-cone-panel {
+  position: absolute; top: 0; left: 0; bottom: 0; z-index: 1001; width: var(--cfg-w); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; box-sizing: border-box;
+  background: var(--card, #fff); color: var(--text); box-shadow: 6px 0 24px rgba(15, 23, 42, .25); font-family: 'Outfit', sans-serif;
+}
+.cm-cone-panel[hidden] { display: none; }
+.cm-map-area.is-cone-open .cm-map-bar { left: calc(var(--cfg-w) + 12px); max-width: calc(100% - var(--cfg-w) - 80px); }
+.cm-cfg-head { display: flex; align-items: flex-start; gap: 8px; }
+.cm-cfg-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cm-cfg-title b { font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-cfg-step { font-size: .72rem; font-weight: 700; color: #c2410c; text-transform: uppercase; letter-spacing: .04em; }
+.cm-cfg-close { width: 34px; padding: 0; justify-content: center; }
+.cm-cfg-progress { height: 5px; border-radius: 3px; background: #e2e8f0; overflow: hidden; margin-top: -4px; }
+.cm-cfg-progress i { display: block; height: 100%; background: #f97316; transition: width .3s; }
+.cm-cfg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cm-cfg-chip {
+  display: inline-flex; align-items: center; gap: 2px; height: 30px; min-width: 34px; padding: 0 8px; justify-content: center;
+  border: 2px solid var(--line); border-radius: 8px; background: var(--card, #fff); color: var(--text); font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer;
+}
+.cm-cfg-chip .material-symbols-outlined { font-size: 15px; }
+.cm-cfg-chip.is-mobile { border-color: #fdba74; }
+.cm-cfg-chip.is-fixe { border-color: #93c5fd; }
+.cm-cfg-chip.is-done { background: #f0fdf4; color: #15803d; }
+.cm-cfg-chip.is-current { outline: 3px solid #f97316; outline-offset: 1px; }
+.cm-cfg-chip-add { height: 30px; padding: 0 9px; font-size: .76rem; border-style: dashed; color: #6d28d9; }
+.cm-cfg-chip-add .material-symbols-outlined { font-size: 16px; }
+.cm-cfg-chip-add.cm-btn-danger { color: #b91c1c; }
+.cm-cfg-chname { font-size: .86rem; font-weight: 600; color: var(--muted); margin-top: -4px; }
+.cm-cfg-shot { position: relative; flex: none; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: #0f172a; }
+.cm-cfg-shot img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; transition: opacity .2s, filter .2s; }
+.cm-cfg-shot img:not([src]) { visibility: hidden; }
+.cm-cfg-shot img.is-stale { opacity: .45; filter: grayscale(.6); }
+.cm-cfg-shot-state {
+  position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 60px); padding: 2px 9px; border-radius: 999px;
+  background: rgba(15, 23, 42, .78); color: #fff; font-size: .72rem; font-weight: 600;
+}
+.cm-cfg-shot-state.is-busy::before {
+  content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%;
+  border: 2px solid #fff; border-top-color: transparent; vertical-align: -1px; animation: cm-spin .8s linear infinite;
+}
+@keyframes cm-spin { to { transform: rotate(360deg); } }
+.cm-cfg-shot-btn { position: absolute; right: 8px; bottom: 8px; width: 36px; padding: 0; justify-content: center; background: rgba(255, 255, 255, .92); }
+.cm-cfg-opt { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cm-cfg-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.cm-cfg-seg .cm-btn { border: none; border-radius: 0; height: 40px; padding: 0 16px; font-size: .9rem; }
+.cm-cfg-seg .cm-btn + .cm-btn { border-left: 1px solid var(--line); }
+.cm-cfg-seg .cm-btn[data-optics="fixe"].is-on { background: #3b82f6; color: #fff; }
+.cm-cfg-seg .cm-btn[data-optics="mobile"].is-on { background: #f97316; color: #fff; }
+.cm-cfg-opt-hint { font-size: .76rem; font-weight: 600; color: var(--muted); }
+.cm-cfg-opt-hint.is-warn { color: #b45309; }
+.cm-cone-panel .cm-help { margin: 0; }
+.cm-cfg-lens { display: flex; align-items: flex-end; gap: 8px; }
+.cm-cfg-lens .cm-field { flex: 1; min-width: 0; }
+.cm-cfg-lens select { width: 100%; height: 36px; }
+.cm-cfg-lock { width: 40px; height: 36px; padding: 0; justify-content: center; flex: none; }
+.cm-cfg-lock.is-on { background: #1e293b; border-color: #1e293b; color: #fff; }
+.cm-cone-fields input:disabled { background: #f1f5f9; color: var(--muted); }
+.cm-cone-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cm-cone-fields input { width: 100%; height: 36px; box-sizing: border-box; font-size: .95rem; }
+.cm-cfg-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
+.cm-cfg-actions .cm-btn { height: 44px; font-size: .9rem; }
+.cm-cfg-save { flex: 1; justify-content: center; }
+.cm-cfg-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .72rem; color: var(--muted); }
+.cm-cfg-auto { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--text); cursor: pointer; }
+.cm-cfg-keys { flex: 1; text-align: right; }
+@media (max-width: 820px) {
+  .cm-cone-panel { top: auto; left: 0; right: 0; width: auto; max-height: 62%; border-radius: 14px 14px 0 0; box-shadow: 0 -6px 24px rgba(15, 23, 42, .25); padding: 10px 12px; gap: 8px; }
+  .cm-map-area.is-cone-open .cm-map-bar { left: 8px; max-width: none; }
+  .cm-cfg-shot { max-height: 26vh; aspect-ratio: auto; height: 26vh; }
+  .cm-cfg-keys { display: none; }
+  .cm-cfg-seg .cm-btn { height: 38px; padding: 0 12px; }
+}
