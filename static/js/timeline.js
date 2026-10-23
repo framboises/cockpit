@@ -6901,20 +6901,71 @@ async function openEditModalFromDrawer(dateStr, item) {
 // TV (ecran mural). Styles : static/css/timeline_v2.css.
 // ============================================================================
 
+// Reglages de categorie (page Configuration, /api/timeline-category-styles) :
+// {slug: {color, icon}}. Couleur : regle injectee .tlc-<slug> qui l'emporte
+// sur timeline_v2.css (classe doublee : specificite superieure, y compris
+// aux couleurs du mode TV). Sans reglage : couleurs integrees, sinon repli.
+let _TL_CAT_STYLES = {};
+
+function _tlCatConfigured(slug) {
+  return !!(_TL_CAT_STYLES[slug] && _TL_CAT_STYLES[slug].color);
+}
+
+function _tlApplyCatStyles(items) {
+  _TL_CAT_STYLES = {};
+  (items || []).forEach(it => {
+    if (!it || !/^[a-z0-9-]{1,120}$/.test(it.slug || '')) return;
+    _TL_CAT_STYLES[it.slug] = {
+      color: /^#[0-9a-fA-F]{6}$/.test(it.color || '') ? it.color : null,
+      icon: /^[a-z0-9_]{1,40}$/.test(it.icon || '') ? it.icon : null,
+    };
+  });
+  let tag = document.getElementById('tl-cat-styles');
+  if (!tag) {
+    tag = document.createElement('style');
+    tag.id = 'tl-cat-styles';
+    document.head.appendChild(tag);
+  }
+  tag.textContent = Object.keys(_TL_CAT_STYLES).filter(_tlCatConfigured).map(slug => {
+    const c = 'tlc-' + slug;
+    return '.' + c + '.' + c + ', .tl-tv .' + c + '.' + c + ' { --cat: ' + _TL_CAT_STYLES[slug].color + '; }';
+  }).join('\n');
+  // Vignettes deja affichees : classes et icones recalculees
+  document.querySelectorAll('.event-item').forEach(card => {
+    const it = card.__itemData || (card.__clusterData && card.__clusterData.items && card.__clusterData.items[0]);
+    if (!it) return;
+    [...card.classList].filter(k => k.indexOf('tlc-') === 0).forEach(k => card.classList.remove(k));
+    card.classList.add(...tlCatClasses(it.category));
+    const ic = card.__itemData && card.querySelector('.ev2-ic');
+    if (ic) ic.textContent = _tlIconFor(card.__itemData);
+  });
+}
+
+function _tlLoadCatStyles() {
+  fetch('/api/timeline-category-styles', { credentials: 'same-origin' })
+    .then(r => (r.ok ? r.json() : null))
+    .then(j => { if (j && Array.isArray(j.items)) _tlApplyCatStyles(j.items); })
+    .catch(() => { /* couleurs integrees conservees */ });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _tlLoadCatStyles);
+else _tlLoadCatStyles();
+
 // Couleur du bord de vignette : classes tlc-* (jamais cat-* qui colore le fond)
 function tlCatClasses(cat) {
   const slug = _categorySlug(cat);
   if (!slug) return ['tlc-none'];
-  return _CAT_KNOWN.has(slug) ? ['tlc-' + slug] : ['tlc-fb', 'tlc-fb-' + _categoryFallbackIdx(slug)];
+  return (_CAT_KNOWN.has(slug) || _tlCatConfigured(slug)) ? ['tlc-' + slug] : ['tlc-fb', 'tlc-fb-' + _categoryFallbackIdx(slug)];
 }
 
 function tlCatIsFallback(cat) {
   const slug = _categorySlug(cat);
-  return !!slug && !_CAT_KNOWN.has(slug);
+  return !!slug && !_CAT_KNOWN.has(slug) && !_tlCatConfigured(slug);
 }
 
 function _tlIconFor(item) {
   const c = String(item.category || '');
+  const st = _TL_CAT_STYLES[_categorySlug(c)];
+  if (st && st.icon) return st.icon;
   if (c.indexOf('Motos') !== -1) return 'two_wheeler';
   const type = detectClusterType(item);
   const ic = type && CLUSTER_CONFIG[type] ? CLUSTER_CONFIG[type].icon : '';

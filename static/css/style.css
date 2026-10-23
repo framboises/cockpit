@@ -16484,3 +16484,24 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .aec-meta { font-size: .75rem; color: var(--muted); }
 .aec-save { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .aec-save .material-symbols-outlined { font-size: 18px; }
+
+/* Configuration : couleurs et icones des categories de la timeline */
+.tlcat-intro { font-size: 0.8rem; color: var(--muted); margin: 0 0 8px; }
+#tlcat-save { height: 30px; padding: 0 12px; font-size: 0.78rem; }
+#tlcat-save:disabled { opacity: 0.5; cursor: default; }
+#tlcat-table td { vertical-align: middle; font-size: 0.82rem; }
+.tlcat-preview {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 150px; max-width: 220px;
+  padding: 5px 10px; border: 1px solid var(--line); border-left: 4px solid var(--cat, #94a3b8);
+  border-radius: var(--radius-sm); background: var(--card); font-size: 0.8rem; font-weight: 600;
+}
+.tlcat-preview .material-symbols-outlined { font-size: 17px; color: var(--cat, #94a3b8); }
+.tlcat-preview span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tlcat-muted { font-size: 0.74rem; color: var(--muted); }
+.tlcat-color { display: flex; align-items: center; gap: 8px; }
+.tlcat-color input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+.tlcat-origin { font-size: 0.72rem; color: var(--muted); }
+.tlcat-icon { height: 30px; font-size: 0.8rem; width: 100%; }
+.tlcat-icon.is-invalid { border-color: var(--danger); }
+.tlcat-add { display: flex; gap: 6px; margin-top: 8px; max-width: 520px; }
+.tlcat-add .form-input { flex: 1; height: 32px; font-size: 0.82rem; }

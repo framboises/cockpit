@@ -146,6 +146,40 @@
         </div>
       </section>
 
+      <!-- Section couleurs et icones des categories de la timeline -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="tlcat">
+          <h3>Couleurs des categories (timeline)</h3>
+          <div style="display:flex; gap:6px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span id="tlcat-status" style="font-size:0.78rem; color:var(--muted);"></span>
+            <button id="tlcat-save" class="btn btn-primary btn-sm" type="button" disabled>Enregistrer</button>
+          </div>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="tlcat-body">
+          <p class="tlcat-intro">Couleur du bord des vignettes et icone, pour toutes les editions. Une categorie sans reglage garde sa couleur par defaut (integree, ou automatique tiree de son nom). Les orthographes proches ("Evenement", "Evénement") partagent le meme reglage.</p>
+          <div class="table-responsive">
+            <table id="tlcat-table" class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Apercu</th>
+                  <th>Categorie</th>
+                  <th style="width:96px">Vignettes</th>
+                  <th style="width:150px">Couleur</th>
+                  <th style="width:190px">Icone</th>
+                  <th style="width:44px"></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <form id="tlcat-add" class="tlcat-add" autocomplete="off">
+            <input type="text" class="form-input" maxlength="120" placeholder="Nouvelle categorie (avant sa premiere vignette)..." aria-label="Nouvelle categorie">
+            <button type="submit" class="btn btn-secondary btn-sm">Ajouter</button>
+          </form>
+        </div>
+      </section>
+
       <!-- Section carte — affichage par defaut -->
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="map-defaults">
@@ -1259,6 +1293,7 @@
 <script src="/static/js/toast.js"></script>
 <script src="/static/js/csrf_refresh.js"></script>
 <script src="/static/js/todo_sets.js"></script>
+<script src="/static/js/timeline_cat_styles.js"></script>
 <script src="/static/js/groups.js"></script>
 <script src="/static/js/merge_config.js"></script>
 <script src="/static/js/map_defaults.js"></script>

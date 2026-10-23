@@ -1461,6 +1461,111 @@ def _used_category_counts(event, year):
     return out
 
 
+# -------------------------------------------------------------------------------
+# Couleurs et icones des categories de la timeline (reglage global)
+# cockpit_settings._id="timeline_categories" : {items: [{slug, label, color, icon}]}
+# Cle = slug du nom (meme normalisation que _categorySlug cote navigateur :
+# "Evenement" et "Evénement" partagent le meme reglage). Sans reglage, la
+# timeline garde ses couleurs integrees (timeline_v2.css) et la couleur de
+# repli tiree du nom.
+# -------------------------------------------------------------------------------
+_TL_CAT_SETTING_ID = "timeline_categories"
+_TL_CAT_HEX_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+_TL_CAT_ICON_RE = re.compile(r'^[a-z0-9_]{1,40}$')
+_TL_CAT_MAX = 200
+# Couleurs integrees de timeline_v2.css (affichees comme valeur par defaut)
+_TL_CAT_BUILTIN = {
+    "parking": "#2563eb", "controle": "#4f46e5", "aa": "#7c3aed", "hospi": "#0d9488",
+    "general": "#64748b", "motos": "#0891b2", "evenement": "#16a34a",
+    "secours": "#dc2626", "pco-secours": "#dc2626", "securite": "#ea580c", "pco-securite": "#ea580c",
+}
+
+
+def _tl_cat_slug(name):
+    s = unicodedata.normalize("NFD", str(name or ""))
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn").lower()
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+
+
+def _tl_cat_items():
+    doc = db["cockpit_settings"].find_one({"_id": _TL_CAT_SETTING_ID}) or {}
+    return doc.get("items") or []
+
+
+@app.route('/api/timeline-category-styles', methods=['GET'])
+@role_required("user")
+def get_timeline_category_styles():
+    """Reglages lus par la timeline (couleur du bord, icone)."""
+    return jsonify({"items": [{"slug": it.get("slug"), "color": it.get("color") or None,
+                               "icon": it.get("icon") or None}
+                              for it in _tl_cat_items()]})
+
+
+@app.route('/api/timeline-category-styles/catalog', methods=['GET'])
+@role_required("admin")
+def get_timeline_category_catalog():
+    """Categories utilisees (toutes editions) + reglages + couleurs integrees,
+    regroupees par slug, pour la page de configuration."""
+    by_slug = {}
+    pipeline = [
+        {"$project": {"events": {"$objectToArray": "$data"}}},
+        {"$unwind": "$events"},
+        {"$unwind": "$events.v"},
+        {"$group": {"_id": "$events.v.category", "count": {"$sum": 1}}},
+    ]
+    for d in db.timetable.aggregate(pipeline):
+        name = str(d.get("_id") or "").strip()
+        slug = _tl_cat_slug(name)
+        if not slug:
+            continue
+        e = by_slug.setdefault(slug, {"slug": slug, "labels": [], "count": 0})
+        e["count"] += int(d.get("count") or 0)
+        if name not in e["labels"]:
+            e["labels"].append(name)
+    for it in _tl_cat_items():
+        e = by_slug.setdefault(it.get("slug"), {"slug": it.get("slug"), "labels": [], "count": 0})
+        e.update(color=it.get("color") or None, icon=it.get("icon") or None, label=it.get("label") or "")
+    for slug, color in _TL_CAT_BUILTIN.items():
+        if slug in by_slug:
+            by_slug[slug]["builtin"] = color
+    out = sorted(by_slug.values(), key=lambda e: (-e["count"], e["slug"]))
+    return jsonify({"items": out})
+
+
+@app.route('/api/timeline-category-styles', methods=['PUT'])
+@role_required("admin")
+def put_timeline_category_styles():
+    data = request.get_json(silent=True) or {}
+    raw = data.get("items")
+    if not isinstance(raw, list) or len(raw) > _TL_CAT_MAX:
+        return jsonify({"ok": False, "error": "Liste invalide."}), 400
+    items, seen = [], set()
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        slug = _tl_cat_slug(it.get("slug") or it.get("label"))
+        if not slug or slug in seen:
+            continue
+        color = str(it.get("color") or "").strip()
+        icon = str(it.get("icon") or "").strip()
+        if color and not _TL_CAT_HEX_RE.match(color):
+            return jsonify({"ok": False, "error": "Couleur invalide : " + color}), 400
+        if icon and not _TL_CAT_ICON_RE.match(icon):
+            return jsonify({"ok": False, "error": "Icone invalide : " + icon}), 400
+        if not color and not icon:
+            continue   # rien a regler : la categorie reprend ses valeurs par defaut
+        seen.add(slug)
+        items.append({"slug": slug, "label": str(it.get("label") or "").strip()[:120],
+                      "color": color.lower() or None, "icon": icon or None})
+    u = _task_user()
+    db["cockpit_settings"].update_one(
+        {"_id": _TL_CAT_SETTING_ID},
+        {"$set": {"items": items, "updated_at": datetime.now(timezone.utc),
+                  "updated_by": u.get("name") or u.get("email")}},
+        upsert=True)
+    return jsonify({"ok": True, "items": items})
+
+
 @app.route('/api/timetable-categories', methods=['GET'])
 @role_required("user")
 def list_timetable_categories():
