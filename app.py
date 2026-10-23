@@ -1651,6 +1651,8 @@ def add_timetable_event():
         # upsert : cree le document event/year s'il n'existe pas encore.
         # $push cree la cle de date si elle est absente.
         tpay = timeline_tasks.editor_payload(data)
+        if tpay and len(tpay["items"]) > timeline_tasks.MAX_TASKS_PER_VIGNETTE:
+            return jsonify({"success": False, "message": "Trop de tâches pour une vignette."}), 400
         event_details["todo"] = timeline_tasks.render_todo_str([
             {"text": it["text"], "status": "done" if it.get("done") else "todo"}
             for it in (tpay or {}).get("items", []) if (it.get("text") or "").strip()])
@@ -1715,7 +1717,8 @@ def update_timetable_event():
             # Champs operateur uniquement. L'origine reste inchangee.
             remark = data.get("remark")
             remark = existing.get("remark", "") if remark is None else str(remark).rstrip()
-            if len(remark) > _TT_TEXT_LIMITS["remark"] or len(str(data.get("todo") or "")) > _TT_TEXT_LIMITS["todo"]:
+            if (len(remark) > _TT_TEXT_LIMITS["remark"] or len(str(data.get("todo") or "")) > _TT_TEXT_LIMITS["todo"]
+                    or len(data.get("tasks") or []) > timeline_tasks.MAX_TASKS_PER_VIGNETTE):
                 return jsonify({"success": False, "message": "Remarque ou taches trop longues."}), 400
             # Taches : `tasks` (editeur) ou chaine `todo` (anciens clients),
             # appliquees a la collection qui reecrit la chaine et le statut.
@@ -1749,6 +1752,8 @@ def update_timetable_event():
         # Taches : la collection fait foi, la chaine est reecrite apres coup
         fields.pop("todo", None)
         tpay = timeline_tasks.editor_payload(data)
+        if tpay and len(tpay["items"]) > timeline_tasks.MAX_TASKS_PER_VIGNETTE:
+            return jsonify({"success": False, "message": "Trop de tâches pour une vignette."}), 400
 
         def _sync_tasks():
             try:
@@ -4237,13 +4242,25 @@ def timeline_task_create():
     reco_ref = None
     raw_ref = data.get('reco_ref')
     if isinstance(raw_ref, dict) and raw_ref.get('summary_id'):
+        # Lier une recommandation (et donc la marquer appliquee plus tard)
+        # est reserve aux managers, comme la route de statut des recommandations.
+        roles = (getattr(request, 'user_payload', {}) or {}).get('roles') or []
+        if 'manager' not in roles and 'admin' not in roles:
+            return jsonify({"success": False, "message": "Réservé aux managers."}), 403
         try:
             bidx = int(raw_ref.get('bullet_index'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "message": "Recommandation invalide."}), 400
         sid = str(raw_ref['summary_id'])
-        if not db[pcorg_summary.SUMMARIES_COLLECTION].find_one({"_id": sid}, {"_id": 1}):
+        sdoc = db[pcorg_summary.SUMMARIES_COLLECTION].find_one(
+            {"_id": sid}, {"sections.recommandations": 1, "sections_corrected.recommandations": 1})
+        if not sdoc:
             return jsonify({"success": False, "message": "Rapport IA introuvable."}), 404
+        reco_txt = (((sdoc.get("sections_corrected") or {}).get("recommandations") or {}).get("text")
+                    or (sdoc.get("sections") or {}).get("recommandations") or "")
+        n_bullets = sum(1 for ln in str(reco_txt).split("\n") if re.match(r"^\s*[-*]\s", ln))
+        if not 0 <= bidx < n_bullets:
+            return jsonify({"success": False, "message": "Recommandation invalide."}), 400
         reco_ref = {"summary_id": sid, "bullet_index": bidx}
     try:
         res = timeline_tasks.add_task(
