@@ -419,14 +419,38 @@ def _shift(hhmm, minutes):
     return f"{t // 60:02d}:{t % 60:02d}"
 
 
+def _flux_window(d):
+    """(minutes avant, minutes apres) l'heure de l'evenement."""
+    before, after = FLUX.get(d.get("source"), (90, 150))
+    if d.get("source") == "antares" and d.get("kind") in FLUX_KIND:
+        before, after = FLUX_KIND[d["kind"]]
+    return before, after
+
+
 def flux(d):
     """(debut des arrivees, fin estimee) 'HH:MM', ou ('', '') sans horaire."""
     if not d.get("time") or d.get("time_tbc"):
         return "", ""
-    before, after = FLUX.get(d.get("source"), (90, 150))
-    if d.get("source") == "antares" and d.get("kind") in FLUX_KIND:
-        before, after = FLUX_KIND[d["kind"]]
+    before, after = _flux_window(d)
     return _shift(d["time"], -before), _shift(d["time"], after)
+
+
+def flux_minutes(d):
+    """(debut des arrivees, fin estimee) en minutes depuis minuit du JOUR de
+    l'evenement, hors 0-1439 quand on passe minuit (spectacle a 23:59 : fin
+    vers 1589 = 02:29 le lendemain). None sans horaire."""
+    m = re.match(r"^(\d{2}):(\d{2})$", str(d.get("time") or ""))
+    if not m or d.get("time_tbc"):
+        return None
+    t = int(m.group(1)) * 60 + int(m.group(2))
+    before, after = _flux_window(d)
+    return t - before, t + after
+
+
+def _day_of(d, minute):
+    """Date ISO ou tombe `minute` (relative au jour de l'evenement) : la veille
+    ou le lendemain quand on passe minuit."""
+    return (date.fromisoformat(d["date"]) + timedelta(days=minute // 1440)).isoformat()
 
 
 def public_event(d):
@@ -461,13 +485,15 @@ def _vignettes(d):
     title = p["title"].replace("/", "-")
     activity = f"{venue} : {title}" if d.get("source") == "antares" else f"{title} ({venue})"
     arr, end = p["arrivals"], p["end_est"]
+    fm = flux_minutes(d)
     bits = ["Evenement voisin", venue, p["kind"]]
     if p["subtitle"]:
         bits.append(p["subtitle"])
     if p["time_tbc"]:
         bits.append("horaire a confirmer")
     if arr:
-        bits.append(f"arrivees du public des {arr} environ, fin estimee vers {end}")
+        bits.append(f"arrivees du public des {arr} environ{' (la veille)' if fm and fm[0] < 0 else ''}, "
+                    f"fin estimee vers {end}{' (le lendemain)' if fm and fm[1] >= 1440 else ''}")
     if d.get("sale_status") == "soon":
         bits.append("billetterie pas encore ouverte")
     bits.append({"antares": "source antaresarena.com", "msb": "source lnb.fr",
@@ -481,8 +507,12 @@ def _vignettes(d):
         "activity": activity[:200], "department": p["kind"],
         "remark": " | ".join(b.replace("/", "-") for b in bits if b)[:600],
         "voisins_role": "evenement", "voisins_time_tbc": p["time_tbc"]})]
-    if arr:
+    if arr and fm:
+        # Chaque flux est range a la date ou il COMMENCE : la sortie d'un
+        # spectacle de 23:59 est le lendemain, les arrivees d'un evenement a
+        # 00:30 la veille (sinon la timeline les affiche au petit matin du jour)
         out.append(dict(common, **{
+            "date": _day_of(d, fm[0]),
             "_id": _mk_id(d["_id"] + "|arrivees"), "start": arr, "end": p["time"],
             "duration": _duration(arr, p["time"]),
             "activity": f"Arrivées du public {venue} - {title}"[:200], "department": "Flux public",
@@ -490,6 +520,7 @@ def _vignettes(d):
                       f"(ordre de grandeur, pas une donnee de l'organisateur)".replace("/", "-")[:600],
             "voisins_role": "arrivees"}))
         out.append(dict(common, **{
+            "date": _day_of(d, fm[1]),
             "_id": _mk_id(d["_id"] + "|sortie"), "start": end, "end": _shift(end, 45),
             "duration": "00:45",
             "activity": f"Sortie du public {venue} - {title}"[:200], "department": "Flux public",
@@ -502,7 +533,8 @@ def _vignettes(d):
 def build_items(db, d_from, d_to):
     out = defaultdict(list)
     for d in active_events(db, d_from, d_to):
-        out[d["date"]].extend(_vignettes(d))
+        for v in _vignettes(d):
+            out[v["date"]].append(v)   # date de la vignette (flux apres minuit = lendemain)
     return out
 
 
@@ -522,9 +554,15 @@ def sync_timeline(db, now=None, dry_run=False):
     d_to = min(d_to, today + timedelta(days=MAX_FUTURE_DAYS))
     items = build_items(db, d_from, d_to)
     prune_before = (today - timedelta(days=KEEP_PAST_DAYS)).isoformat()
+    # La sortie d'un evenement de d_to peut tomber le lendemain : ce jour est
+    # ecrit aussi, mais seulement si aucun evenement connu n'y tombe (il serait
+    # remplace par un jeu incomplet). Sinon il le sera quand la fenetre avancera.
+    write_to = d_to
+    if not (last and last.get("date") and last["date"] > d_to.isoformat()):
+        write_to = d_to + timedelta(days=1)
     days_by_year = defaultdict(list)
     x = d_from
-    while x <= d_to:
+    while x <= write_to:
         days_by_year[x.year].append(x.isoformat())
         x += timedelta(days=1)
     docs = [MT._sync_year_doc(db, y, days, items, prune_before, dry_run, origin=ORIGIN)

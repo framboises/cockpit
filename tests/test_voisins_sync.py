@@ -253,6 +253,24 @@ def test_flux_vignettes_arrivals_and_exit():
     assert VS._shift("23:30", 45) == "00:15"
 
 
+def test_flux_after_midnight_go_to_the_right_day():
+    # Cas reel : NOCTURNE EXPERIENCE a Antares le samedi 24/10/2026 a 23:59,
+    # la sortie du public etait rangee le samedi a 02:29 au lieu du dimanche
+    d = {"_id": "antares|4811|2026-10-24T2359", "source": "antares", "venue": "antares",
+         "kind": "Evénement", "title": "NOCTURNE EXPERIENCE", "date": "2026-10-24", "time": "23:59", "status": "prevu"}
+    v = {it["voisins_role"]: it for it in VS._vignettes(d)}
+    assert (v["evenement"]["date"], v["evenement"]["start"], v["evenement"]["end"]) == ("2026-10-24", "23:59", "02:29")
+    assert (v["arrivees"]["date"], v["arrivees"]["start"]) == ("2026-10-24", "22:29")
+    assert (v["sortie"]["date"], v["sortie"]["start"], v["sortie"]["end"]) == ("2026-10-25", "02:29", "03:14")
+    assert "fin estimee vers 02:29 (le lendemain)" in v["evenement"]["remark"]
+    # Symetrique : evenement apres minuit, arrivees la veille
+    e = dict(d, _id="antares|1|2026-10-25T0030", date="2026-10-25", time="00:30")
+    w = {it["voisins_role"]: it for it in VS._vignettes(e)}
+    assert (w["arrivees"]["date"], w["arrivees"]["start"]) == ("2026-10-24", "23:00")
+    assert w["sortie"]["date"] == "2026-10-25" and "(la veille)" in w["evenement"]["remark"]
+    assert VS.flux_minutes(d) == (1349, 1589) and VS.flux_minutes(dict(d, time_tbc=True)) is None
+
+
 def test_public_event_projection_is_safe():
     d = dict(VS.parse_espn(ESPN)[0], url="javascript:alert(1)")
     p = VS.public_event(d)
