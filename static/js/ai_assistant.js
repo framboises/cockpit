@@ -2137,10 +2137,146 @@
         }, 80);
       });
       actions.appendChild(promote);
+      var taskBtn = el("button", {
+        type: "button",
+        class: "ai-bullet-promote-btn ai-bullet-task-btn",
+        title: "Transformer cette recommandation en tâche sur une vignette de la timeline"
+      }, [
+        el("span", { class: "material-symbols-outlined" }, ["add_task"]),
+        el("span", { text: "Tâche" })
+      ]);
+      taskBtn.addEventListener("click", function () {
+        openRecoTaskPicker(summary, idx, bulletText);
+      });
+      actions.appendChild(taskBtn);
       row.appendChild(actions);
+      row.setAttribute("data-bullet", String(idx));
       wrap.appendChild(row);
     });
+    loadRecoTasks(summary, wrap);
     return wrap;
+  }
+
+  // ----- Recommandation -> tache de la timeline -----
+  // La tache porte la reference de la recommandation : une fois faite, la
+  // recommandation passe automatiquement a "Appliquee".
+
+  var RECO_TASK_STATUS = { todo: "à faire", done: "faite", na: "sans objet", blocked: "bloquée" };
+
+  function loadRecoTasks(summary, wrap) {
+    if (!summary || !summary.id) return;
+    apiGetJson("/api/timeline-tasks/by-reco?summary_id=" + encodeURIComponent(summary.id)).then(function (res) {
+      if (!res || !res.success) return;
+      (res.tasks || []).forEach(function (t) {
+        var row = wrap.querySelector('.ai-bullet-row[data-bullet="' + t.bullet_index + '"]');
+        if (!row) return;
+        var when = t.date ? t.date.slice(8, 10) + "/" + t.date.slice(5, 7) : "";
+        var txt = "Tâche " + (RECO_TASK_STATUS[t.status] || t.status) +
+                  (t.status === "done" && t.done_by_name ? " par " + t.done_by_name : "") +
+                  " · " + (t.activity || "") + (when ? " (" + when + ")" : "");
+        row.appendChild(el("div", { class: "ai-bullet-task ai-bullet-task-" + t.status }, [
+          el("span", { class: "material-symbols-outlined" }, [t.status === "done" ? "task_alt" : "pending_actions"]),
+          el("span", { text: txt })
+        ]));
+      });
+    });
+  }
+
+  function _todayYmd() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function openRecoTaskPicker(summary, bulletIndex, bulletText) {
+    var ev = summary.event || selectedEventYear().event;
+    var yr = summary.year ? String(summary.year) : selectedEventYear().year;
+    if (!ev || !yr) { toast("Choisissez un événement pour rattacher la tâche.", "error"); return; }
+    var host = rootEl || document.body;
+    var old = host.querySelector(".ai-reco-picker");
+    if (old) old.remove();
+
+    var chosen = null;
+    var all = [];
+    var textArea = el("textarea", { class: "ai-reco-text", rows: "2", maxlength: "300" });
+    textArea.value = String(bulletText || "").replace(/\*\*/g, "").slice(0, 300);
+    var search = el("input", { type: "search", class: "ai-reco-search", placeholder: "Filtrer : porte, parking, activité..." });
+    var pastCb = el("input", { type: "checkbox" });
+    var pastLbl = el("label", { class: "ai-reco-past" }, [pastCb, el("span", { text: "Afficher les vignettes passées" })]);
+    var list = el("div", { class: "ai-reco-list" }, [el("p", { class: "ai-reco-muted", text: "Chargement des vignettes..." })]);
+    var createBtn = el("button", { type: "button", class: "ai-btn ai-btn-primary", disabled: "disabled" }, [
+      el("span", { class: "material-symbols-outlined" }, ["add_task"]), el("span", { text: "Créer la tâche" })
+    ]);
+    var closeBtn = el("button", { type: "button", class: "ai-btn" }, [el("span", { text: "Annuler" })]);
+    var box = el("div", { class: "ai-reco-picker", role: "dialog", "aria-label": "Créer une tâche" }, [
+      el("div", { class: "ai-reco-card" }, [
+        el("h4", { text: "Recommandation → tâche (" + ev + " " + yr + ")" }),
+        el("label", { class: "ai-reco-label", text: "Texte de la tâche" }), textArea,
+        el("label", { class: "ai-reco-label", text: "Vignette où la rattacher" }), search, pastLbl, list,
+        el("div", { class: "ai-reco-foot" }, [closeBtn, createBtn])
+      ])
+    ]);
+    host.appendChild(box);
+    closeBtn.addEventListener("click", function () { box.remove(); });
+    box.addEventListener("click", function (e) { if (e.target === box) box.remove(); });
+
+    function paint() {
+      clearChildren(list);
+      var q = search.value.trim().toLowerCase();
+      var today = _todayYmd();
+      var shown = all.filter(function (v) {
+        return (pastCb.checked || v.date >= today) && (!q || v.label.toLowerCase().indexOf(q) !== -1);
+      }).slice(0, 200);
+      if (!shown.length) {
+        list.appendChild(el("p", { class: "ai-reco-muted", text: pastCb.checked ? "Aucune vignette ne correspond." : "Aucune vignette à venir ne correspond (cocher « passées » pour rattacher à une vignette déjà passée)." }));
+        return;
+      }
+      shown.forEach(function (v) {
+        var b = el("button", { type: "button", class: "ai-reco-item" + (chosen === v.id ? " is-on" : "") + (v.date < today ? " is-past" : "") }, [
+          el("span", { class: "ai-reco-when", text: v.when }), el("span", { text: v.label })
+        ]);
+        b.addEventListener("click", function () { chosen = v.id; createBtn.removeAttribute("disabled"); paint(); });
+        list.appendChild(b);
+      });
+    }
+    search.addEventListener("input", paint);
+    pastCb.addEventListener("change", paint);
+
+    apiGetJson("/timetable?event=" + encodeURIComponent(ev) + "&year=" + encodeURIComponent(yr)).then(function (doc) {
+      Object.keys((doc && doc.data) || {}).forEach(function (date) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+        (doc.data[date] || []).forEach(function (v) {
+          if (!v || !v._id) return;
+          var start = (v.start && v.start !== "TBC") ? v.start : "";
+          all.push({
+            id: String(v._id), date: date, sort: date + " " + (start || "99:99"),
+            when: date.slice(8, 10) + "/" + date.slice(5, 7) + (start ? " " + start : ""),
+            label: (v.activity || "Sans titre") + (v.place ? " · " + v.place : "")
+          });
+        });
+      });
+      all.sort(function (a, b) { return a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0; });
+      paint();
+    });
+
+    createBtn.addEventListener("click", function () {
+      var text = textArea.value.trim();
+      if (!text || !chosen) return;
+      createBtn.setAttribute("disabled", "disabled");
+      apiPostJson("/api/timeline-tasks", {
+        event: ev, year: yr, vignette_id: chosen, text: text,
+        reco_ref: { summary_id: summary.id, bullet_index: bulletIndex }
+      }).then(function (res) {
+        if (!res || !res.success) {
+          toast((res && res.message) || "Tâche non créée.", "error");
+          createBtn.removeAttribute("disabled");
+          return;
+        }
+        toast("Tâche créée sur la timeline.", "success");
+        box.remove();
+        if (typeof window.refreshTimetablePreservingScroll === "function") window.refreshTimetablePreservingScroll();
+        if (state.current && state.current.id === summary.id) renderSummary(state.current, { keepTab: true });
+      });
+    });
   }
 
   // ---------- Open / close ----------

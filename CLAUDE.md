@@ -142,6 +142,7 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne AVANT de modifier le code du domaine** : il porte les pieges verifies, les conventions de donnees et les regles non negociables (PMV notamment).
 
 - `docs/claude/timeline.md` : Timeline v2 de l'accueil (vignettes compactes par heure, passe replie, indicateurs de jour des epreuves via la mecanique SAISON, recherche derriere une loupe, mode TV, gabarit en cache)
+- `docs/claude/taches.md` : Taches de preparation des vignettes (collection timeline_tasks, chaine `todo` = vue calculee, merge qui ne touche jamais les ajouts manuels, tracabilite, recommandation IA -> tache, historique entre editions, analyse et suggestions IA sur les modeles)
 - `docs/claude/waze.md` : Publication des fermetures du moteur d'itineraire vers Waze for Cities (flux CIFS public en Basic auth, horaires, desynchronisation avec les regles, jamais de flux vide sur panne)
 - `docs/claude/vision.md` : Integration Vision (tablettes scan billets vehicule, JWT RS256, CORS, sync Firestore facturee)
 - `docs/claude/ia-resume-pcorg.md` : Assistant IA : resume de periode pcorg, rapport matinal, couts et budget IA, prompt caching

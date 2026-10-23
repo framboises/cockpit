@@ -85,38 +85,20 @@ def _reset_todos_cache():
 
 
 def _get_todos_cache(db) -> dict:
-    """Charge les todos. Retourne {type: [{text, phase, control}, ...]}.
+    """Charge les todos. Retourne {type: [{id, text, phase, control,
+    critical, due_offset_min, origin}, ...]} (timeline_tasks.normalize_template_items).
 
     'control' vaut 'controle', 'libre' ou 'both' (defaut) : permet de cibler
     une tache selon le mode d'acces (dayControl) de l'item a l'ouverture.
+    'id' identifie l'item : c'est par lui que les taches de la collection
+    timeline_tasks sont rattachees au modele.
     """
     global _TODOS_CACHE
     if _TODOS_CACHE is not None:
         return _TODOS_CACHE
     try:
-        _TODOS_CACHE = {}
-        for doc in db.todos.find({}, {"type": 1, "todos": 1}):
-            t = doc.get("type")
-            raw = doc.get("todos") or []
-            items = []
-            for x in raw:
-                if isinstance(x, str):
-                    if x.strip():
-                        items.append({"text": x.strip(), "phase": "open",
-                                      "control": "both"})
-                elif isinstance(x, dict):
-                    text = str(x.get("text", "")).strip()
-                    phase = x.get("phase", "both")
-                    if phase not in ("open", "close", "both",
-                                     "switch_control", "switch_free"):
-                        phase = "both"
-                    control = x.get("control", "both")
-                    if control not in ("controle", "libre", "both"):
-                        control = "both"
-                    if text:
-                        items.append({"text": text, "phase": phase,
-                                      "control": control})
-            _TODOS_CACHE[t] = items
+        import timeline_tasks
+        _TODOS_CACHE = timeline_tasks.load_templates(db)
     except Exception as e:
         logger.error(f"Impossible de charger la collection 'todos': {e}")
         _TODOS_CACHE = {}
@@ -192,7 +174,7 @@ def _filter_todos_by_phase(todos_items: list, phase: str,
             t_ctrl = t.get("control") or "both"
             if t_ctrl != "both" and t_ctrl != (control or ""):
                 continue
-        out.append(t["text"])
+        out.append(t)
     return out
 
 
@@ -200,11 +182,17 @@ def _attach_todos_str(vignette: dict, base_activity: str, category: str,
                       place: str, db=None, config_todos_type: str = None,
                       phase: str = "open") -> dict:
     """Attache les todos sous forme de string markdown sur la vignette.
-    phase: 'open' pour vignette ouverture, 'close' pour fermeture."""
+    phase: 'open' pour vignette ouverture, 'close' pour fermeture.
+
+    Pose aussi `_task_tpl` (items du modele retenus, liste vide si le type
+    est connu mais sans tache pour cette phase) : update_timetable_document
+    le retire avant ecriture et le transmet a timeline_tasks.apply_merge."""
     try:
         todo_type = config_todos_type or _resolve_todo_type(base_activity, category, place)
         if not todo_type:
             return vignette
+        vignette["_task_tpl"] = []
+        vignette["todos_type"] = todo_type
         cache = _get_todos_cache(db) if db is not None else {}
         todos_items = cache.get(todo_type) or []
         if not todos_items:
@@ -215,8 +203,8 @@ def _attach_todos_str(vignette: dict, base_activity: str, category: str,
         filtered = _filter_todos_by_phase(todos_items, phase, control)
         if not filtered:
             return vignette
-        vignette["todo"] = _build_todo_string(filtered)
-        vignette["todos_type"] = todo_type
+        vignette["todo"] = _build_todo_string([t["text"] for t in filtered])
+        vignette["_task_tpl"] = filtered
     except Exception as e:
         logger.error(f"_attach_todos_str ({base_activity}/{category}/{place}): {e}")
     return vignette
@@ -924,10 +912,15 @@ PARAM_FIELDS = {
 
 
 def _merge_todos(old_todo_str: str, new_todo_str: str) -> str:
-    """Fusionne les todos : preserve l'etat coche, ajoute les nouveaux, retire les supprimes.
+    """Fusionne les todos : preserve l'etat coche, ajoute les nouveaux.
 
     old_todo_str: string markdown existant dans la vignette (avec etats coches)
     new_todo_str: string markdown genere par le merge (tout non coche)
+
+    Repli seulement : la verite est la collection timeline_tasks, dont
+    apply_merge reecrit ensuite la chaine. Si ce chemin echoue, la chaine
+    garde les lignes absentes du modele (ajouts d'operateur ou items
+    retires du modele) : mieux vaut une ligne de trop qu'un ajout perdu.
 
     Retourne le string fusionne.
     """
@@ -953,7 +946,11 @@ def _merge_todos(old_todo_str: str, new_todo_str: str) -> str:
         mark = "x" if done else " "
         result.append(f"- [{mark}] {task['text']}")
 
-    # Les taches supprimees du merge sont retirees (meme si cochees)
+    new_texts = {t["text"] for t in new_tasks}
+    for task in old_tasks:
+        if task["text"] not in new_texts:
+            mark = "x" if task["done"] else " "
+            result.append(f"- [{mark}] {task['text']}")
     return "\n".join(result)
 
 
@@ -1026,12 +1023,24 @@ def update_timetable_document(event, year, vignettes, db=None):
         return
 
     timetable_col = db.timetable
+    # Reprise des chaines `todo` en taches AVANT tout patch : elle lit les
+    # etats coches tels que les operateurs les ont laisses.
+    tasks_ok = True
+    try:
+        import timeline_tasks
+        timeline_tasks.ensure_migrated(db, event, year)
+    except Exception:
+        tasks_ok = False
+        logger.exception("Reprise des taches impossible pour %s %s : chaines conservees", event, year)
     timetable_doc = timetable_col.find_one({"event": event, "year": year})
     if not timetable_doc:
-        timetable_doc = {"event": event, "year": year, "data": {}}
+        timetable_doc = {"event": event, "year": year, "data": {},
+                         "tasks_migrated_at": datetime.now(timezone.utc)}
         logger.info("Creation d'un nouveau document timetable")
 
     data_field = timetable_doc.get("data", {})
+    # Items du modele de taches par vignette (pose par _attach_todos_str)
+    task_entries = {}
 
     # Set des IDs generes pour le nettoyage des orphelines
     generated_ids = set()
@@ -1051,6 +1060,7 @@ def update_timetable_document(event, year, vignettes, db=None):
         generated_ids.add(vid)
         data_field.setdefault(date_key, [])
         items = data_field[date_key]
+        tpl = v.pop("_task_tpl", None)
 
         # Chercher par _id
         idx = next((i for i, x in enumerate(items) if x.get("_id") == vid), None)
@@ -1058,6 +1068,7 @@ def update_timetable_document(event, year, vignettes, db=None):
         if idx is not None:
             # Patch partiel
             items[idx] = _patch_vignette(items[idx], v)
+            stored = items[idx]
         else:
             # Fallback : chercher par (param_id, activity) parmi les anciennes vignettes
             idx2 = next((i for i, x in enumerate(items)
@@ -1066,9 +1077,13 @@ def update_timetable_document(event, year, vignettes, db=None):
                          and x.get("_id") not in generated_ids), None)
             if idx2 is not None:
                 items[idx2] = _patch_vignette(items[idx2], v)
+                stored = items[idx2]
             else:
                 # Nouvelle vignette
                 items.append(v)
+                stored = v
+        if tpl is not None:
+            task_entries[str(stored.get("_id"))] = {"vignette": stored, "tpl": tpl}
 
     # Nettoyage des orphelines : supprimer les vignettes origin=parametrage
     # dont l'ID n'est pas dans le set genere. Les vignettes manuelles et
@@ -1078,8 +1093,12 @@ def update_timetable_document(event, year, vignettes, db=None):
     # ⚠️ Lecture-reecriture du document entier : une ecriture momentus
     # concurrente (quelques ms, une fois par heure) peut etre perdue ; la
     # synchro suivante la retablit.
+    removed_ids = []
     for date_key in list(data_field.keys()):
         items = data_field[date_key]
+        removed_ids.extend(str(item.get("_id")) for item in items
+                           if item.get("origin") == "parametrage"
+                           and item.get("_id") not in generated_ids)
         data_field[date_key] = [
             item for item in items
             if item.get("origin") != "parametrage"
@@ -1090,6 +1109,16 @@ def update_timetable_document(event, year, vignettes, db=None):
             del data_field[date_key]
 
     timetable_doc["data"] = data_field
+    for rid in removed_ids:
+        task_entries.pop(rid, None)
+    # Taches : synchro du modele dans timeline_tasks (les ajouts manuels ne
+    # sont jamais touches) puis chaines `todo` reecrites depuis la collection.
+    if tasks_ok:
+        try:
+            timeline_tasks.apply_merge(db, event, year, timetable_doc, task_entries, removed_ids)
+        except Exception:
+            logger.exception("Synchro des taches impossible pour %s %s : chaines fusionnees conservees",
+                             event, year)
     # version est gere par $inc, ne pas le repousser via $set (conflit Mongo)
     timetable_doc.pop("version", None)
     timetable_col.update_one(
@@ -1107,6 +1136,11 @@ def update_timetable_document(event, year, vignettes, db=None):
 def run_merge(db, event: str, year: str):
     """Point d'entree principal. Appele depuis app.py ou en standalone."""
     _reset_todos_cache()
+    try:
+        import timeline_tasks
+        timeline_tasks.ensure_template_ids(db)
+    except Exception as e:
+        logger.warning("Ids des modeles de taches non ecrits : %s", e)
     logger.info(f"Debut merge pour {event} {year}")
 
     parametrage_doc = db.parametrages.find_one({"event": event, "year": year})

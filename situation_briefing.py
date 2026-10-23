@@ -636,7 +636,18 @@ def src_timetable(db, event, year, now_utc):
         "lieu": _trunc(it.get("place"), 80) or None,
         "categorie": it.get("category") or None,
         "remarque": _trunc(it.get("remark"), 120) or None,
+        "taches": it.get("taches") or None,
     } for it in items[:25]]}
+
+
+def src_taches(db, event, year, now_utc):
+    """Taches de preparation en retard (echeance passee), bloquees, et
+    critiques a venir (collection timeline_tasks, 12 h en arriere, 6 h en avant)."""
+    if not event or year is None:
+        raise ValueError("evenement non determine")
+    import timeline_tasks
+    return timeline_tasks.open_and_late(db, event, year, now_utc=now_utc,
+                                        ahead_hours=UPCOMING_HOURS)
 
 
 SOURCE_LABELS = {
@@ -647,6 +658,7 @@ SOURCE_LABELS = {
     "meteo": "Meteo",
     "field": "Tablettes Field",
     "timetable": "Timetable",
+    "taches": "Taches de preparation",
 }
 
 
@@ -687,6 +699,7 @@ def build_context(db, now=None, event=None, year=None, sources=None):
         "meteo": (src_meteo, (db, now_utc)),
         "field": (src_field, (db, event, year, now_utc)),
         "timetable": (src_timetable, (db, event, year, now_utc)),
+        "taches": (src_taches, (db, event, year, now_utc)),
     }
     if sources:
         for name, fn in sources.items():
@@ -727,10 +740,10 @@ REGLES D'ANCRAGE (non negociables) :
 
 FORMAT DE SORTIE : un objet JSON strict, sans texte autour, avec exactement ces 5 cles, chaque valeur etant une chaine :
 - "situation" : 3 a 5 lignes. Etat general (activite main courante, alertes, presents, trafic, meteo) et tendance.
-- "points_chauds" : puces "- " : ce qui demande une action ou une attention maintenant (fiches majeures ouvertes et anciennes, alertes non prises en charge, SOS, axe critique, consigne meteo). Si rien : "- Aucun point chaud dans les donnees fournies."
+- "points_chauds" : puces "- " : ce qui demande une action ou une attention maintenant (fiches majeures ouvertes et anciennes, alertes non prises en charge, SOS, axe critique, consigne meteo, taches de preparation en retard ou bloquees, critiques d'abord, avec le lieu et le motif du blocage). Si rien : "- Aucun point chaud dans les donnees fournies."
 - "a_surveiller_6h" : puces "- " : jalons timetable, meteo, pic de frequentation attendu, dans les 6 prochaines heures, avec l'heure.
 - "ressources" : puces "- " : tablettes engagees / disponibles / hors ligne, sur quoi elles sont engagees.
-- "consignes_releve" : puces "- " : ce que l'equipe sortante doit transmettre explicitement (dossiers en cours, fiches a suivre, engagements en cours, points non resolus).
+- "consignes_releve" : puces "- " : ce que l'equipe sortante doit transmettre explicitement (dossiers en cours, fiches a suivre, engagements en cours, taches bloquees ou en retard, points non resolus).
 
 Pour les listes, separe les puces par des retours a la ligne commencant par "- "."""
 

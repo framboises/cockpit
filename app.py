@@ -55,6 +55,7 @@ from ai_reports import ai_reports_bp
 from alert_ai import alert_ai_bp
 import pcorg_summary
 import pcorg_summary_mail
+import timeline_tasks
 import pcorg_ai_memory
 import alfred
 from alfred import alfred_bp
@@ -1260,6 +1261,9 @@ def get_timetable():
                                  if not re.match(r"^\d{4}-\d{2}-\d{2}$", d) or lo <= d <= hi}
         timetable_doc["window"] = {"from": lo, "to": hi}
 
+    # Taches de preparation (collection timeline_tasks) : `tasks` sur chaque
+    # vignette ; la chaine `todo` reste la vue de repli.
+    timeline_tasks.attach_tasks(db, event, year, timetable_doc)
     return jsonify(timetable_doc)
 
 @app.route('/get_parametrage', methods=['GET'])
@@ -1520,6 +1524,13 @@ def delete_timetable_category():
     )
     return jsonify({"ok": True})
 
+def _task_user():
+    """Auteur d'une action sur une tache (tracabilite)."""
+    p = getattr(request, 'user_payload', {}) or {}
+    name = (str(p.get('firstname') or '') + ' ' + str(p.get('lastname') or '')).strip()
+    return {"email": p.get('email') or '', "name": name or p.get('email') or ''}
+
+
 # -------------------------------------------------------------------------------
 # Validation commune ajout / edition d'une vignette timetable
 # -------------------------------------------------------------------------------
@@ -1639,11 +1650,20 @@ def add_timetable_event():
 
         # upsert : cree le document event/year s'il n'existe pas encore.
         # $push cree la cle de date si elle est absente.
+        tpay = timeline_tasks.editor_payload(data)
+        event_details["todo"] = timeline_tasks.render_todo_str([
+            {"text": it["text"], "status": "done" if it.get("done") else "todo"}
+            for it in (tpay or {}).get("items", []) if (it.get("text") or "").strip()])
         db.timetable.update_one(
             {"event": event_name, "year": year},
             {"$push": {f"data.{date}": event_details}, "$inc": {"version": 1}},
             upsert=True,
         )
+        if tpay and tpay["items"]:
+            try:
+                timeline_tasks.sync_editor(db, event_name, year, event_details["_id"], tpay, _task_user())
+            except Exception:
+                logger.exception("Taches de la nouvelle vignette non enregistrees")
         return jsonify({"success": True, "message": "Événement ajouté avec succès.",
                         "_id": event_details["_id"]})
     except Exception as e:
@@ -1695,16 +1715,24 @@ def update_timetable_event():
             # Champs operateur uniquement. L'origine reste inchangee.
             remark = data.get("remark")
             remark = existing.get("remark", "") if remark is None else str(remark).rstrip()
-            todo = data.get("todo")
-            todo = existing.get("todo", "") if todo is None else str(todo).rstrip()
-            if len(remark) > _TT_TEXT_LIMITS["remark"] or len(todo) > _TT_TEXT_LIMITS["todo"]:
+            if len(remark) > _TT_TEXT_LIMITS["remark"] or len(str(data.get("todo") or "")) > _TT_TEXT_LIMITS["todo"]:
                 return jsonify({"success": False, "message": "Remarque ou taches trop longues."}), 400
-            prep = str(data.get("preparation_checked", existing.get("preparation_checked", "")) or "").lower()
-            set_ops = {
-                f"data.{found_date}.{idx}.remark": remark,
-                f"data.{found_date}.{idx}.todo": todo,
-                f"data.{found_date}.{idx}.preparation_checked": prep if prep in _TT_PREP_VALUES else "",
-            }
+            # Taches : `tasks` (editeur) ou chaine `todo` (anciens clients),
+            # appliquees a la collection qui reecrit la chaine et le statut.
+            tpay = timeline_tasks.editor_payload(data)
+            tasks_changed = False
+            if tpay is not None:
+                try:
+                    tasks_changed = timeline_tasks.sync_editor(
+                        db, event_name, year, ev_id, tpay, _task_user()) is not None
+                except timeline_tasks.TaskError as te:
+                    return jsonify({"success": False, "message": str(te)}), te.status
+            set_ops = {f"data.{found_date}.{idx}.remark": remark}
+            if not tasks_changed:
+                # Statut saisi a la main ; s'il vient d'etre deduit des taches,
+                # celui-ci l'emporte (le client envoie l'ancien).
+                prep = str(data.get("preparation_checked", existing.get("preparation_checked", "")) or "").lower()
+                set_ops[f"data.{found_date}.{idx}.preparation_checked"] = prep if prep in _TT_PREP_VALUES else ""
             if remark != (existing.get("remark") or ""):
                 # merge._patch_vignette conserve alors la remarque de l'operateur
                 set_ops[f"data.{found_date}.{idx}.remark_manual"] = True
@@ -1718,6 +1746,17 @@ def update_timetable_event():
 
         target_date = fields.pop("date")
         fields["origin"] = "manual-edit"
+        # Taches : la collection fait foi, la chaine est reecrite apres coup
+        fields.pop("todo", None)
+        tpay = timeline_tasks.editor_payload(data)
+
+        def _sync_tasks():
+            try:
+                if tpay is not None:
+                    timeline_tasks.sync_editor(db, event_name, year, ev_id, tpay, _task_user())
+                timeline_tasks.update_context(db, event_name, year, ev_id)
+            except Exception:
+                logger.exception("Taches de la vignette %s non synchronisees", ev_id)
 
         # Date changee -> on deplace l'objet mis a jour
         if found_date != target_date:
@@ -1736,10 +1775,12 @@ def update_timetable_event():
                 {"_id": doc["_id"], f"data.{found_date}": {"$size": 0}},
                 {"$unset": {f"data.{found_date}": ""}}
             )
+            _sync_tasks()
             return jsonify({"success": True, "message": "Événement déplacé et mis à jour."})
 
         set_ops = {f"data.{found_date}.{idx}.{k}": v for k, v in fields.items()}
         db.timetable.update_one({"_id": doc["_id"]}, {"$set": set_ops, "$inc": {"version": 1}})
+        _sync_tasks()
         return jsonify({"success": True, "message": "Événement mis à jour."})
 
     except Exception as e:
@@ -1775,6 +1816,10 @@ def delete_timetable_event():
             {"event": event_name, "year": year, f"data.{date}": {"$size": 0}},
             {"$unset": {f"data.{date}": ""}}
         )
+        try:
+            timeline_tasks.delete_for_vignette(db, event_name, year, ev_id)
+        except Exception:
+            logger.exception("Taches de la vignette supprimee %s non effacees", ev_id)
         return jsonify({"success": True, "message": "Événement supprimé."})
     except Exception as e:
         logger.error("Erreur delete_timetable_event: %s", e)
@@ -1821,10 +1866,15 @@ def duplicate_timetable_event():
         if target_date == date:
             new_ev["activity"] = f"{src.get('activity') or ''} (copie)".strip()
 
+        new_ev.pop("tasks", None)
         db.timetable.update_one(
             {"_id": doc["_id"]},
             {"$push": {f"data.{target_date}": new_ev}, "$inc": {"version": 1}}
         )
+        try:
+            timeline_tasks.copy_tasks(db, event_name, year, ev_id, new_ev["_id"], _task_user())
+        except Exception:
+            logger.exception("Taches de la vignette dupliquee non copiees")
         return jsonify({"success": True, "message": "Événement dupliqué.", "new_id": new_ev["_id"]})
     except Exception as e:
         logger.error("Erreur duplicate_timetable_event: %s", e)
@@ -4044,32 +4094,17 @@ COL_TODOS = db['todos']  # schema: { type:str, todos:[{text:str, phase:str}], cr
 
 # Helpers
 
-_VALID_PHASES = {"open", "close", "both", "switch_control", "switch_free"}
-_VALID_CONTROLS = {"controle", "libre", "both"}
-
-def _normalize_todos(raw_todos):
-    """Normalise les todos en [{text, phase, control}]. Accepte l'ancien format [str].
+def _normalize_todos(raw_todos, todos_type=""):
+    """Normalise les todos en [{id, text, phase, control, critical,
+    due_offset_min, origin}] (timeline_tasks.normalize_template_items).
+    Accepte l'ancien format [str].
 
     'control' ('controle'|'libre'|'both') cible une tache selon le mode d'acces
     de l'item a l'ouverture/fermeture. Defaut 'both' (s'applique aux deux modes).
+    'id' doit etre renvoye tel quel par l'editeur : c'est lui qui rattache les
+    taches deja creees sur les vignettes (etat, auteur) a l'item modifie.
     """
-    result = []
-    for item in (raw_todos or []):
-        if isinstance(item, str):
-            text = item.strip()
-            if text:
-                result.append({"text": text, "phase": "open", "control": "both"})
-        elif isinstance(item, dict):
-            text = str(item.get("text", "")).strip()
-            phase = item.get("phase", "both")
-            if phase not in _VALID_PHASES:
-                phase = "both"
-            control = item.get("control", "both")
-            if control not in _VALID_CONTROLS:
-                control = "both"
-            if text:
-                result.append({"text": text, "phase": phase, "control": control})
-    return result
+    return timeline_tasks.normalize_template_items(raw_todos, todos_type)
 
 def _pub(doc):
     if not doc: return None
@@ -4089,6 +4124,7 @@ def _pub(doc):
 @role_required("manager")
 
 def list_todo_sets():
+    timeline_tasks.ensure_template_ids(db)
     q = {}
     t = request.args.get('type')
     if t: q['type'] = t
@@ -4112,7 +4148,7 @@ def create_todo_set():
     typ = (data.get('type') or '').strip()
     if not typ:
         return jsonify({'error':'type is required'}), 400
-    todos = _normalize_todos(data.get('todos'))
+    todos = _normalize_todos(data.get('todos'), typ)
     doc = {
         'type': typ,
         'todos': todos,
@@ -4133,7 +4169,8 @@ def update_todo_set(id):
     if 'type' in data:
         patch['type'] = (data.get('type') or '').strip()
     if 'todos' in data:
-        patch['todos'] = _normalize_todos(data.get('todos'))
+        cur = COL_TODOS.find_one({'_id': ObjectId(id)}, {'type': 1}) or {}
+        patch['todos'] = _normalize_todos(data.get('todos'), patch.get('type') or cur.get('type') or '')
     if not patch: return jsonify({'error':'Empty update'}), 400
     patch['updatedAt'] = datetime.now(timezone.utc)
     res = COL_TODOS.find_one_and_update({'_id': ObjectId(id)}, {'$set': patch}, return_document=True)
@@ -4177,6 +4214,142 @@ def delete_todo_item(id, idx):
         {'_id': ObjectId(id)}, {'$set': {'todos': arr, 'updatedAt': datetime.now(timezone.utc)}}, return_document=True
     )
     return jsonify(_pub(res))
+
+################################################################################
+# Taches de preparation des vignettes (collection timeline_tasks)
+################################################################################
+
+def _tt_task_error(e):
+    return jsonify({"success": False, "message": str(e)}), getattr(e, "status", 400)
+
+
+@app.route('/api/timeline-tasks', methods=['POST'])
+@role_required("user")
+def timeline_task_create():
+    """Ajoute une tache a une vignette. Avec `reco_ref` {summary_id,
+    bullet_index} : tache issue d'une recommandation de l'Assistant IA
+    (faite -> recommandation marquee appliquee)."""
+    data = request.get_json(silent=True) or {}
+    event_name, year = _tt_event_year(data)
+    vid = str(data.get('vignette_id') or '')
+    if not event_name or not year or not vid:
+        return jsonify({"success": False, "message": "Paramètres manquants (event/year/vignette_id)."}), 400
+    reco_ref = None
+    raw_ref = data.get('reco_ref')
+    if isinstance(raw_ref, dict) and raw_ref.get('summary_id'):
+        try:
+            bidx = int(raw_ref.get('bullet_index'))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "Recommandation invalide."}), 400
+        sid = str(raw_ref['summary_id'])
+        if not db[pcorg_summary.SUMMARIES_COLLECTION].find_one({"_id": sid}, {"_id": 1}):
+            return jsonify({"success": False, "message": "Rapport IA introuvable."}), 404
+        reco_ref = {"summary_id": sid, "bullet_index": bidx}
+    try:
+        res = timeline_tasks.add_task(
+            db, event_name, year, vid, data.get('text'), _task_user(),
+            source="ia_reco" if reco_ref else "manual", reco_ref=reco_ref,
+            note=data.get('note'), critical=bool(data.get('critical')))
+    except timeline_tasks.TaskError as e:
+        return _tt_task_error(e)
+    return jsonify(dict(res, success=True))
+
+
+@app.route('/api/timeline-tasks/<task_id>/status', methods=['POST'])
+@role_required("user")
+def timeline_task_status(task_id):
+    """Statut d'une tache : todo | done | na (sans objet) | blocked (motif requis)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        res = timeline_tasks.set_status(db, task_id, str(data.get('status') or ''),
+                                        _task_user(), note=data.get('note'))
+    except timeline_tasks.TaskError as e:
+        return _tt_task_error(e)
+    return jsonify(dict(res, success=True))
+
+
+@app.route('/api/timeline-tasks/<task_id>', methods=['PATCH'])
+@role_required("user")
+def timeline_task_edit(task_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        res = timeline_tasks.edit_task(
+            db, task_id, _task_user(), text=data.get('text'), note=data.get('note'),
+            critical=data.get('critical') if 'critical' in data else None)
+    except timeline_tasks.TaskError as e:
+        return _tt_task_error(e)
+    return jsonify(dict(res, success=True))
+
+
+@app.route('/api/timeline-tasks/<task_id>', methods=['DELETE'])
+@role_required("user")
+def timeline_task_delete(task_id):
+    try:
+        res = timeline_tasks.delete_task(db, task_id, _task_user())
+    except timeline_tasks.TaskError as e:
+        return _tt_task_error(e)
+    return jsonify(dict(res, success=True))
+
+
+@app.route('/api/timeline-tasks/history', methods=['GET'])
+@role_required("user")
+def timeline_task_history():
+    """Meme creneau (activite + lieu) aux autres editions, tous evenements."""
+    event_name = request.args.get('event') or ''
+    year = request.args.get('year') or ''
+    vid = request.args.get('vignette_id') or ''
+    if not event_name or not year or not vid:
+        return jsonify({"success": False, "message": "Paramètres manquants."}), 400
+    try:
+        res = timeline_tasks.vignette_history(db, event_name, year, vid)
+    except timeline_tasks.TaskError as e:
+        return _tt_task_error(e)
+    return jsonify(dict(res, success=True))
+
+
+@app.route('/api/timeline-tasks/by-reco', methods=['GET'])
+@role_required("manager")
+def timeline_task_by_reco():
+    """Taches creees depuis les recommandations d'un rapport IA."""
+    sid = request.args.get('summary_id') or ''
+    out = []
+    for t in db[timeline_tasks.COLLECTION].find({"reco_ref.summary_id": sid, "deleted": {"$ne": True}},
+                                                {"history": 0}):
+        out.append(dict(timeline_tasks.public_task(t),
+                        bullet_index=(t.get("reco_ref") or {}).get("bullet_index"),
+                        activity=t.get("activity"), place=t.get("place"), date=t.get("date")))
+    return jsonify({"success": True, "tasks": out})
+
+
+@app.route('/api/todo-sets/<id>/insights', methods=['GET'])
+@role_required("manager")
+def todo_set_insights(id):
+    """Usage reel d'un modele sur les editions passees + recommandations RETEX."""
+    doc = COL_TODOS.find_one({'_id': ObjectId(id)})
+    if not doc:
+        return jsonify({'error': 'Not found'}), 404
+    res = timeline_tasks.template_insights(db, doc.get('type'))
+    roles = (getattr(request, 'user_payload', {}) or {}).get('roles') or []
+    res['retex'] = timeline_tasks.retex_recommendations(db) if 'admin' in roles else []
+    return jsonify(res)
+
+
+@app.route('/api/todo-sets/<id>/ai-suggest', methods=['POST'])
+@role_required("admin")
+def todo_set_ai_suggest(id):
+    """Propositions IA d'evolution d'un modele (appel facture, budget IA)."""
+    doc = COL_TODOS.find_one({'_id': ObjectId(id)})
+    if not doc:
+        return jsonify({'ok': False, 'error': 'Not found'}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        res = timeline_tasks.suggest_template_changes(db, doc, model=data.get('model'))
+    except pcorg_summary.ClaudeError as e:
+        code = str(e)
+        status = 429 if code == "budget_exceeded" else (503 if "non configuree" in code else 502)
+        return jsonify({'ok': False, 'error': code}), status
+    return jsonify({'ok': True, 'propositions': res['propositions'], 'model': res['model']})
+
 
 @app.route('/config/todos')
 @role_required("admin")

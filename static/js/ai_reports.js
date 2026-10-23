@@ -16,9 +16,10 @@
     trafic: "Trafic",
     meteo: "Meteo",
     field: "Tablettes Field",
-    timetable: "Timetable (6 h)"
+    timetable: "Timetable (6 h)",
+    taches: "Taches de preparation"
   };
-  var SOURCE_ORDER = ["main_courante", "alertes", "presents", "trafic", "meteo", "field", "timetable"];
+  var SOURCE_ORDER = ["main_courante", "alertes", "presents", "trafic", "meteo", "field", "timetable", "taches"];
   var BRIEF_SECTIONS = [
     ["situation", "Situation"],
     ["points_chauds", "Points chauds"],
@@ -339,8 +340,24 @@
     },
     timetable: function (d) {
       return [list(d.vignettes, function (x) {
-        return el("span", null, [el("b", { text: (x.heure || "") + " " }), document.createTextNode((x.activite || "") + (x.lieu ? " - " + x.lieu : ""))]);
+        var t = x.taches ? " (taches " + x.taches.faites + "/" + x.taches.total + ")" : "";
+        return el("span", null, [el("b", { text: (x.heure || "") + " " }), document.createTextNode((x.activite || "") + (x.lieu ? " - " + x.lieu : "") + t)]);
       }, "aucune vignette dans les 6 prochaines heures")];
+    },
+    taches: function (d) {
+      var line = function (x) {
+        return el("span", null, [
+          el("b", { text: (x.echeance || "").slice(11) + " " }),
+          x.critique ? el("span", { "class": "air-tag", text: "critique" }) : null,
+          document.createTextNode(" " + (x.tache || "") + " - " + (x.vignette || "") + (x.lieu ? " [" + x.lieu + "]" : "") + (x.motif ? " : " + x.motif : ""))
+        ]);
+      };
+      return [
+        el("div", { "class": "air-kvs" }, [kv("En retard", d.total_en_retard, "air-strong"), kv("Bloquees", d.total_bloquees)]),
+        el("h5", { text: "En retard" }), list(d.en_retard, line, "aucune tache en retard"),
+        el("h5", { text: "Bloquees" }), list(d.bloquees, line, "aucune tache bloquee"),
+        el("h5", { text: "Critiques a venir (6 h)" }), list(d.critiques_a_venir, line, "aucune")
+      ];
     }
   };
 

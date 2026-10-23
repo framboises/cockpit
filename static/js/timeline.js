@@ -197,22 +197,100 @@ function serializeTodo(items) {
     .join('\n');
 }
 
+// --- Taches structurees (collection timeline_tasks) ---
+// /timetable envoie item.tasks : [{id, text, status (todo|done|na|blocked),
+// source, template, critical, due_at, note, done_by_name, done_at,
+// status_by_name, status_at, reco}]. Repli sur la chaine item.todo (taches
+// sans id) si la collection n'a pas repondu.
+const TASK_RESOLVED = { done: true, na: true };
+
+function tasksOf(item) {
+  if (item && Array.isArray(item.tasks)) {
+    return item.tasks.map(t => Object.assign({}, t, { done: !!TASK_RESOLVED[t.status] }));
+  }
+  return splitTodo(item?.todo || "").map(t => ({ id: null, text: t.text, done: t.done, status: t.done ? 'done' : 'todo' }));
+}
+
+// Heure courante de la timeline (simulation comprise) au format des echeances
+function _tlNowKey() {
+  const d = TimelineClock.get();
+  return ymdLocal(d) + 'T' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function taskIsLate(t, nowKey) {
+  return !!(t.due_at && (t.status === 'todo' || t.status === 'blocked') && t.due_at < (nowKey || _tlNowKey()));
+}
+
+function _tlFmtStamp(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Ligne de tracabilite d'une tache (qui, quand, echeance, note)
+function taskMetaText(t, nowKey) {
+  const parts = [];
+  if (t.status === 'done') parts.push('Faite' + (t.done_by_name ? ' par ' + t.done_by_name : '') + (t.done_at ? ' le ' + _tlFmtStamp(t.done_at) : ''));
+  if (t.status === 'na') parts.push('Sans objet' + (t.status_by_name ? ' (' + t.status_by_name + ')' : ''));
+  if (t.status === 'blocked') parts.push('Bloquée' + (t.status_by_name ? ' par ' + t.status_by_name : ''));
+  if (t.due_at && !TASK_RESOLVED[t.status]) {
+    parts.push('Échéance ' + t.due_at.slice(8, 10) + '/' + t.due_at.slice(5, 7) + ' ' + t.due_at.slice(11, 16) + (taskIsLate(t, nowKey) ? ' (en retard)' : ''));
+  }
+  if (t.note) parts.push('Note : ' + t.note);
+  if (t.source === 'ia_reco') parts.push('Issue d\'une recommandation IA');
+  return parts.join(' · ');
+}
+
+function _taskBadgesHtml(t, late) {
+  let h = '';
+  if (t.critical) h += '<span class="material-symbols-outlined tt-b tt-b-crit" title="Tâche critique">priority_high</span>';
+  if (late) h += '<span class="material-symbols-outlined tt-b tt-b-late" title="En retard">schedule</span>';
+  if (t.status === 'blocked') h += '<span class="material-symbols-outlined tt-b tt-b-block" title="Bloquée">block</span>';
+  if (t.status === 'na') h += '<span class="material-symbols-outlined tt-b" title="Sans objet">do_not_disturb_on</span>';
+  if (t.source === 'ia_reco') h += '<span class="material-symbols-outlined tt-b tt-b-ia" title="Issue d\'une recommandation IA">auto_awesome</span>';
+  return h;
+}
+
+// Appel des routes /api/timeline-tasks (leve une Error au message lisible)
+async function tlTaskApi(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok || data.success === false) throw new Error(data.message || ('HTTP ' + res.status));
+  return data;
+}
+
+// Reponse serveur -> vignette en memoire (taches, cache todo, statut)
+function tlApplyTaskResult(item, res) {
+  if (!item || !res) return;
+  item.tasks = res.tasks || [];
+  if (typeof res.todo === 'string') item.todo = res.todo;
+  if (res.preparation_checked != null) item.preparation_checked = res.preparation_checked;
+}
+
 function renderTodoSticky(item) {
-  const forceReady = (item.preparation_checked || "").toString().toLowerCase() === "true";
-  const tasks = splitTodo(item.todo || "");
+  const tasks = tasksOf(item);
   if (tasks.length === 0) return "";
-
-  // ⬇️ si prêt -> on force l'affichage comme coché
-  const finalTasks = forceReady ? tasks.map(t => ({...t, done:true})) : tasks;
-
-  const lis = finalTasks.map((t, idx) => `
-    <li data-idx="${idx}">
-      <input type="checkbox" class="todo-checkbox" ${t.done ? 'checked' : ''} />
-      <span class="todo-text ${t.done ? 'todo-done' : ''}">${t.text}</span>
-    </li>`).join('');
+  const nowKey = _tlNowKey();
+  const lis = tasks.map((t, idx) => {
+    const late = taskIsLate(t, nowKey);
+    const cls = 'tt-st-' + t.status + (late ? ' is-late' : '') + (t.critical ? ' is-critical' : '');
+    return `
+    <li data-idx="${idx}" data-task-id="${_acoEsc(t.id || '')}" class="${cls}" title="${_acoEsc(taskMetaText(t, nowKey))}">
+      <input type="checkbox" class="todo-checkbox" ${t.done ? 'checked' : ''} ${t.status === 'na' ? 'disabled' : ''} />
+      <span class="todo-text ${t.done ? 'todo-done' : ''}">${_acoEsc(t.text)}</span>
+      ${_taskBadgesHtml(t, late)}
+    </li>`;
+  }).join('');
 
   return `
-    <div class="todo-sticky" data-event-id="${item._id}">
+    <div class="todo-sticky" data-event-id="${_acoEsc(item._id || '')}">
       <h6><span class="material-icons" style="font-size:16px;line-height:0;">checklist</span> Préparation</h6>
       <ul>${lis}</ul>
     </div>`;
@@ -462,7 +540,7 @@ function labelForItem(it){
 }
 
 function hasNoTodos(item) {
-  return splitTodo(item?.todo || "").length === 0;
+  return tasksOf(item).length === 0;
 }
 function validHHMM(s) { return !!(s && /^\d{1,2}[:h]\d{2}$/i.test(s.trim())); }
 
@@ -474,7 +552,7 @@ function getPrepStatus(item) {
   if (raw === "false" || raw === "no" || raw === "non" || raw === "pending") return "none";
 
   // 🔁 Fallback: déduire depuis le TODO si présent
-  const tasks = splitTodo(item.todo || "");
+  const tasks = tasksOf(item);
   if (tasks.length === 0) return null;              // pas de statut affiché
   const done = tasks.filter(t => t.done).length;
   if (done === 0) return "none";
@@ -644,15 +722,19 @@ function applyPreparationStatus(cardEl, statusStr) {
     chip.textContent = getPrepLabel(disp);
   }
 
-  // cocher visuellement toutes les cases du sticky si présent
-  const sticky = cardEl.querySelector('.todo-sticky');
-  if (sticky) {
-    sticky.querySelectorAll('input.todo-checkbox').forEach(cb => {
-      cb.checked = (status === 'true');
-      const li = cb.closest('li');
-      li?.querySelector('.todo-text')?.classList.toggle('todo-done', cb.checked);
-    });
-  }
+  // Les cases refletent l'etat reel des taches (tracabilite) : un statut
+  // "Prete" pose a la main ne les coche plus artificiellement.
+}
+
+// Re-rend la liste de taches et le compteur d'une vignette apres un changement
+function _tlRefreshCardTasks(eventItem, item) {
+  const wrap = eventItem.querySelector('.toggle-content');
+  if (wrap) wrap.innerHTML = renderTodoSticky(item);
+  const tasks = tasksOf(item);
+  const todoBtn = eventItem.querySelector('.ev2-todo');
+  if (todoBtn && todoBtn.lastChild) todoBtn.lastChild.nodeValue = tasks.filter(t => t.done).length + '/' + tasks.length;
+  todoBtn?.classList.toggle('has-late', tasks.some(t => taskIsLate(t)));
+  applyPreparationStatus(eventItem, item.preparation_checked || 'none');
 }
 
 // Fonction pour créer une vignette d'événement dans la timeline avec affichage en deux colonnes
@@ -694,8 +776,9 @@ function createEventItem(date, item) {
     }
     const subHtml = subParts.join(' · ');
     eventItem.classList.add(...tlCatClasses(item.category));
-    const tasks = splitTodo(item.todo || "");
+    const tasks = tasksOf(item);
     const doneTasks = tasks.filter(t => t.done).length;
+    const lateTasks = tasks.some(t => taskIsLate(t));
 
     // statut “métier” (base)
     const baseStatus = getPrepStatus(item);
@@ -726,110 +809,51 @@ function createEventItem(date, item) {
                 ${_acoBadgeHtml(item)}
                 ${getAccessChipHtml(item)}
                 ${prepHtml}
-                ${tasks.length ? `<button type="button" class="ev2-todo" title="Tâches de préparation" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">checklist</span>${doneTasks}/${tasks.length}</button>` : ''}
+                ${tasks.length ? `<button type="button" class="ev2-todo${lateTasks ? ' has-late' : ''}" title="Tâches de préparation${lateTasks ? ' (en retard)' : ''}" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">checklist</span>${doneTasks}/${tasks.length}</button>` : ''}
                 ${_plCardBtnHtml(item)}
             </div>
         </div>
         ${tasks.length ? `<div class="toggle-content">${renderTodoSticky(item)}</div>` : ''}
     `;
 
-    const sticky = eventItem.querySelector('.todo-sticky');
-    if (sticky) {
-      sticky.addEventListener('change', (e) => {
+    // Coche sur place (delegation : la liste est re-rendue apres chaque
+    // changement). Tache avec id : route de statut, auteur et heure traces.
+    const todoWrap = eventItem.querySelector('.toggle-content');
+    if (todoWrap) {
+      todoWrap.addEventListener('change', async (e) => {
         const input = e.target;
         if (!input.classList.contains('todo-checkbox')) return;
-
         const li = input.closest('li');
-        if (!li) return;
-
-        const idx = Number(li.dataset.idx);
-        const tasks = splitTodo(item.todo || "");
-        if (!requireIdOrWarn(item)) return;
-        if (!Number.isFinite(idx) || !tasks[idx]) return;
-
-        // 1) maj du modèle local
-        tasks[idx].done = input.checked;
-        item.todo = serializeTodo(tasks);
-
-        const txt = li.querySelector('.todo-text');
-        if (txt) txt.classList.toggle('todo-done', input.checked);
-        const todoBtn = eventItem.querySelector('.ev2-todo');
-        if (todoBtn && todoBtn.lastChild) todoBtn.lastChild.nodeValue = tasks.filter(t => t.done).length + '/' + tasks.length;
-
-        // 2) sauvegarde TODO (toujours)
-        fetch('/update_timetable_event', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-          },
-          body: JSON.stringify({
-            event: window.selectedEvent,
-            year: window.selectedYear,
-            date: eventItem.dataset.date,
-            _id: item._id,
-            todo: item.todo
-          })
-        })
-        .then(r => r.json())
-        .then(res => {
-          if (!res.success && typeof showDynamicFlashMessage === 'function') {
-            showDynamicFlashMessage("Échec de la sauvegarde TODO", "error");
-          }
-
-          // 3) statut auto (ready / progress)
-          const doneCount = tasks.filter(t => t.done).length;
-          const allDone   = tasks.length > 0 && doneCount === tasks.length;
-          const newStatus = allDone ? "true" : (tasks.length ? "progress" : "");
-
-          // rien à faire si inchangé
-          if ((item.preparation_checked || "").toLowerCase() === newStatus) {
-            applyPreparationStatus(eventItem, newStatus || 'none');
-            return;
-          }
-
-          // a) prêt → passe par /set_preparation_ready si tu l'as
-          if (allDone) {
-            fetch('/set_preparation_ready', {
+        if (!li || !requireIdOrWarn(item)) return;
+        const taskId = li.dataset.taskId;
+        input.disabled = true;
+        try {
+          if (taskId) {
+            const res = await tlTaskApi('POST', '/api/timeline-tasks/' + encodeURIComponent(taskId) + '/status',
+                                        { status: input.checked ? 'done' : 'todo' });
+            tlApplyTaskResult(item, res);
+          } else {
+            // Repli sans collection : chaine todo, le serveur deduit le statut
+            const list = splitTodo(item.todo || "");
+            const idx = Number(li.dataset.idx);
+            if (!list[idx]) return;
+            list[idx].done = input.checked;
+            item.todo = serializeTodo(list);
+            await fetch('/update_timetable_event', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-              },
-              body: JSON.stringify({
-                id: item._id,
-                event: window.selectedEvent,
-                year: window.selectedYear,
-                date: eventItem.dataset.date
-              })
-            }).then(() => {
-              item.preparation_checked = "true";
-              applyPreparationStatus(eventItem, "true");
-            }).catch(()=>{});
-            return;
+              headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
+              body: JSON.stringify({ event: window.selectedEvent, year: window.selectedYear,
+                                     date: eventItem.dataset.date, _id: item._id, scope: 'operator',
+                                     todo: item.todo })
+            });
           }
-
-          // b) non prêt → “progress” (et on persiste)
-          fetch('/update_timetable_event', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-            },
-            body: JSON.stringify({
-              event: window.selectedEvent,
-              year: window.selectedYear,
-              date: eventItem.dataset.date,
-              _id: item._id,
-              preparation_checked: newStatus,  // "progress" ou ""
-              todo: item.todo
-            })
-          }).then(() => {
-            item.preparation_checked = newStatus;
-            applyPreparationStatus(eventItem, newStatus || 'none');
-          }).catch(()=>{});
-        })
-        .catch(err => console.error("Save TODO failed:", err));
+          _tlRefreshCardTasks(eventItem, item);
+        } catch (err) {
+          input.checked = !input.checked;
+          showDynamicFlashMessage("Tâche non enregistrée : " + err.message, "error");
+        } finally {
+          input.disabled = false;
+        }
       });
     }
 
@@ -4572,6 +4596,8 @@ window.openEventDrawer = openEventDrawer;
       department: F.department.value.trim(),
       remark: F.remark.value,
       todo: (typeof window.collectEventTodos === 'function' ? window.collectEventTodos() : ''),
+      tasks: (typeof window.collectEventTasks === 'function' ? window.collectEventTasks().tasks : undefined),
+      tasks_known: (typeof window.collectEventTasks === 'function' ? window.collectEventTasks().known : undefined),
       preparation_checked: F.prep.value || '',
     };
   }
@@ -4739,7 +4765,7 @@ window.openEventDrawer = openEventDrawer;
       F.place.value = item.place || '';
       F.department.value = item.department || '';
       F.remark.value = item.remark || '';
-      if (window.populateEventTodoEditor) window.populateEventTodoEditor(item.todo || '');
+      if (window.populateEventTodoEditor) window.populateEventTodoEditor(item);
       const c = computedDuration();
       const dur = String(item.duration || '').trim();
       state.durationManual = !!dur && !(c && c.value === dur);
@@ -5020,9 +5046,7 @@ function maybePromoteReadyFromTodos(dateStr, item, containerEl) {
 function renderDrawerView() {
   const it = _drawerCurrent.item;
   drawerTitleEl.textContent = it.activity || 'Événement';
-  const todoArray = splitTodo(it.todo || "");
   const prep = (it.preparation_checked ?? "").toString().toLowerCase();
-  const forceReady = prep === 'true';
 
   const prepLabel =
     prep === 'true' ? 'Prête'
@@ -5040,11 +5064,11 @@ function renderDrawerView() {
     </div>
     <div class="field">
       <div class="label">Catégorie</div>
-      <div class="value">${it.category || '—'}</div>
+      <div class="value">${_acoEsc(it.category || '—')}</div>
     </div>
     <div class="field">
       <div class="label">Lieu</div>
-      <div class="value">${it.place || '—'}</div>
+      <div class="value">${_acoEsc(it.place || '—')}</div>
     </div>
     ${(() => {
       const info = getAccessInfo(it);
@@ -5056,11 +5080,11 @@ function renderDrawerView() {
     })()}
     <div class="field">
       <div class="label">Département</div>
-      <div class="value">${it.department || '—'}</div>
+      <div class="value">${_acoEsc(it.department || '—')}</div>
     </div>
     <div class="field">
       <div class="label">Remarques</div>
-      <div class="value">${it.remark || '—'}</div>
+      <div class="value">${_acoEsc(it.remark || '—')}</div>
     </div>
 
     <div class="field">
@@ -5077,113 +5101,27 @@ function renderDrawerView() {
           <button type="button" class="psg-btn" data-status="progress" title="Marquer 'En cours'">En cours</button>
           <button type="button" class="psg-btn" data-status="true"     title="">Prête</button>
         </div>
-        <div class="psg-hint">Astuce : “Prête” est verrouillé si des tâches TODO ne sont pas cochées.</div>
+        <div class="psg-hint">Astuce : "Prête" est verrouillé tant que des tâches ne sont ni faites ni "sans objet".</div>
       </div>
     </div>
 
-    <div class="field">
-      <div class="label">TODO</div>
-      ${todoArray.length ? `
-        <ul class="todo-list">
-          ${todoArray.map((line, idx) => {
-            const done  = forceReady ? true : !!line.done;
-            const clean = line.text;
-            return `
-              <li>
-                <label class="todo-item">
-                  <input type="checkbox" data-idx="${idx}" ${done ? 'checked':''}/>
-                  <span>${clean}</span>
-                </label>
-              </li>`;
-          }).join('')}
-        </ul>
-        <div class="todo-actions">
-          <button class="btn btn-secondary" id="todo-add-line">Ajouter une tâche</button>
-          <button class="btn btn-secondary" id="todo-clear-done">Supprimer tâches faites</button>
-          <button class="btn btn-primary"   id="todo-save">Enregistrer TODO</button>
-        </div>
-      ` : `
-        <div class="empty-todo">
-          Aucune tâche. <button class="btn btn-secondary" id="todo-add-first">Ajouter</button>
-        </div>
-      `}
+    <div class="field tt-tasks-field">
+      <div class="label">Tâches <span class="tt-tasks-count"></span></div>
+      <ul class="tt-task-list"></ul>
+      <form class="tt-task-add" autocomplete="off">
+        <input type="text" class="form-input" maxlength="300" placeholder="Ajouter une tâche..." aria-label="Nouvelle tâche">
+        <button type="submit" class="btn btn-secondary">Ajouter</button>
+      </form>
+    </div>
+
+    <div class="field tt-history-field">
+      <div class="label">Éditions précédentes <span class="tt-history-hint">même créneau, tous événements</span></div>
+      <div class="tt-history"><span class="tt-muted">Chargement...</span></div>
     </div>
   `;
 
-  // Wiring TODO interactions (version robuste + autosave)
-  drawerBodyEl.querySelectorAll('input[type="checkbox"][data-idx]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const idx  = Number(cb.dataset.idx);
-      const list = splitTodo(_drawerCurrent.item.todo || "");
-      if (!Number.isFinite(idx) || !list[idx]) return;
-
-      list[idx].done = cb.checked;
-      _drawerCurrent.item.todo = serializeTodo(list);
-
-      // statut auto (ready / progress) côté drawer
-      const doneCount = list.filter(t => t.done).length;
-      const allDone   = list.length > 0 && doneCount === list.length;
-      const newStatus = allDone ? "true" : (list.length ? "progress" : "");
-
-      if ((_drawerCurrent.item.preparation_checked || "").toLowerCase() !== newStatus) {
-        _drawerCurrent.item.preparation_checked = newStatus;
-
-        // maj visuelle immédiate
-        const pill = drawerBodyEl.querySelector('.prep-pill');
-        if (pill) {
-          pill.className = `prep-pill prep-${newStatus || 'none'}`;
-          pill.textContent = allDone ? 'Prête' : (list.length ? 'En cours' : 'Non');
-        }
-      }
-
-      // 🔸 AUTOSAVE pour la déco / coche
-      saveUpdate(_drawerCurrent.date, _drawerCurrent.item);
-
-      // [AJOUT] Les TODO ont changé → mettre à jour les boutons (désactiver/activer "Prête")
-      updatePrepControls(drawerBodyEl, _drawerCurrent.item);
-    });
-  });
-
-  const addLine   = drawerBodyEl.querySelector('#todo-add-line');
-  const addFirst  = drawerBodyEl.querySelector('#todo-add-first');
-  const clearDone = drawerBodyEl.querySelector('#todo-clear-done');
-  const saveTodo  = drawerBodyEl.querySelector('#todo-save');
-
-  addLine?.addEventListener('click', () => {
-    const list = splitTodo(_drawerCurrent.item.todo || "");
-    showPromptToast('Nouvelle tache :', { okLabel: 'Ajouter' }).then((txt) => {
-      if (txt && txt.trim()) {
-        list.push({ text: txt.trim(), done: false });
-        _drawerCurrent.item.todo = serializeTodo(list);
-        renderDrawerView(); // re-render
-      }
-    });
-  });
-
-  addFirst?.addEventListener('click', () => {
-    const list = splitTodo(_drawerCurrent.item.todo || "");
-    showPromptToast('Nouvelle tache :', { okLabel: 'Ajouter' }).then((txt) => {
-      if (txt && txt.trim()) {
-        list.push({ text: txt.trim(), done: false });
-        _drawerCurrent.item.todo = serializeTodo(list);
-        renderDrawerView();
-      }
-    });
-  });
-
-  clearDone?.addEventListener('click', () => {
-    const list = splitTodo(_drawerCurrent.item.todo || "").filter(l => !l.done);
-    _drawerCurrent.item.todo = serializeTodo(list);
-    renderDrawerView();
-  });
-
-  // bouton "Enregistrer TODO" manuel (au cas où)
-  saveTodo?.addEventListener('click', () => {
-    saveUpdate(_drawerCurrent.date, _drawerCurrent.item);
-
-    // Les TODO ont changé → mettre à jour les contrôles de statut (disable "Prête" si besoin)
-    updatePrepControls(drawerBodyEl, _drawerCurrent.item);
-  });
+  renderDrawerTasks();
+  loadDrawerHistory(it);
 
   // (1) Clic sur les boutons "Non / En cours / Prête"
   drawerBodyEl.querySelectorAll('.prep-status-group .psg-btn').forEach(btn => {
@@ -5196,6 +5134,168 @@ function renderDrawerView() {
   // (2) État visuel initial (active/disabled + tooltip)
   updatePrepControls(drawerBodyEl, _drawerCurrent.item);
 
+}
+
+/* --- Taches du tiroir : tracabilite, actions, historique --- */
+// Chaque action passe par /api/timeline-tasks : le serveur trace l'auteur et
+// l'heure, reecrit la chaine `todo` et le statut de preparation, puis la
+// timeline est rafraichie.
+function renderDrawerTasks() {
+  const it = _drawerCurrent.item;
+  const list = drawerBodyEl.querySelector('.tt-task-list');
+  if (!list || !it) return;
+  const tasks = tasksOf(it);
+  const nowKey = _tlNowKey();
+  const count = drawerBodyEl.querySelector('.tt-tasks-count');
+  if (count) count.textContent = tasks.length ? (tasks.filter(t => t.done).length + '/' + tasks.length) : '';
+  list.innerHTML = '';
+  if (!tasks.length) {
+    const li = document.createElement('li');
+    li.className = 'tt-empty';
+    li.textContent = 'Aucune tâche.';
+    list.appendChild(li);
+  }
+  const legacy = tasks.some(t => !t.id);
+  tasks.forEach((t, idx) => {
+    const late = taskIsLate(t, nowKey);
+    const li = document.createElement('li');
+    li.className = 'tt-task tt-st-' + t.status + (late ? ' is-late' : '') + (t.critical ? ' is-critical' : '');
+    li.dataset.taskId = t.id || '';
+    li.dataset.idx = String(idx);
+    li.innerHTML = `
+      <input type="checkbox" class="todo-checkbox" ${t.done ? 'checked' : ''} ${t.status === 'na' || legacy ? 'disabled' : ''} aria-label="Tâche faite">
+      <div class="tt-task-body">
+        <div class="tt-task-text"><span class="${t.done ? 'todo-done' : ''}">${_acoEsc(t.text)}</span>${_taskBadgesHtml(t, late)}</div>
+        <div class="tt-task-meta">${_acoEsc(taskMetaText(t, nowKey))}</div>
+      </div>
+      ${t.id ? `<div class="tt-task-actions">
+        <button type="button" class="tt-act${t.status === 'na' ? ' is-on' : ''}" data-act="na" title="${t.status === 'na' ? 'Remettre à faire' : 'Sans objet'}"><span class="material-symbols-outlined">do_not_disturb_on</span></button>
+        <button type="button" class="tt-act${t.status === 'blocked' ? ' is-on' : ''}" data-act="blocked" title="${t.status === 'blocked' ? 'Débloquer' : 'Signaler un blocage'}"><span class="material-symbols-outlined">block</span></button>
+        <button type="button" class="tt-act" data-act="note" title="Note"><span class="material-symbols-outlined">sticky_note_2</span></button>
+        <button type="button" class="tt-act" data-act="delete" title="Retirer la tâche de cette vignette"><span class="material-symbols-outlined">close</span></button>
+      </div>` : ''}`;
+    list.appendChild(li);
+  });
+  if (legacy && tasks.length) {
+    const li = document.createElement('li');
+    li.className = 'tt-empty';
+    li.textContent = 'Suivi détaillé indisponible : rechargez la page.';
+    list.appendChild(li);
+  }
+  updatePrepControls(drawerBodyEl, it);
+}
+
+async function _drawerTaskCall(method, url, body) {
+  try {
+    const res = await tlTaskApi(method, url, body);
+    tlApplyTaskResult(_drawerCurrent.item, res);
+    renderDrawerTasks();
+    const pill = drawerBodyEl.querySelector('.prep-pill');
+    if (pill) updatePrepControls(drawerBodyEl, _drawerCurrent.item);
+    refreshTimetablePreservingScroll();
+    return res;
+  } catch (err) {
+    showDynamicFlashMessage("Tâche non enregistrée : " + err.message, "error");
+    renderDrawerTasks();
+    return null;
+  }
+}
+
+drawerBodyEl?.addEventListener('change', (e) => {
+  const cb = e.target;
+  if (!cb.classList?.contains('todo-checkbox')) return;
+  const li = cb.closest('.tt-task');
+  if (!li || !li.dataset.taskId) return;
+  _drawerTaskCall('POST', '/api/timeline-tasks/' + encodeURIComponent(li.dataset.taskId) + '/status',
+                  { status: cb.checked ? 'done' : 'todo' });
+});
+
+drawerBodyEl?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.tt-act');
+  if (!btn) return;
+  const li = btn.closest('.tt-task');
+  const id = li?.dataset.taskId;
+  if (!id) return;
+  const t = tasksOf(_drawerCurrent.item).find(x => x.id === id);
+  if (!t) return;
+  const base = '/api/timeline-tasks/' + encodeURIComponent(id);
+  const act = btn.dataset.act;
+  if (act === 'na') {
+    _drawerTaskCall('POST', base + '/status', { status: t.status === 'na' ? 'todo' : 'na' });
+  } else if (act === 'blocked') {
+    if (t.status === 'blocked') { _drawerTaskCall('POST', base + '/status', { status: 'todo' }); return; }
+    const why = await showPromptToast('Motif du blocage :', { okLabel: 'Signaler', defaultValue: t.note || '' });
+    if (why && why.trim()) _drawerTaskCall('POST', base + '/status', { status: 'blocked', note: why.trim() });
+  } else if (act === 'note') {
+    const note = await showPromptToast('Note sur la tâche (vide pour effacer) :', { okLabel: 'Enregistrer', defaultValue: t.note || '', multiline: true });
+    if (note !== null) _drawerTaskCall('PATCH', base, { note: note.trim() });
+  } else if (act === 'delete') {
+    const ok = await showConfirmToast('Retirer cette tâche de la vignette ?', { okLabel: 'Retirer' });
+    if (ok) _drawerTaskCall('DELETE', base);
+  }
+});
+
+drawerBodyEl?.addEventListener('submit', (e) => {
+  const form = e.target.closest('.tt-task-add');
+  if (!form) return;
+  e.preventDefault();
+  const input = form.querySelector('input');
+  const text = (input?.value || '').trim();
+  const it = _drawerCurrent.item;
+  if (!text || !requireIdOrWarn(it)) return;
+  input.value = '';
+  _drawerTaskCall('POST', '/api/timeline-tasks', {
+    event: window.selectedEvent, year: window.selectedYear, vignette_id: it._id, text,
+  });
+});
+
+// Historique du meme creneau (activite + lieu) aux autres editions
+const _tlHistoryCache = new Map();
+async function loadDrawerHistory(it) {
+  const box = drawerBodyEl.querySelector('.tt-history');
+  if (!box || !it?._id) return;
+  const key = window.selectedEvent + '|' + window.selectedYear + '|' + it._id;
+  let data = _tlHistoryCache.get(key);
+  if (!data) {
+    try {
+      const url = '/api/timeline-tasks/history?event=' + encodeURIComponent(window.selectedEvent) +
+                  '&year=' + encodeURIComponent(window.selectedYear) + '&vignette_id=' + encodeURIComponent(it._id);
+      data = await tlTaskApi('GET', url);
+      _tlHistoryCache.set(key, data);
+    } catch (err) {
+      box.textContent = 'Historique indisponible.';
+      return;
+    }
+  }
+  if (_drawerCurrent.item?._id !== it._id) return;   // tiroir change entre-temps
+  box.innerHTML = '';
+  const eds = data.editions || [];
+  if (!eds.length) {
+    box.innerHTML = '<span class="tt-muted">Aucun historique pour ce créneau.</span>';
+    return;
+  }
+  eds.forEach(ed => {
+    const card = document.createElement('div');
+    card.className = 'tt-hist-ed';
+    const title = ed.courante ? 'Autres jours de cette édition' : (ed.event + ' ' + ed.year);
+    const stats = [];
+    stats.push(ed.faites + '/' + ed.total + ' faite' + (ed.faites > 1 ? 's' : ''));
+    if (ed.faites_en_retard) stats.push(ed.faites_en_retard + ' en retard');
+    if (ed.non_faites) stats.push(ed.non_faites + ' non faite' + (ed.non_faites > 1 ? 's' : ''));
+    if (ed.sans_objet) stats.push(ed.sans_objet + ' sans objet');
+    if (ed.bloquees) stats.push(ed.bloquees + ' bloquée' + (ed.bloquees > 1 ? 's' : ''));
+    let h = '<div class="tt-hist-head"><strong>' + _acoEsc(title) + '</strong><span>' + _acoEsc(stats.join(' · ')) + '</span></div>';
+    if (ed.ajouts_manuels?.length) {
+      h += '<div class="tt-hist-row"><span class="tt-hist-k">Ajouté sur place</span>' +
+           ed.ajouts_manuels.map(x => '<span class="tt-hist-chip">' + _acoEsc(x) + '</span>').join('') + '</div>';
+    }
+    (ed.notes || []).forEach(n => {
+      h += '<div class="tt-hist-note"><span class="material-symbols-outlined">sticky_note_2</span><span><em>' +
+           _acoEsc(n.tache) + '</em> : ' + _acoEsc(n.note) + (n.par ? ' <span class="tt-muted">(' + _acoEsc(n.par) + ')</span>' : '') + '</span></div>';
+    });
+    card.innerHTML = h;
+    box.appendChild(card);
+  });
 }
 
 /* --- Boutons pied de drawer --- */
@@ -5373,12 +5473,15 @@ function _csrfToken() {
 }
 
 // ---- Editeur de taches (TODO) propre a la vignette ----
-function _addEventTodoRow(text, done) {
+function _addEventTodoRow(text, done, taskId) {
   const list = document.getElementById('event-todo-list');
   if (!list) return null;
   const row = document.createElement('div');
   row.className = 'event-todo-row' + (done ? ' is-done' : '');
   row.dataset.done = done ? '1' : '';
+  // Id de la tache (collection timeline_tasks) : le serveur met a jour
+  // la tache existante au lieu d'en recreer une (etat, auteur conserves).
+  row.dataset.taskId = taskId || '';
 
   const check = document.createElement('input');
   check.type = 'checkbox';
@@ -5432,12 +5535,32 @@ function _addEventTodoRow(text, done) {
   return row;
 }
 
-// Remplit l'editeur depuis une chaine markdown ('- [ ] ...'), preservant l'etat coche.
-window.populateEventTodoEditor = function (todoStr) {
+// Remplit l'editeur depuis la vignette (taches structurees) ou une chaine
+// markdown ('- [ ] ...'), preservant l'etat coche. Les ids affiches sont
+// memorises : seules ces taches peuvent etre retirees a l'enregistrement.
+window.populateEventTodoEditor = function (src) {
   const list = document.getElementById('event-todo-list');
   if (!list) return;
   list.innerHTML = '';
-  splitTodo(todoStr || '').forEach(it => _addEventTodoRow(it.text, it.done));
+  const tasks = (src && typeof src === 'object') ? tasksOf(src) : splitTodo(src || '');
+  list.dataset.known = JSON.stringify(tasks.map(t => t.id).filter(Boolean));
+  tasks.forEach(it => _addEventTodoRow(it.text, it.done, it.id));
+};
+
+// Taches de l'editeur pour le serveur : [{id, text, done}] + ids affiches.
+window.collectEventTasks = function () {
+  const list = document.getElementById('event-todo-list');
+  if (!list) return { tasks: [], known: [] };
+  let known = [];
+  try { known = JSON.parse(list.dataset.known || '[]'); } catch (e) {}
+  const tasks = Array.from(list.querySelectorAll('.event-todo-row'))
+    .map(row => ({
+      id: row.dataset.taskId || '',
+      text: (row.querySelector('input[type="text"]')?.value || '').trim(),
+      done: row.dataset.done === '1',
+    }))
+    .filter(it => it.text);
+  return { tasks, known };
 };
 
 // Reconstruit la chaine markdown a partir des lignes (etat coche preserve par ligne).
@@ -6474,7 +6597,7 @@ async function openEditModalFromDrawer(dateStr, item) {
 
   // Peut-on marquer "Prête" ? (OK si aucune tâche, ou si toutes cochées)
   function canMarkReadyFromTodos(item){
-    const tasks = splitTodo(item.todo || "");
+    const tasks = tasksOf(item);
     if (!tasks.length) return true;
     return tasks.every(t => !!t.done);
   }
@@ -6505,7 +6628,7 @@ async function openEditModalFromDrawer(dateStr, item) {
       btnReady.disabled = !allowed;
       btnReady.title = allowed
         ? 'Marquer comme prête'
-        : "Impossible : des tâches TODO ne sont pas cochées";
+        : "Impossible : des tâches ne sont pas traitées";
     }
 
     // Met à jour la pastille du drawer (visuel)
@@ -6555,7 +6678,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     // -- Règle métier : pas de "true" si TODO non cochées --
     if (target === 'true' && !canMarkReadyFromTodos(item)) {
       typeof showDynamicFlashMessage === 'function' &&
-        showDynamicFlashMessage("Des tâches TODO ne sont pas cochées — impossible de marquer 'Prête'.", "warning");
+        showDynamicFlashMessage("Des tâches ne sont pas traitées : impossible de marquer 'Prête'.", "warning");
       return;
     }
   
@@ -6604,6 +6727,7 @@ async function openEditModalFromDrawer(dateStr, item) {
         year: window.selectedYear,
         date: dateStr,
         _id: evId,
+        scope: 'operator',
         preparation_checked: "",
         start: null, end: null, duration: null,
         category: null, activity: null, place: null,
@@ -6947,6 +7071,7 @@ function _tlTick() {
   if (!list) return;
   const now = _tlNow();
   const sec = list.querySelector('.timetable-date-section[data-date="' + now.ymd + '"]');
+  const nowKey = _tlNowKey();
   list.querySelectorAll('.event-item').forEach(card => {
     const cd = card.querySelector('.ev2-cd');
     if (!cd) return;
@@ -6961,6 +7086,12 @@ function _tlTick() {
     card.classList.toggle('is-live', live);
     if (cd.textContent !== txt) cd.textContent = txt;
     if (cd.className !== cls) cd.className = cls;
+    // Taches passees en retard depuis le rendu : bouton et liste a jour
+    const todoBtn = card.querySelector('.ev2-todo');
+    if (todoBtn && card.__itemData) {
+      const late = tasksOf(card.__itemData).some(t => taskIsLate(t, nowKey));
+      if (todoBtn.classList.contains('has-late') !== late) _tlRefreshCardTasks(card, card.__itemData);
+    }
   });
   _tlApplyPast();
 }

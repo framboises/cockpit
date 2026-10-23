@@ -283,3 +283,62 @@ body:not(.tl-view-map):not(.tl-search-open) #main-content:not(.map-fullscreen) {
   .tv-kpis { margin-left: 0; }
 }
 body.tl-tv-on { overflow: hidden; }
+
+/* ==========================================================================
+   Taches de preparation (collection timeline_tasks) : vignette et tiroir
+   ========================================================================== */
+.ev2-todo.has-late { color: var(--danger); border-color: var(--danger); }
+.todo-sticky li .tt-b { font-size: 15px; color: var(--muted); }
+.todo-sticky li.is-late .todo-text { color: var(--danger); font-weight: 600; }
+.todo-sticky li.tt-st-blocked .todo-text { color: #b45309; }
+.tt-b-crit { color: var(--danger) !important; }
+.tt-b-late { color: var(--danger) !important; }
+.tt-b-block { color: #b45309 !important; }
+.tt-b-ia { color: var(--brand) !important; }
+
+.tt-tasks-field .label .tt-tasks-count { font-weight: 600; color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.tt-task-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
+.tt-task { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid transparent; }
+.tt-task:hover { background: var(--bg); border-color: var(--line); }
+.tt-task .todo-checkbox { margin-top: 2px; }
+.tt-task-body { flex: 1; min-width: 0; }
+.tt-task-text { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 0.86rem; }
+.tt-task-text .tt-b { font-size: 16px; color: var(--muted); }
+.tt-task-meta:empty { display: none; }
+.tt-task-meta { font-size: 0.74rem; color: var(--muted); margin-top: 2px; }
+.tt-task.is-late { border-color: rgba(220, 38, 38, 0.35); background: rgba(220, 38, 38, 0.05); }
+.tt-task.is-late .tt-task-meta { color: var(--danger); }
+.tt-task.tt-st-blocked { border-color: rgba(180, 83, 9, 0.35); background: rgba(245, 158, 11, 0.07); }
+.tt-task.tt-st-na .tt-task-text span:first-child { color: var(--muted); text-decoration: line-through; }
+/* Actions en surimpression au survol : le texte garde toute la largeur */
+.tt-task-actions {
+  position: absolute; top: 4px; right: 4px;
+  display: flex; gap: 2px; padding: 1px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  opacity: 0; pointer-events: none; transition: opacity .12s;
+}
+.tt-task:hover .tt-task-actions, .tt-task:focus-within .tt-task-actions { opacity: 1; pointer-events: auto; }
+@media (hover: none) {
+  .tt-task-actions { position: static; opacity: 1; pointer-events: auto; box-shadow: none; border: 0; }
+}
+.tt-act { border: 0; background: none; padding: 2px; border-radius: 6px; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.tt-act .material-symbols-outlined { font-size: 18px; }
+.tt-act:hover { background: var(--brand-light); color: var(--brand); }
+.tt-act.is-on { color: var(--brand); background: var(--brand-light); }
+.tt-act[data-act="delete"]:hover { color: var(--danger); background: rgba(220, 38, 38, 0.08); }
+.tt-empty { font-size: 0.82rem; color: var(--muted); padding: 4px 8px; }
+.tt-task-add { display: flex; gap: 6px; margin-top: 8px; }
+.tt-task-add .form-input { flex: 1; min-width: 0; }
+
+.tt-history-hint { font-weight: 400; color: var(--muted); font-size: 0.74rem; margin-left: 4px; }
+.tt-history { display: grid; gap: 6px; margin-top: 4px; }
+.tt-muted { color: var(--muted); font-size: 0.8rem; }
+.tt-hist-ed { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.8rem; }
+.tt-hist-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.tt-hist-head span { color: var(--muted); }
+.tt-hist-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; }
+.tt-hist-k { color: var(--muted); margin-right: 2px; }
+.tt-hist-chip { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+.tt-hist-note { display: flex; gap: 4px; align-items: flex-start; margin-top: 4px; }
+.tt-hist-note .material-symbols-outlined { font-size: 15px; color: #92400e; margin-top: 1px; }

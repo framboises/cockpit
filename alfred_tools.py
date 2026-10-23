@@ -426,6 +426,7 @@ def t_timeline(db, args, ctx):
                     pass
                 out.append({"quand": dt.strftime("%d/%m %H:%M") if dt else v.get("datetime"),
                             "activite": v.get("activity"), "lieu": v.get("place"),
+                            "taches": v.get("taches"),
                             "evenement": ev, "_k": dt.timestamp() if dt else 0})
         out.sort(key=lambda x: x.pop("_k") if "_k" in x else 0)
         return {"disponible": True, "fenetre_heures": heures, "vignettes": out[:30]}

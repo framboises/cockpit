@@ -61,7 +61,7 @@
                   <th style="width:36px"><input type="checkbox" id="check-all"></th>
                   <th>Type</th>
                   <th>Taches (apercu)</th>
-                  <th style="width:72px">Actions</th>
+                  <th style="width:108px">Actions</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -825,6 +825,20 @@
     <div class="crud-modal-footer">
       <button class="btn btn-secondary" data-close>Annuler</button>
       <button id="modal-save" class="btn btn-primary">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modale — Analyse d'un modele de taches (usage reel, RETEX, suggestions IA) -->
+<div id="todo-insights-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog todo-insights-dialog">
+    <div class="crud-modal-header">
+      <h3 id="todo-insights-title">Analyse</h3>
+      <button class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body" id="todo-insights-body"></div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" data-close>Fermer</button>
     </div>
   </div>
 </div>

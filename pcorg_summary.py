@@ -1266,7 +1266,18 @@ def _serialize_upcoming(item, dt_paris):
         "preparation_checked": item.get("preparation_checked") or "",
         "duration": item.get("duration") or "",
         "remark": (item.get("remark") or "").strip()[:240],
+        # Taches de preparation (cache `todo` de la vignette, tenu a jour par
+        # timeline_tasks) : {faites, total, a_faire}, None si aucune.
+        "taches": _upcoming_tasks(item),
     }
+
+
+def _upcoming_tasks(item):
+    try:
+        import timeline_tasks
+        return timeline_tasks.summarize_for_prompt(item)
+    except Exception:
+        return None
 
 
 def _scan_timetable_doc(doc, now_paris, end_paris):
@@ -1393,6 +1404,10 @@ def _factorize_upcoming(items, min_to_factorize=2):
         synth["place"] = place_str
         synth["is_factorized"] = True
         synth["factor_count"] = len(siblings)
+        # Taches cumulees du groupe (le detail par lieu est dans la timeline)
+        tks = [s["item"].get("taches") for s in siblings if s["item"].get("taches")]
+        synth["taches"] = ({"faites": sum(t["faites"] for t in tks),
+                            "total": sum(t["total"] for t in tks)} if tks else None)
         out.append(synth)
     return out
 
@@ -2239,7 +2254,8 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         if upcoming:
             parts.append(
                 "\n\nVignettes timetable des prochaines 24 heures ("
-                + str(len(upcoming)) + " jalon(s)) :\n"
+                + str(len(upcoming)) + " jalon(s)) ; 'taches' = taches de preparation "
+                "de la vignette (faites / total, a_faire = restant) :\n"
                 + json.dumps(upcoming, ensure_ascii=False, indent=2, default=_json_default)
             )
         else:
