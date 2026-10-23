@@ -49,6 +49,7 @@ from dateutil import parser as dtparser
 # Module partage avec Cockpit (racine du repo, deux niveaux au-dessus)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import pcorg_history  # noqa: E402
+import pcorg_labels  # noqa: E402
 # Source unique des fenetres d'epreuve et de la priorite entre epreuves
 # simultanees (meme regle que Cockpit : /api/event/current, creation, tablettes)
 import event_courant  # noqa: E402
@@ -608,8 +609,13 @@ def _map_niveau_urgence(group_desc):
     return _STADE_TO_URGENCE.get(best) if best else None
 
 
-def transform_row(row, event_label, year):
-    """Transforme une ligne SQL en document MongoDB (même format que l'import CSV)."""
+def transform_row(row, event_label, year, canon=None):
+    """Transforme une ligne SQL en document MongoDB (même format que l'import CSV).
+
+    `canon` (pcorg_labels.Canon) ramene sous-classification, intervenants et
+    service aux libelles de pcorg_lists (Prysm a les deux orthographes :
+    "Signaletique" / "Signalétique"). Le XML brut reste dans
+    content_category_xml."""
     # Champs bruts
     msg_id = row.get("UserMessageId")
     msg_guid = clean_null(row.get("UserMessageGuid"))
@@ -675,6 +681,8 @@ def transform_row(row, event_label, year):
     # Parse XML
     xml_cat = parse_namevalue_xml(content_cat_raw) if content_cat_raw else {}
     xml_ref = parse_namevalue_xml(content_ref_raw) if content_ref_raw else {}
+    if canon is not None:
+        canon.apply_cc(category, xml_cat)
 
     # text_full
     extra_text = xml_cat.get("texte") if "texte" in xml_cat else None
@@ -785,9 +793,10 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
     interv = doc.get("intervenants") or []
     services = doc.get("services") or []
 
-    # Extraire les labels existants pour comparaison rapide
+    # Cles des libelles existants (sans accents ni casse : "Signaletique" et
+    # "Signalétique" sont le meme libelle, cf. pcorg_labels)
     def existing_labels(items):
-        return {(it["label"] if isinstance(it, dict) else it) for it in items}
+        return {pcorg_labels.key(it["label"] if isinstance(it, dict) else it) for it in items}
 
     interv_set = existing_labels(interv)
     service_set = existing_labels(services)
@@ -810,9 +819,11 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
         if cat not in sc:
             sc[cat] = []
             sc_sets[cat] = set()
-        if val not in sc_sets[cat]:
+        if not isinstance(val, str):
+            continue
+        if pcorg_labels.key(val) not in sc_sets[cat]:
             sc[cat].append({"id": _gen_id(), "label": val})
-            sc_sets[cat].add(val)
+            sc_sets[cat].add(pcorg_labels.key(val))
             added += 1
 
     # Scanner les intervenants (intervenant1-5)
@@ -824,9 +835,9 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
         ]
         for row in pcorg_col.aggregate(pipeline_int):
             val = row["_id"]
-            if val and val not in interv_set:
+            if val and isinstance(val, str) and pcorg_labels.key(val) not in interv_set:
                 interv.append({"id": _gen_id(), "label": val})
-                interv_set.add(val)
+                interv_set.add(pcorg_labels.key(val))
                 added += 1
 
     # Scanner les moyens engages (niveau 1 et 2, meme liste)
@@ -838,9 +849,9 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
         ]
         for row in pcorg_col.aggregate(pipeline_m):
             val = row["_id"]
-            if val and val not in interv_set:
+            if val and isinstance(val, str) and pcorg_labels.key(val) not in interv_set:
                 interv.append({"id": _gen_id(), "label": val})
-                interv_set.add(val)
+                interv_set.add(pcorg_labels.key(val))
                 added += 1
 
     # Scanner les services contactes
@@ -851,9 +862,9 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
     ]
     for row in pcorg_col.aggregate(pipeline_svc):
         val = row["_id"]
-        if val and val not in service_set:
+        if val and isinstance(val, str) and pcorg_labels.key(val) not in service_set:
             services.append({"id": _gen_id(), "label": val})
-            service_set.add(val)
+            service_set.add(pcorg_labels.key(val))
             added += 1
 
     if added > 0:
@@ -1009,6 +1020,9 @@ def main():
         except Exception as e:
             print(f"  [WARN] Index : {e}")
 
+    # Libelles de reference (une orthographe par libelle, cf. pcorg_labels)
+    canon = pcorg_labels.Canon(mongo_db["pcorg_config"].find_one({"_id": "pcorg_lists"}))
+
     # ── Curseur de sync ──
     last_date_write = None
     if not args.full:
@@ -1051,7 +1065,7 @@ def main():
             # (priorite event_courant entre epreuves simultanees)
             ts_dt, _ = to_iso_dt(row.get("UserMessageDateCreate"))
             evt, yr = trouver_evenement(ts_dt, plages)
-            doc = transform_row(row, evt, yr)
+            doc = transform_row(row, evt, yr, canon)
             cat_counts[doc.get("category", "?")] += 1
             event_counts[f"{evt} {yr}"] += 1
             batch_docs[doc["_id"]] = doc

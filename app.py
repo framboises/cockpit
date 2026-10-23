@@ -5588,6 +5588,7 @@ def run_merge_manual():
 ################################################################################
 
 import pcorg_history as PH  # noqa: E402  parsing, fusion SQL/Cockpit, chronologie
+import pcorg_labels as PL  # noqa: E402  une orthographe par libelle de liste
 import pcorg_assist as PCA  # noqa: E402  search_terms / ensure_text_index (recherche $text)
 from pymongo.errors import DuplicateKeyError  # noqa: E402
 
@@ -5661,6 +5662,16 @@ def _pcorg_clean_cc(cc):
     return out
 
 
+def _pcorg_canon_cc(category, cc):
+    """Ramene sous-classification, intervenants et service aux libelles de
+    pcorg_lists (une orthographe par libelle, cf. pcorg_labels)."""
+    try:
+        PL.Canon(COL_PCORG_CONFIG.find_one({"_id": "pcorg_lists"})).apply_cc(category, cc)
+    except Exception:
+        logger.exception("pcorg : normalisation des libelles")
+    return cc
+
+
 def _pcorg_is_closed(doc):
     return (doc or {}).get("status_code") == 10
 
@@ -5718,7 +5729,7 @@ PCO_PROJECTION = {
     "_id": 1, "ts": 1, "close_ts": 1, "created_at": 1, "category": 1, "text": 1,
     "area": 1, "operator": 1, "severity": 1, "is_incident": 1,
     "gps": 1, "status_code": 1, "niveau_urgence": 1, "bounce_rev": 1,
-    "operator_close": 1, "server": 1,
+    "operator_close": 1, "server": 1, "sql_id": 1,
     "content_category.sous_classification": 1,
     "content_category.patrouille": 1,
     "content_category.source_type": 1,
@@ -5823,6 +5834,7 @@ def _pcorg_serialise(doc):
         "server": doc.get("server"),
         "niveau_urgence": doc.get("niveau_urgence"),
         "bounce_rev": doc.get("bounce_rev", 0),
+        "sql_id": doc.get("sql_id"),   # n° Prysm (filtre "n°" du petit bloc)
         "dispatch": _pcorg_dispatch_view(doc),
         "integrations": _pcorg_integrations_view(doc) if doc.get("integrations") else None,
         # Createur Cockpit (e-mail) : "lecture seule" permet d'editer ses fiches
@@ -6474,7 +6486,7 @@ def pcorg_create():
         return jsonify({"error": "niveau_urgence invalide"}), 400
 
     area_desc = (data.get("area_desc") or "").strip()
-    content_cat = _pcorg_clean_cc(data.get("content_category"))
+    content_cat = _pcorg_canon_cc(category, _pcorg_clean_cc(data.get("content_category")))
     initial_comment = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
 
     # Jeton client (un par ouverture de l'assistant) : un double clic sur
@@ -6815,10 +6827,11 @@ def pcorg_update(doc_id):
             change("gps", doc.get("gps"), gps)
 
     old_cc = doc.get("content_category") or {}
-    cc_update = _pcorg_clean_cc(data.get("content_category"))
+    cc_update = _pcorg_canon_cc(new_cat, _pcorg_clean_cc(data.get("content_category")))
     for k, v in cc_update.items():
         old_v = old_cc.get(k)
-        if (old_v in (None, "", False) and v in (None, "", False)) or old_v == v:
+        # "Signaletique" -> "Signalétique" n'est pas une modification
+        if (old_v in (None, "", False) and v in (None, "", False)) or PL.same(old_v, v):
             continue
         sets[f"content_category.{k}"] = v
         owned.add(f"content_category.{k}")
@@ -7053,7 +7066,11 @@ def pcorg_camera_capture():
     if fiche_id and fiche_doc:
         entry = PH.make_entry(_pcorg_operator(request.user_payload),
                               f"Capture camera {cam_doc['name']}", ts=ts, photo=photo_url)
-        PH.append_entry(db["pcorg"], fiche_id, entry, inc_bounce=True)
+        # La capture prend plusieurs secondes : fiche close entre-temps = refus
+        n = PH.append_entry(db["pcorg"], fiche_id, entry, inc_bounce=True,
+                            extra_filter=_PCORG_OPEN_FILTER)
+        if not n:
+            return jsonify({"error": "intervention close entre-temps, capture non jointe"}), 409
         result["entry"] = entry
 
     return jsonify(result)
@@ -7423,6 +7440,14 @@ def update_pcorg_config():
     update = {k: v for k, v in data.items() if k in allowed}
     if not update:
         return jsonify({"error": "rien a mettre a jour"}), 400
+    # Une orthographe par libelle ("Signaletique" = "Signalétique")
+    if isinstance(update.get("sous_classifications"), dict):
+        update["sous_classifications"] = {
+            cat: PL.dedupe_items(items)[0] if isinstance(items, list) else items
+            for cat, items in update["sous_classifications"].items()}
+    for k in ("intervenants", "services"):
+        if isinstance(update.get(k), list):
+            update[k] = PL.dedupe_items(update[k])[0]
     COL_PCORG_CONFIG.update_one(
         {"_id": "pcorg_lists"},
         {"$set": update},

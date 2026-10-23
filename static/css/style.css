@@ -12495,9 +12495,16 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-popup { font-family: "Outfit", sans-serif; }
 .pcorg-popup-header {
   display: flex; align-items: center; gap: 6px;
-  padding: 7px 12px; color: #fff;
+  /* 40 px a droite : reserve la croix de fermeture Leaflet (right 8 px, 24 px de large) */
+  padding: 7px 40px 7px 12px; color: #fff;
+  min-height: 30px; box-sizing: border-box;
 }
 .pcorg-popup-icon { font-size: 16px; }
+/* Champ obligatoire manquant dans l'assistant de creation */
+.form-input.pcorg-field-missing {
+  border-color: var(--danger, #ef4444) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+}
 .pcorg-popup-cat { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; flex: 1; }
 .pcorg-popup-status {
   font-size: 0.58rem; font-weight: 700; text-transform: uppercase;

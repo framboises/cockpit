@@ -411,7 +411,12 @@
       if (document.querySelector("#toast-container .toast-confirm, #toast-container .toast-input")) return;
       var gps = document.getElementById("pcorgGpsModal");
       if (gps && gps.classList.contains("show")) { gps.classList.remove("show"); return; }
-      if (createModal && createModal.classList.contains("show")) { hideCreate(); return; }
+      // Fiche similaire ouverte PAR-DESSUS l'assistant : on ferme la fiche,
+      // pas l'assistant (sa saisie etait perdue)
+      if (detailModal && detailModal.classList.contains("show") && detailModal.classList.contains("pca-over")) {
+        hideFiche(); return;
+      }
+      if (createModal && createModal.classList.contains("show")) { requestHideCreate(); return; }
       if (detailModal && detailModal.classList.contains("show")) { hideFiche(); }
     });
 
@@ -1161,7 +1166,25 @@
       updateBadge(openFiltered.length);
       updateMapPins(openFiltered);
       if (expPanel && expPanel.style.display !== "none") renderExpanded();
+      syncOpenFiche(openFiltered);
     }).catch(function (err) { console.error("[pcorg] refresh error", err); });
+  }
+
+  // Fiche affichee modifiee ailleurs (tablette, autre poste, Prysm) : close
+  // entre-temps (absente des ouvertes) ou nouvelle entree (bounce_rev). Elle
+  // restait "EN COURS" avec ses boutons Clore / Consigner.
+  var detailShown = null;     // {id, open, rev} de la fiche rendue
+  function syncOpenFiche(openItems) {
+    if (!detailShown || !detailOpenId || detailShown.id !== detailOpenId) return;
+    if (!detailModal || !detailModal.classList.contains("show")) return;
+    if (!detailShown.open) return;
+    var it = null;
+    for (var i = 0; i < openItems.length; i++) {
+      if (openItems[i].id === detailOpenId) { it = openItems[i]; break; }
+    }
+    // Hors fenetre des ouvertes chargees (SAISON > 30 j) : rien a conclure
+    if (!it && !loadAllOpen && (lastData && lastData.older_open)) return;
+    if (!it || (it.bounce_rev || 0) !== detailShown.rev) reloadFiche(detailOpenId);
   }
 
   // ── Filtre texte du petit bloc (local, sur les fiches chargees) ──────────
@@ -1176,7 +1199,7 @@
       inp.type = "search";
       inp.placeholder = "Filtrer (texte, zone, vehicule, n°)...";
       inp.addEventListener("input", function () {
-        widgetFilterText = (inp.value || "").trim().toLowerCase();
+        widgetFilterText = labelKey(inp.value || "");
         // Un seul filtre pour les deux onglets
         document.querySelectorAll(".pcorg-widget-filter-input").forEach(function (o) {
           if (o !== inp) o.value = inp.value;
@@ -1190,9 +1213,10 @@
 
   function matchesWidgetFilter(it) {
     if (!widgetFilterText) return true;
-    var hay = [it.text, it.category, it.sous_classification, it.area_desc, it.operator,
-      it.patrouille, it.niveau_urgence ? urgencyLabel(it.category, it.niveau_urgence) : ""]
-      .join(" ").toLowerCase();
+    // Sans accents ("signaletique" trouve "Signalétique"), n° Prysm compris
+    var hay = labelKey([it.text, it.category, it.sous_classification, it.area_desc, it.operator,
+      it.patrouille, it.niveau_urgence ? urgencyLabel(it.category, it.niveau_urgence) : "",
+      it.sql_id != null ? it.sql_id : ""].join(" "));
     return hay.indexOf(widgetFilterText) !== -1;
   }
 
@@ -1348,7 +1372,10 @@
       var gpsIcon = matIcon(item.lat != null ? "location_on" : "location_off",
         "pcorg-row-gps " + (item.lat != null ? "has-gps" : "no-gps"));
       gpsIcon.style.fontSize = "14px";
-      if (item.lat == null) {
+      if (item.lat == null && (isClosed || !canEditFiche(item))) {
+        // Fiche close ou en lecture seule : le serveur refuserait (403)
+        gpsIcon.title = "Pas de position";
+      } else if (item.lat == null) {
         gpsIcon.title = "Ajouter une position";
         gpsIcon.addEventListener("click", (function (id) {
           return function (e) { e.stopPropagation(); openGpsModal(id); };
@@ -1556,6 +1583,8 @@
   }
 
   var detailOpenId = null;
+  var detailSeq = 0;          // garde contre une reponse /detail arrivee en retard
+  var ficheDrafts = {};       // id -> texte de "Consigner une action" en cours
 
   // opts.keepScroll : rechargement apres une action (commentaire, urgence...)
   // sans remonter en haut de la fiche ni faire clignoter un "Chargement".
@@ -1585,19 +1614,32 @@
     closeBtn.onclick = function () { hideFiche(); };
     detailOverlay.onclick = function () { hideFiche(); };
 
+    var seq = ++detailSeq;
     fetch("/api/pcorg/detail/" + encodeURIComponent(id))
       .then(function (r) { return r.json(); })
       .then(function (d) {
+        // Clic sur A puis B : la reponse lente de A ne remplace plus B ;
+        // un rechargement automatique n'ecrase pas un formulaire d'edition
+        if (seq !== detailSeq || detailOpenId !== id) return;
+        if (keep && document.getElementById("pcorg-edit-text")) return;
         if (d.error) { body.textContent = d.error; return; }
         // Ack bounce for this user
         ackPin(id, d.bounce_rev || 0);
         var mk = pcorgMarkers[id];
         if (mk && mk.getElement && mk.getElement()) mk.getElement().classList.remove("pcorg-pin-bounce");
+        // Saisie en cours dans "Consigner une action" : focus et curseur gardes
+        var ae = document.activeElement;
+        var typing = keep && ae && ae.classList && ae.classList.contains("pcorg-comment-input");
+        var caret = typing ? ae.selectionStart : 0;
         // Statut lu sur la fiche elle-meme, pas sur la liste d'ou vient le clic
         renderFiche(d, d.status_code === 10);
         if (keep) {
           body.scrollTop = prevScroll;
           scrollEl.scrollTop = prevScrollModal;
+        }
+        if (typing) {
+          var ta = body.querySelector(".pcorg-comment-input");
+          if (ta) { ta.focus({ preventScroll: true }); try { ta.setSelectionRange(caret, caret); } catch (e) {} }
         }
       })
       .catch(function () { body.textContent = "Erreur de chargement"; });
@@ -1794,6 +1836,7 @@
     var statusEl = header.querySelector(".pcorg-fiche-status");
     statusEl.textContent = d.status_code === 10 ? "TERMINE" : "EN COURS";
     statusEl.className = "pcorg-fiche-status " + (d.status_code === 10 ? "closed" : "open");
+    detailShown = { id: d.id, open: d.status_code !== 10, rev: d.bounce_rev || 0 };
 
     // Urgency badge in header
     var urgEl = header.querySelector(".pcorg-fiche-urgency");
@@ -1954,6 +1997,13 @@
       var commentInput = mkEl("textarea", "form-input pcorg-comment-input");
       commentInput.rows = 2;
       commentInput.placeholder = "Action realisee, observation, consigne...";
+      // Brouillon conserve : la fiche est reconstruite a chaque rechargement
+      // (dispatch, urgence, capture...) et effacait le texte en cours
+      commentInput.value = ficheDrafts[d.id] || "";
+      commentInput.addEventListener("input", function () {
+        if (commentInput.value.trim()) ficheDrafts[d.id] = commentInput.value;
+        else delete ficheDrafts[d.id];
+      });
       commentForm.appendChild(commentInput);
 
       var commentBtns = mkEl("div", "pcorg-comment-btns");
@@ -1991,6 +2041,7 @@
             photoBtn.disabled = false;
             if (r.ok) {
               commentInput.value = "";
+              delete ficheDrafts[d.id];
               showToast("success", blobs.length > 1 ? "Photos ajoutees" : "Photo ajoutee");
               reloadFiche(d.id);
             } else {
@@ -2013,6 +2064,7 @@
             commentBtn.disabled = false;
             if (r.ok) {
               commentInput.value = "";
+              delete ficheDrafts[d.id];
               showToast("success", "Commentaire ajoute");
               reloadFiche(d.id);
             } else {
@@ -2265,6 +2317,13 @@
         var opt = mkEl("option", ""); opt.value = o; opt.textContent = o;
         el.appendChild(opt);
       });
+      // Valeur courante ecrite autrement ("Signaletique") : l'option de la liste
+      if (value && options.indexOf(value) === -1) {
+        var vk = labelKey(value);
+        for (var oi = 0; oi < options.length; oi++) {
+          if (labelKey(options[oi]) === vk) { value = options[oi]; break; }
+        }
+      }
       // Valeur courante absente de la liste (ancienne fiche, liste modifiee)
       if (value && options.indexOf(value) === -1) {
         var optC = mkEl("option", ""); optC.value = value; optC.textContent = value;
@@ -2666,8 +2725,8 @@
       badge.title = "Saisie le " + createdAt.toLocaleString("fr-FR");
       valWrap.appendChild(badge);
     }
-    // Bouton edit (crayon) — uniquement si fiche ouverte
-    if (!isClosed && d.status_code !== 10) {
+    // Bouton edit (crayon) — fiche ouverte et modifiable (lecture seule : 403)
+    if (!isClosed && d.status_code !== 10 && canEditFiche(d)) {
       var editBtn = mkEl("button", "pcorg-fiche-ts-edit");
       editBtn.type = "button";
       editBtn.title = "Modifier l'heure d'intervention";
@@ -2898,19 +2957,30 @@
 
   // Cloture avec motif (facultatif), consigne dans la meme entree que le
   // changement de statut et affiche en texte normal sous la pastille
+  // Le bilan deja tape dans "Consigner une action" pre-remplit le motif
+  // (il etait perdu : la boite partait vide puis la fiche se fermait).
+  var closingIds = {};
   function closeIntervention(id) {
-    showPromptToast("Clore cette intervention ? Motif / bilan (facultatif)",
-      { okLabel: "Clore", cancelLabel: "Annuler", type: "warning" }).then(function (motif) {
-      if (motif === null) return;
+    if (closingIds[id]) return;   // double clic : une seule boite
+    closingIds[id] = true;
+    showPromptToast("Clore cette intervention ? Motif / bilan (facultatif, Ctrl+Entree pour clore)",
+      { okLabel: "Clore", cancelLabel: "Annuler", type: "warning", multiline: true,
+        defaultValue: ficheDrafts[id] || "" }).then(function (motif) {
+      if (motif === null) { delete closingIds[id]; return; }
       apiCall("POST", "/api/pcorg/close/" + encodeURIComponent(id), { comment: (motif || "").trim() })
         .then(function (r) {
+          delete closingIds[id];
           if (r.ok) {
+            delete ficheDrafts[id];
             hideFiche();
             removePin(id);
             showToast("success", "Intervention cloturee");
             refresh();
           } else {
             showToast("error", r.error || "Erreur");
+            // Fiche close ou modifiee ailleurs entre-temps : etat a jour
+            refresh();
+            reloadFiche(id);
           }
         });
     });
@@ -3380,9 +3450,16 @@
       setActiveFiche(item.id);
       if (chronoDiv._loaded) return;
       chronoDiv._loaded = true;
+      // Le contenu arrive apres l'ouverture : la popup grandit vers le haut
+      // et son en-tete (croix comprise) sortait de la carte. Recadrage.
+      function refit() {
+        var pp = marker.getPopup();
+        if (pp && pp.isOpen()) pp.update();
+      }
       fetch("/api/pcorg/detail/" + encodeURIComponent(item.id))
         .then(function (r) { return r.json(); })
         .then(function (d) {
+          setTimeout(refit, 0);
           if (d.error) { chronoDiv.textContent = ""; return; }
           if (d.operator_group) {
             opVal.textContent = (operatorLabel(d.operator) || "?") + " (" + d.operator_group + ")";
@@ -3519,9 +3596,27 @@
   var createPendingPatrouille = "";
   var cockpitUserNames = []; // [{name: "Prenom Nom"}, ...] pour autocomplete sources
 
+  // Cle d'un libelle de liste : sans accents, sans casse, tirets ignores
+  // (meme regle que pcorg_labels.key cote serveur)
+  function labelKey(s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[\s\-_]+/g, " ").trim().toLowerCase();
+  }
+
+  // Libelles d'une liste, une seule fois chacun ("Signaletique" et
+  // "Signalétique" venaient tous deux de Prysm) : garde le plus accentue
   function extractLabels(items) {
     if (!items || !items.length) return [];
-    return items.map(function (it) { return (typeof it === "object") ? it.label : it; });
+    var out = [], pos = {};
+    function accents(s) { return (String(s).normalize("NFD").match(/[̀-ͯ]/g) || []).length; }
+    items.forEach(function (it) {
+      var lbl = (it && typeof it === "object") ? it.label : it;
+      if (!lbl) return;
+      var k = labelKey(lbl);
+      if (pos[k] === undefined) { pos[k] = out.length; out.push(lbl); }
+      else if (accents(lbl) > accents(out[pos[k]])) out[pos[k]] = lbl;
+    });
+    return out;
   }
 
   function loadPcorgConfig() {
@@ -3811,9 +3906,9 @@
     // Droit de groupe "Creer des fiches" (le serveur refuse aussi : 403)
     if (btn && window.__userCanCreateFiche === false && !window.__userIsAdmin) btn.style.display = "none";
 
-    closeBtn.addEventListener("click", hideCreate);
-    cancelBtn.addEventListener("click", hideCreate);
-    createOverlay.addEventListener("click", hideCreate);
+    closeBtn.addEventListener("click", requestHideCreate);
+    cancelBtn.addEventListener("click", requestHideCreate);
+    createOverlay.addEventListener("click", requestHideCreate);
 
     buildSourceTabs();
 
@@ -3855,11 +3950,15 @@
         }
         var text = document.getElementById("pcorg-c-text").value.trim();
         if (!text) {
-          showToast("warning", "La description est obligatoire");
+          flagRequired("pcorg-c-text", "La description est obligatoire");
           return;
         }
         var srcCheck = validateSourceFields();
-        if (!srcCheck.ok) { showToast("warning", srcCheck.msg); return; }
+        if (!srcCheck.ok) {
+          if (srcCheck.field) flagRequired(srcCheck.field, srcCheck.msg);
+          else showToast("warning", srcCheck.msg);
+          return;
+        }
         goToStep(3);
       }
     });
@@ -3908,8 +4007,45 @@
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      // "Enregistrer" apparait a la place exacte de "Suivant" : un double
+      // clic sur "Suivant" creait la fiche sans laisser voir l'etape 3
+      if (Date.now() - createStepAt < 700) return;
       submitCreate();
     });
+  }
+
+  // Saisie en cours dans l'assistant (description, action, photos)
+  function createIsDirty() {
+    var ids = ["pcorg-c-text", "pcorg-c-comment"];
+    for (var i = 0; i < ids.length; i++) {
+      var el = document.getElementById(ids[i]);
+      if (el && el.value.trim()) return true;
+    }
+    return !!(_createCameraPhoto || (_createPhotos && _createPhotos.length));
+  }
+
+  // Fermeture demandee par l'operateur (croix, Annuler, fond, Echap) :
+  // confirmation si une saisie serait perdue
+  function requestHideCreate() {
+    if (!createModal || !createModal.classList.contains("show")) return;
+    if (createSubmitting || !createIsDirty()) { hideCreate(); return; }
+    showConfirmToast("Abandonner la saisie de cette fiche ?",
+      { okLabel: "Abandonner", cancelLabel: "Continuer la saisie", type: "warning" })
+      .then(function (ok) { if (ok) hideCreate(); });
+  }
+
+  // Champ obligatoire manquant : le toast seul passait inapercu quand le
+  // champ etait hors de vue (etape 3 longue)
+  function flagRequired(id, msg) {
+    showToast("warning", msg);
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("pcorg-field-missing");
+    try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+    var clear = function () { el.classList.remove("pcorg-field-missing"); el.removeEventListener("input", clear); el.removeEventListener("change", clear); };
+    el.addEventListener("input", clear);
+    el.addEventListener("change", clear);
   }
 
   function openCreateWizard() {
@@ -4058,8 +4194,10 @@
     document.getElementById("pcorg-create-grid25").classList.remove("active");
   }
 
+  var createStepAt = 0;
   function goToStep(step) {
     createStep = step;
+    createStepAt = Date.now();
     // Update step visibility
     document.querySelectorAll(".pcorg-create-step").forEach(function (el) {
       el.classList.toggle("active", el.getAttribute("data-step") === String(step));
@@ -4474,14 +4612,15 @@
     }
 
     function render() {
-      var q = (input.value || "").trim().toLowerCase();
+      // Sans accents : "Herve" trouve "Hervé"
+      var q = labelKey(input.value || "");
       if (q.length < minChars) { close(); return; }
       var items = (getItems() || []).filter(function (it) {
-        return it.toLowerCase().indexOf(q) !== -1;
+        return labelKey(it).indexOf(q) !== -1;
       });
       items.sort(function (a, b) {
-        var as = a.toLowerCase().indexOf(q) === 0 ? 0 : 1;
-        var bs = b.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+        var as = labelKey(a).indexOf(q) === 0 ? 0 : 1;
+        var bs = labelKey(b).indexOf(q) === 0 ? 0 : 1;
         if (as !== bs) return as - bs;
         return a.localeCompare(b);
       });
@@ -4661,7 +4800,7 @@
       var label = createSource === "externe" ? "L'appelant"
                 : createSource === "operateur" ? "L'opérateur émetteur"
                 : "Le donneur d'ordre";
-      return { ok: false, msg: label + " est obligatoire" };
+      return { ok: false, msg: label + " est obligatoire", field: qId };
     }
     if (!createCanal) return { ok: false, msg: "Selectionnez le canal" };
     return { ok: true };
@@ -4865,16 +5004,16 @@
 
   function submitCreate() {
     // Validate action prise
-    var comment = getVal("pcorg-c-comment");
-    if (!comment) {
-      showToast("warning", "L'action prise est obligatoire");
-      return;
-    }
     if (createSubmitting) return;
     var specValues = createFieldsCtl ? createFieldsCtl.collect() : {};
-    // Validate sous-classification
+    // Validate sous-classification (au-dessus de l'action dans le formulaire)
     if (createFieldsCtl && createFieldsCtl.requiresSous && !specValues.sous_classification) {
-      showToast("warning", "La sous-classification est obligatoire");
+      flagRequired("pcorg-c-sous_classification", "La sous-classification est obligatoire");
+      return;
+    }
+    var comment = getVal("pcorg-c-comment");
+    if (!comment) {
+      flagRequired("pcorg-c-comment", "L'action prise est obligatoire");
       return;
     }
     var text = document.getElementById("pcorg-c-text").value.trim();
@@ -5966,7 +6105,7 @@
     pcaAbort();
     pca.key = "";
     pca.res = null;
-    if (pca.bar) { pca.bar.textContent = ""; pca.bar.hidden = true; }
+    if (pca.bar) { pca.bar.textContent = ""; pca.bar.hidden = true; pca.bar.style.minHeight = ""; }
   }
 
   function pcaKey(text) {
@@ -6060,8 +6199,13 @@
   function pcaRender() {
     var bar = pca.bar, res = pca.res;
     if (!bar) return;
+    // La barre ne retrecit plus une fois affichee (jusqu'a la fermeture de
+    // l'assistant) : sa disparition apres "Appliquer" remontait Source /
+    // Suivant sous le curseur, et le clic suivant tombait a cote
+    var prevH = bar.hidden ? 0 : bar.offsetHeight;
+    if (prevH) bar.style.minHeight = Math.max(prevH, parseInt(bar.style.minHeight, 10) || 0) + "px";
     bar.textContent = "";
-    if (!res) { bar.hidden = true; return; }
+    if (!res) { bar.hidden = !prevH && !bar.style.minHeight; return; }
     var s = res.suggestions;
     var chips = [];
     if (s) {
@@ -6072,12 +6216,17 @@
       }
       var sousCat = s.sous_classification_category;
       var sel = pcaSousSelect();
-      var sousDone = sel && createSelectedCat === sousCat && sel.value === s.sous_classification;
+      var sousDone = sel && createSelectedCat === sousCat && labelKey(sel.value) === labelKey(s.sous_classification);
       if (s.sous_classification && !sousDone && CATEGORY_ORDER.indexOf(sousCat) !== -1) {
         chips.push(pcaChip("Sous-classification : " + s.sous_classification, s.reason, function () {
           if (!pcaEnsureCategory(sousCat)) return;
           var el = pcaSousSelect();
-          if (el) el.value = s.sous_classification;
+          if (!el) return;
+          // Option du menu de meme cle (orthographe de la liste)
+          var want = labelKey(s.sous_classification);
+          for (var i = 0; i < el.options.length; i++) {
+            if (el.options[i].value && labelKey(el.options[i].value) === want) { el.value = el.options[i].value; break; }
+          }
         }));
       }
       var urgCat = s.category || createSelectedCat;
@@ -6131,7 +6280,7 @@
       });
       bar.appendChild(warn);
     }
-    bar.hidden = !bar.childNodes.length;
+    bar.hidden = !bar.childNodes.length && !bar.style.minHeight;
   }
 
   // La fiche s'ouvre AU-DESSUS de l'assistant de creation, sans le fermer

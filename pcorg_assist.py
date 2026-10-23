@@ -48,6 +48,7 @@ from flask import Blueprint, jsonify, request
 
 import event_courant as EC
 import pcorg_history as PH
+import pcorg_labels as PL
 import pcorg_summary
 
 logger = logging.getLogger(__name__)
@@ -555,10 +556,11 @@ def validate_suggestion(raw, allowed_categories, sous_by_cat, urgency_cats,
     raw_sous = raw.get("sous_classification")
     if effective and isinstance(raw_sous, str) and raw_sous.strip():
         wanted = fold(raw_sous)
-        for lbl in sous_by_cat.get(effective) or []:
-            if fold(lbl) == wanted:
-                sous = lbl
-                break
+        # Liste encore doublonnee ("Signaletique" / "Signalétique") : la meme
+        # variante que le menu de l'assistant (la plus accentuee)
+        matches = [lbl for lbl in sous_by_cat.get(effective) or [] if fold(lbl) == wanted]
+        if matches:
+            sous = PL.best(matches)
 
     urg = raw.get("niveau_urgence")
     urg = urg.strip().upper() if isinstance(urg, str) else None

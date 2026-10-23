@@ -160,9 +160,18 @@ function showPromptToast(message, options) {
     var inputRow = document.createElement("div");
     inputRow.className = "toast-input-field";
 
-    var input = document.createElement("input");
+    // options.multiline : zone de texte (Entree = retour a la ligne,
+    // Ctrl+Entree = valider), curseur en fin de texte pre-rempli
+    var multiline = !!options.multiline;
+    var input = document.createElement(multiline ? "textarea" : "input");
     input.className = "toast-input-control";
-    input.type = inputType;
+    if (multiline) {
+      input.rows = 3;
+      input.style.resize = "vertical";
+      input.style.minWidth = "320px";
+    } else {
+      input.type = inputType;
+    }
     input.value = defaultValue;
 
     inputRow.appendChild(input);
@@ -191,7 +200,8 @@ function showPromptToast(message, options) {
       requestAnimationFrame(function () {
         toast.classList.add("show");
         input.focus();
-        input.select();
+        if (multiline) input.setSelectionRange(input.value.length, input.value.length);
+        else input.select();
       });
     });
 
@@ -203,8 +213,8 @@ function showPromptToast(message, options) {
     btnOk.addEventListener("click", function () { cleanup(input.value); });
     btnCancel.addEventListener("click", function () { cleanup(null); });
     input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); cleanup(input.value); }
-      if (e.key === "Escape") { e.preventDefault(); cleanup(null); }
+      if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) { e.preventDefault(); cleanup(input.value); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cleanup(null); }
     });
   });
 }

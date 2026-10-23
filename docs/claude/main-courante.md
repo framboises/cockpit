@@ -75,6 +75,16 @@ Le parametrage SAISON peut porter des **jours publics** saisis dans GroundMaster
 - Création idempotente : `client_token` (un par ouverture de l'assistant) → même `_id`, un double clic ne crée plus deux fiches.
 - Suppression : archivée dans `pcorg_deleted` (qui, quand) avant `delete_one`, tablette libérée.
 
+### Une orthographe par libellé (`pcorg_labels.py`, 16/10/2026)
+
+Prysm a les deux orthographes de plusieurs libellés (« Signaletique » / « Signalétique », « Electricite » / « Electricité », « Patrouille securite » / « Patrouille sécurité »…) et `enrich_pcorg_config` les recopiait toutes dans `pcorg_lists` (comparaison à l'octet près) : doublons dans les menus, stats coupées en deux.
+
+- **Clé** `PL.key` : sans accents, sans casse, tirets / espaces ignorés. Variante retenue (`PL.best`) : la plus accentuée, puis la plus utilisée. Le libellé **de la liste** fait foi : le renommer dans la configuration suffit.
+- **Synchro** : `transform_row(..., canon)` ramène sous-classification, intervenants 1-5, moyens engagés et service contacté au libellé de la liste (le XML brut reste dans `content_category_xml`) ; `enrich_pcorg_config` compare par clé.
+- **Cockpit** : `_pcorg_canon_cc` à la création et à l'édition ; en édition, « Signaletique » → « Signalétique » n'est pas une modification (`PL.same`). `PUT /api/pcorg-config` dédoublonne les listes. Dispatch (`dispatch_auto._norm`) et intégrations (`integrations._norm`) comparaient déjà sans accents.
+- **Navigateur** : `labelKey` (même règle) ; menus dédoublonnés (`extractLabels`), valeur d'une ancienne fiche ramenée à l'option de la liste, filtre du petit bloc et autocomplétion insensibles aux accents.
+- **Rattrapage** : `scripts/dedupe_pcorg_labels.py` (simulation par défaut, `--apply`) fusionne les doublons des listes et corrige les fiches (`content_category`, `xml_struct`), garde `cockpit_rev`, ne touche ni chronologie ni `cockpit_owned`.
+
 ### Photos prises sur le moment (07/10/2026)
 
 `POST /api/pcorg/photo/<id>` (multipart `photos` 1-5 + `text` facultatif, fiche ouverte, droits d'écriture habituels) : même traitement que les photos Field (`field._process_and_save_photo` : Pillow, EXIF retiré, 1920 px, miniature), rangées sous `uploads/field_photos/<event>/<year>/` (purge 30 j comme les captures caméras), entrée de chronologie avec `photos`. `pcorg.js` : bouton « Joindre une photo » dans l'assistant (étape 3, envoi après création, comme la capture caméra) et icône photo dans « Consigner une action » de la fiche (le texte saisi sert de légende). Téléphone : l'input ouvre l'appareil photo (`capture`), poste : choix de fichier ; réduction à 1920 px côté navigateur avant envoi (`shrinkPhoto`).
