@@ -540,17 +540,119 @@
     var AI_COLOR = { personne: "#16a34a", vehicule: "#2563eb", velo: "#16a34a" };
     // Cadres trouves par le detecteur de l'IA sur cette photo (hors "objet",
     // trop vague : un frisbee pour une corneille)
+    // Chaque cadre garde son index k dans ai.detections (cle des retours de
+    // l'operateur, det_fb) et un numero n affiche (1, 2...) commun au cadre
+    // et a sa ligne de retour
+    // Le cadre qui est la cible de la camera (p.answer.k, choisi par le
+    // serveur : detection._target_det) est TOUJOURS dessine, meme sous 20 %
     function aiBoxes(p) {
-        return ((p.ai && p.ai.detections) || []).filter(function (d) { return d.box && d.category !== "objet" && d.conf >= 0.2; });
+        var out = [], tk = p.answer ? p.answer.k : null;
+        ((p.ai && p.ai.detections) || []).forEach(function (d, k) {
+            if (d.box && d.category !== "objet" && (d.conf >= 0.2 || k === tk)) out.push({ k: k, n: out.length + 1, d: d });
+        });
+        return out;
     }
+    var DET_FB_TXT = { juste: "juste", faux: "faux", personne: "-> personne", vehicule: "-> vehicule" };
     // r : portion de la photo affichee (zoom), en fractions
-    function aiBoxEl(d, r) {
-        var bx = el("div", "dt-box dt-box-ai");
+    function aiBoxEl(it, r, p) {
+        var d = it.d, fb = p && p.det_fb && p.det_fb[it.k];
+        var bx = el("div", "dt-box dt-box-ai" + (fb ? " is-fb is-fb-" + (fb.verdict === "juste" || fb.verdict === "faux" ? fb.verdict : "reclass") : ""));
+        bx.dataset.k = it.k;
         bx.style.left = ((d.box.x - r.x) / r.w * 100) + "%"; bx.style.top = ((d.box.y - r.y) / r.h * 100) + "%";
         bx.style.width = (d.box.w / r.w * 100) + "%"; bx.style.height = (d.box.h / r.h * 100) + "%";
         bx.style.setProperty("--bc", AI_COLOR[d.category] || "#7c3aed");
-        bx.appendChild(el("span", "dt-box-tag", "IA voit : " + (AI_NAME[d.category] || d.category).toLowerCase() + " " + Math.round(d.conf * 100) + " %"));
+        // Juste un numero (le detail est dans la liste et en infobulle) : les
+        // etiquettes longues se chevauchaient quand les cadres sont proches
+        // Cadre IA qui EST la cible de la camera : pastille cerclee d'orange
+        var isTgt = p && p.answer && p.answer.k === it.k;
+        var num = el("span", "dt-box-num" + (isTgt ? " is-target" : ""), String(it.n));
+        num.title = "IA " + it.n + " : " + (AI_NAME[d.category] || d.category).toLowerCase() + " " + Math.round(d.conf * 100) + " %" +
+            (fb ? " (" + (DET_FB_TXT[fb.verdict] || fb.verdict) + ")" : "") +
+            (isTgt ? " - c'est la cible de la camera (cadre orange)" : "");
+        bx.appendChild(num);
+        // Clic sur le cadre : amene a sa ligne de retour (fiche)
+        bx.addEventListener("click", function (e) {
+            var row = document.querySelector('#dt-detail-body .dt-detfb-row[data-k="' + it.k + '"]');
+            if (!row || bx.closest("#dt-lightbox")) return;
+            e.stopPropagation();
+            row.scrollIntoView({ block: "nearest" });
+            row.classList.remove("is-flash"); void row.offsetWidth; row.classList.add("is-flash");
+        });
         return bx;
+    }
+    // Retour sur les cadres du detecteur (pointilles) d'une photo : juste,
+    // faux, ou autre classe. Exemples pour reentrainer le detecteur.
+    // Cadres a juger a part : tous SAUF celui qui est la cible de la camera
+    // (p.answer.k), juge par la reponse "c'est quoi ?" de la photo
+    function targetBox(p) {
+        var tk = p.answer && p.answer.k;
+        return tk == null ? null : aiBoxes(p).filter(function (it) { return it.k === tk; })[0] || null;
+    }
+    function detOthers(p) {
+        var tk = p.answer && p.answer.k;
+        return aiBoxes(p).filter(function (it) { return it.k !== tk; });
+    }
+    function detFeedback(g, p, idx) {
+        var items = detOthers(p);
+        var wrap = el("div", "dt-detfb");
+        wrap.appendChild(el("span", "dt-ai-vote-q", "Autres cadres de l'IA (pointilles, hors cible de la camera) : juste ou faux ?"));
+        items.forEach(function (it) {
+            var d = it.d, fb = (p.det_fb && p.det_fb[it.k]) || null;
+            var row = el("div", "dt-detfb-row"); row.dataset.k = it.k;
+            row.appendChild(el("span", "dt-detfb-n", String(it.n)));
+            row.appendChild(el("span", "dt-detfb-lab", (AI_NAME[d.category] || d.category) + " " + Math.round(d.conf * 100) + " %"));
+            var other = d.category === "personne" ? "vehicule" : "personne";
+            [["juste", "Juste"], ["faux", "Faux"], [other, "C'est " + (other === "personne" ? "une personne" : "un vehicule")]].forEach(function (o) {
+                var on = fb && fb.verdict === o[0];
+                var b = el("button", "chip dt-detfb-btn is-" + (o[0] === "juste" || o[0] === "faux" ? o[0] : "reclass") + (on ? " is-on" : ""), o[1]);
+                b.type = "button";
+                b.title = on ? "Retirer mon retour" : o[0] === "faux" ? "Il n'y a ni personne ni vehicule dans ce cadre" : "";
+                b.addEventListener("click", function () { sendDetFeedback(g, p, idx, it.k, on ? null : o[0]); });
+                row.appendChild(b);
+            });
+            // Survol : le cadre correspondant ressort sur la photo et le zoom
+            row.addEventListener("mouseenter", function () { hlBox(it.k, true); });
+            row.addEventListener("mouseleave", function () { hlBox(it.k, false); });
+            wrap.appendChild(row);
+        });
+        wrap.appendChild(el("span", "dt-detfb-hint", "Une cible ratee par l'IA ? \"Indiquer personne / vehicule\" pour la dessiner."));
+        return wrap;
+    }
+    // Ecarte les numeros des cadres IA qui se chevauchent (entre eux ou avec
+    // l'etiquette de la camera) : decalage horizontal, apres mise en page
+    function spreadNums(root) {
+        var placed = Array.prototype.map.call(root.querySelectorAll(".dt-box:not(.dt-box-ai) > .dt-box-tag"), function (t) {
+            return t.getBoundingClientRect();
+        });
+        root.querySelectorAll(".dt-box-num").forEach(function (n) {
+            n.style.transform = "";
+            var r = n.getBoundingClientRect(), dx = 0;
+            if (!r.width) return;
+            for (var guard = 0; guard < 12; guard++) {
+                var hit = placed.filter(function (q) {
+                    return r.left + dx < q.right && r.right + dx > q.left && r.top < q.bottom && r.bottom > q.top;
+                })[0];
+                if (!hit) break;
+                dx = hit.right - r.left + 2;
+            }
+            if (dx) n.style.transform = "translateX(" + dx + "px)";
+            placed.push({ left: r.left + dx, right: r.right + dx, top: r.top, bottom: r.bottom });
+        });
+    }
+    function spreadWhenReady(root, im) {
+        function go() { requestAnimationFrame(function () { spreadNums(root); }); }
+        if (im.complete && im.naturalWidth) go(); else im.addEventListener("load", go);
+    }
+    function hlBox(k, on) {
+        document.querySelectorAll('#dt-detail-body .dt-box-ai[data-k="' + k + '"]').forEach(function (b) { b.classList.toggle("is-hl", on); });
+    }
+    function sendDetFeedback(g, p, idx, k, verdict) {
+        send("POST", API.episodes + "/" + g.ep.id + "/photos/" + idx + "/detections/" + k, { photo: p.photo, verdict: verdict }).then(function (r) {
+            p.det_fb = p.det_fb || {};
+            if (r.fb) p.det_fb[k] = r.fb; else delete p.det_fb[k];
+            if (gallery === g && g.idx === idx) g.render();
+            toast("success", verdict ? "Retour enregistre, merci" : "Retour retire");
+        }).catch(function (e) { toast("error", e.message); });
     }
     var LABEL_CAT = {
         personne: { label: "Personne", icon: "directions_walk", color: "#16a34a" },
@@ -709,22 +811,24 @@
         renderList();
     }
     function pct(x) { return x != null ? " (" + Math.round(x * 100) + " %)" : ""; }
-    // Ce que l'IA voit le plus probablement : le pourcentage le plus haut,
-    // detecteur (personne / vehicule) ou avis (oiseau, panneau...), quelle que
-    // soit la decision. ai : verdict d'episode {label, conf, guess} ou resultat
-    // d'une photo {detections, guess}
-    function aiTop(ai) {
-        if (!ai) return null;
-        var c = [];
-        if (ai.label && ai.label !== "rien" && ai.conf) c.push({ label: ai.label, p: ai.conf });
-        (ai.detections || []).forEach(function (d) { if (d.category !== "objet") c.push({ label: d.category, p: d.conf }); });
-        if (ai.guess && ai.guess[0]) c.push({ label: ai.guess[0].label, p: ai.guess[0].p });
-        c.sort(function (a, b) { return b.p - a.p; });
-        return c[0] || null;
+    // LA reponse de l'IA, une seule, sur la CIBLE SIGNALEE (cadre orange) :
+    // calculee par le serveur (detection._ai_answer). Personne / vehicule
+    // trouve dans le cadre, sinon ce que voit l'avis (grillage, oiseau...).
+    // Les autres cadres en pointilles (voiture garee a cote...) n'y comptent
+    // pas. holder : une photo (p.answer) ou le verdict d'episode (ai.answer).
+    function aiAnswer(holder) {
+        return (holder && holder.answer) || null;
+    }
+    var ANSWER_SRC = { detecteur: "cadre IA qui coincide avec le cadre orange", avis: "avis sur le cadre orange, aucun cadre IA ne coincide" };
+    function aiDetail(ai, ans) {
+        if (!ai && !ans) return "";
+        return "Reponse sur la cible du cadre orange" + (ans ? " (" + (ANSWER_SRC[ans.src] || ans.src) + ")" : "") +
+            ". Avis : " + (((ai && ai.guess) || []).slice(0, 2).map(function (g) { return (AI_NAME[g.label] || g.label).toLowerCase() + " " + Math.round(g.p * 100) + " %"; }).join(", ") || "-") +
+            ". Les cadres en pointilles hors du cadre orange ne comptent pas.";
     }
     function aiBadge(ai) {
         if (!ai || !ai.status) return null;
-        var t = aiTop(ai);
+        var t = aiAnswer(ai);
         var lab = t ? (AI_NAME[t.label] || t.label).toLowerCase() + " " + Math.round(t.p * 100) + " %" : "rien";
         var d = aiDoubt(ai);
         if (d) return badge("dt-b-ai-doubt", "help", "A verifier : " + (AI_NAME[d.label] || d.label).toLowerCase() + " " + Math.round(d.p * 100) + " % ?");
@@ -739,8 +843,9 @@
         var doubt = aiDoubt(ai);
         var box = el("div", "dt-ai" + (ai.status ? " is-" + ai.status : "") + (doubt ? " is-doubt" : ""));
         var v = el("div", "dt-ai-verdict");
-        var txt, top = aiTop(ai);
+        var txt, top = aiAnswer(ai);
         var seen = top ? (AI_LABEL[top.label] || top.label) + pct(top.p) : "rien";
+        v.title = aiDetail(ai, top);
         if (doubt) {
             v.appendChild(icon("help"));
             txt = "Filtree, mais a verifier : l'avis IA voit " + (AI_LABEL[doubt.label] || doubt.label) + pct(doubt.p) +
@@ -750,18 +855,24 @@
             txt = "Filtree : l'IA voit surtout " + seen + ", pas de personne ni de vehicule. Aucune alerte envoyee.";
         } else if (ai.status === "confirmed") {
             v.appendChild(icon("verified"));
-            txt = "Confirmee : l'IA voit surtout " + seen +
-                (top && top.label !== ai.label ? ", et detecte " + (AI_LABEL[ai.label] || ai.label) + pct(ai.real_conf || ai.conf) : "") +
+            txt = "Confirmee : l'IA voit " + seen +
                 (ep.armed === false ? ". Hors planning : pas d'alerte." : ". Alerte envoyee.");
         } else {
             v.appendChild(icon("help"));
-            txt = "Non verifiee" + (ai.reason ? " (" + ai.reason + ")" : "") +
+            var snapOnly = ep.photos && ep.photos.length && ep.photos.every(function (p) { return p.snapshot; });
+            txt = "Non verifiee" + (snapOnly ? " (la camera n'envoie pas de photo, capture Cockpit juste apres)" : ai.reason ? " (" + ai.reason + ")" : "") +
                 (ep.armed === false ? ". Hors planning : pas d'alerte." : " : alerte envoyee sans verification.");
         }
         if (ai.status === "filtered" && ep.armed === false) txt = txt.replace("Aucune alerte envoyee.", "Hors planning : pas d'alerte de toute facon.");
         v.appendChild(el("span", "", txt));
         box.appendChild(v);
         if (!ai.status) return box;
+        // Sans aucune photo (ni de la camera ni capture de secours) : rien a
+        // regarder, donc pas de question sur le cadre orange
+        if (!ep.photos || !ep.photos.length) {
+            box.appendChild(el("span", "dt-ai-vote-q", "Pas de photo pour cette intrusion : pas de reponse possible pour entrainer l'IA."));
+            return box;
+        }
         var vote = truthPicker(ep);
         // Personne / vehicule rate par le filtre : montrer ou etait la cible
         if (ai.status === "filtered" && ai.vote === "down" && ep.photos && ep.photos.length) {
@@ -784,27 +895,23 @@
     // Le pouce (l'IA a eu raison ou non) est deduit cote serveur.
     var TRUTHS = ["personne", "vehicule", "velo", "animal", "oiseau", "panneau", "branche", "reflet", "sol", "grillage", "rien"];
     var TRUTH_NAME = { sol: "Sol / ombre", rien: "Rien" };
+    // " (photo N / M)" : la photo qui a decide (ai.photo), comme le compteur de la galerie
+    function decisionPhotoNo(ep) {
+        var dp = ep.ai && ep.ai.photo;
+        if (!dp || !ep.photos) return "";
+        for (var i = 0; i < ep.photos.length; i++) {
+            if (ep.photos[i].photo === dp) return " (photo " + (i + 1) + " / " + ep.photos.length + ")";
+        }
+        return "";
+    }
     function truthPicker(ep) {
         var ai = ep.ai || {};
         var wrap = el("div", "dt-ai-vote");
         wrap.appendChild(el("span", "dt-ai-vote-q", ep.photos && ep.photos.length > 1
-            ? "Pour l'intrusion, la cible qui a decide l'IA, c'est quoi ? Chaque photo a aussi sa propre reponse, sous le zoom."
+            ? "Pour l'intrusion : dans le cadre orange de la photo qui a declenche l'alerte" + decisionPhotoNo(ep) +
+              ", c'est quoi ? Chaque photo a aussi sa propre reponse, sous le zoom."
             : "Qu'est-ce que la cible signalee (cadre orange) ? Clique la bonne reponse : ca entraine l'IA."));
-        var pcts = {};
-        (ai.guess || []).forEach(function (g) { pcts[g.label] = g.p; });
-        var ranked = TRUTHS.slice().sort(function (a, b) { return (pcts[b] || 0) - (pcts[a] || 0); });
-        var row = el("div", "dt-ai-guess dt-truths");
-        ranked.forEach(function (lab) {
-            var p = pcts[lab];
-            var on = ai.truth === lab;
-            var b = el("button", "chip dt-truth" + (on ? " is-on" : "") + (p != null && p >= 0.03 ? " is-ai" : "")); b.type = "button";
-            b.setAttribute("aria-pressed", on ? "true" : "false");
-            b.textContent = (TRUTH_NAME[lab] || AI_NAME[lab] || lab) + (p != null && p >= 0.03 ? " " + Math.round(p * 100) + " %" : "");
-            b.title = on ? "Retirer mon avis" : "C'est " + (AI_LABEL[lab] || lab);
-            b.addEventListener("click", function () { sendTruth(ep, on ? null : lab); });
-            row.appendChild(b);
-        });
-        wrap.appendChild(row);
+        wrap.appendChild(truthRow(ai, ai.answer, ai.truth, "Retirer mon avis", function (lab, on) { sendTruth(ep, on ? null : lab); }));
         if (ai.truth || ai.vote) {
             var by = el("div", "dt-ai-vote-by");
             by.appendChild(document.createTextNode(
@@ -826,6 +933,28 @@
         }
         return wrap;
     }
+    // Pilules de reponse : la reponse de l'IA en tete, SEULE avec un
+    // pourcentage (marquee "IA"), puis les autres dans l'ordre de l'avis
+    function truthRow(ai, ans, current, retireTitle, onPick) {
+        var pcts = {};
+        ((ai && ai.guess) || []).forEach(function (g) { pcts[g.label] = g.p; });
+        var ranked = TRUTHS.slice().sort(function (a, b) {
+            if (ans && a === ans.label) return -1;
+            if (ans && b === ans.label) return 1;
+            return (pcts[b] || 0) - (pcts[a] || 0);
+        });
+        var row = el("div", "dt-ai-guess dt-truths");
+        ranked.forEach(function (lab) {
+            var on = current === lab, isAns = ans && ans.label === lab;
+            var b = el("button", "chip dt-truth" + (on ? " is-on" : "") + (isAns ? " is-ai" : "")); b.type = "button";
+            b.setAttribute("aria-pressed", on ? "true" : "false");
+            b.textContent = (TRUTH_NAME[lab] || AI_NAME[lab] || lab) + (isAns ? " (IA " + Math.round(ans.p * 100) + " %)" : "");
+            b.title = on ? retireTitle : isAns ? "Reponse de l'IA. " + aiDetail(ai, ans) : "C'est " + (AI_LABEL[lab] || lab);
+            b.addEventListener("click", function () { onPick(lab, on); });
+            row.appendChild(b);
+        });
+        return row;
+    }
     function sendTruth(ep, truth, note) {
         var body = { truth: truth };
         if (note != null) body.note = note;
@@ -843,22 +972,17 @@
         var t = p.truth || {};
         var n = g.photos.filter(function (x) { return x.truth; }).length;
         var wrap = el("div", "dt-ai-vote dt-photo-truth");
-        wrap.appendChild(el("span", "dt-ai-vote-q", "Et sur cette photo, c'est quoi ? " +
+        // La question porte sur le cadre ORANGE ; on nomme le cadre IA qui y tombe
+        var tgt = targetBox(p);
+        var q = el("span", "dt-ai-vote-q");
+        q.appendChild(document.createTextNode("Dans le "));
+        q.appendChild(el("b", "dt-q-orange", "cadre orange"));
+        q.appendChild(document.createTextNode(" (cible de la camera)" + (tgt ? ", = cadre IA " + tgt.n : "") + ", c'est quoi ? " +
             (g.photos.length > 1 ? "(" + n + " / " + g.photos.length + " photos repondues)" : "")));
-        var pcts = {};
-        ((p.ai && p.ai.guess) || []).forEach(function (x) { pcts[x.label] = x.p; });
-        var ranked = TRUTHS.slice().sort(function (a, b) { return (pcts[b] || 0) - (pcts[a] || 0); });
-        var row = el("div", "dt-ai-guess dt-truths");
-        ranked.forEach(function (lab) {
-            var pp = pcts[lab], on = t.truth === lab;
-            var b = el("button", "chip dt-truth" + (on ? " is-on" : "") + (pp != null && pp >= 0.03 ? " is-ai" : "")); b.type = "button";
-            b.setAttribute("aria-pressed", on ? "true" : "false");
-            b.textContent = (TRUTH_NAME[lab] || AI_NAME[lab] || lab) + (pp != null && pp >= 0.03 ? " " + Math.round(pp * 100) + " %" : "");
-            b.title = on ? "Retirer ma reponse" : "C'est " + (AI_LABEL[lab] || lab);
-            b.addEventListener("click", function () { sendPhotoTruth(g, p, idx, on ? null : lab, on ? null : t.note); });
-            row.appendChild(b);
-        });
-        wrap.appendChild(row);
+        wrap.appendChild(q);
+        wrap.appendChild(truthRow(p.ai, p.answer, t.truth, "Retirer ma reponse", function (lab, on) {
+            sendPhotoTruth(g, p, idx, on ? null : lab, on ? null : t.note);
+        }));
         if (p.verifying) wrap.appendChild(el("div", "dt-ai-vote-by", "L'IA analyse cette photo..."));
         if (t.truth) {
             wrap.appendChild(el("div", "dt-ai-vote-by", "Reponse : " + (TRUTH_NAME[t.truth] || AI_NAME[t.truth] || t.truth) +
@@ -900,6 +1024,7 @@
         p.verifying = true;
         send("POST", API.episodes + "/" + g.ep.id + "/photos/" + idx + "/verify", { photo: p.photo }).then(function (r) {
             p.ai = r.ai;
+            p.answer = r.answer || null;
         }).catch(function () { p.ai_failed = true; }).then(function () {
             p.verifying = false;
             if (gallery === g && g.idx === idx) g.render();
@@ -1013,12 +1138,13 @@
     // l'IA (son pourcentage le plus haut), cote a cote
     function boxTag(p) {
         var tag = el("span", "dt-box-tag", "camera : " + (BOX_LABEL[p.type] || "objet"));
-        var top = aiTop(p.ai);
+        var top = aiAnswer(p);
         var tip = "Ce que la camera a cru voir" + (p.target_id ? " (cible " + p.target_id + ")" : "");
+        // Etiquette courte (camera seule) : la reponse de l'IA est sous la
+        // photo et en infobulle, sinon les etiquettes se chevauchent
         if (p.ai) {
             var lab = top ? (AI_NAME[top.label] || top.label).toLowerCase() + " " + Math.round(top.p * 100) + " %" : "rien";
-            tag.appendChild(el("b", "dt-box-tag-ai", "IA : " + lab));
-            tip += ", et ce que voit l'IA (son pourcentage le plus haut)";
+            tip += ". Reponse de l'IA : " + lab + ". " + aiDetail(p.ai, top);
         }
         tag.title = tip + ". Le cadre en pointilles = ce que detecte l'IA.";
         return tag;
@@ -1038,9 +1164,10 @@
             bx.appendChild(boxTag(p));
             wrap.appendChild(bx);
         }
-        aiBoxes(p).forEach(function (d) {
-            wrap.appendChild(aiBoxEl(d, { x: 0, y: 0, w: 1, h: 1 }));
+        aiBoxes(p).forEach(function (it) {
+            wrap.appendChild(aiBoxEl(it, { x: 0, y: 0, w: 1, h: 1 }, p));
         });
+        spreadWhenReady(wrap, im);
         ((p.label && p.label.boxes) || []).forEach(function (b) {
             wrap.appendChild(labelBoxEl(b, { x: 0, y: 0, w: 1, h: 1 }, p.label.by));
         });
@@ -1084,9 +1211,10 @@
             bx.appendChild(boxTag(p));
             if ((p.rect.y - r.y) / r.h < 0.08) bx.classList.add("tag-inside");
             z.appendChild(bx);
-            aiBoxes(p).forEach(function (d) { z.appendChild(aiBoxEl(d, r)); });
+            aiBoxes(p).forEach(function (it) { z.appendChild(aiBoxEl(it, r, p)); });
             ((p.label && p.label.boxes) || []).forEach(function (b) { z.appendChild(labelBoxEl(b, r, p.label.by)); });
             z.appendChild(el("span", "dt-zoom-x", "x" + Math.max(1, Math.round(1 / r.w * 10) / 10)));
+            requestAnimationFrame(function () { spreadNums(z); });
         });
         im.src = p.photo;
         z.appendChild(im);
@@ -1098,8 +1226,12 @@
     var gallery = null;
     function buildGallery(photos, start, ep) {
         var g = { photos: photos, idx: start, root: el("div", "dt-gallery"), ep: ep || null };
+        // Bloc visuel (photo + zoom cote a cote, vignettes) qui reste en haut
+        // de la fiche ; les questions defilent dessous sans perdre la photo
+        var visual = el("div", "dt-visual"), vrow = el("div", "dt-visual-row");
         var stage = el("div", "dt-stage");
         var side = el("div", "dt-zoom-wrap");
+        var answers = el("div", "dt-answers");
         var strip = photos.length > 1 ? el("div", "dt-strip") : null;
         function nav(cls, ic, delta, label) {
             var b = el("button", "dt-nav " + cls); b.type = "button"; b.title = label; b.setAttribute("aria-label", label);
@@ -1124,32 +1256,26 @@
             zv.title = "Agrandir le zoom";
             zv.addEventListener("click", function () { openLightbox(photos, g.idx, "zoom"); });
             side.appendChild(zv);
+            answers.textContent = "";
             var info = el("div", "dt-zoom-info");
-            info.appendChild(el("b", "", "Zoom sur la cible signalee"));
-            info.appendChild(el("span", "", fmtTime(p.at) + (p.target_id ? " - cible " + p.target_id : "")));
-            if (!p.rect) info.appendChild(el("span", "", "Pas de cadre fourni par la camera"));
+            // Qui dit quoi : la camera (cadre orange) contre l'IA, sur une ligne
+            info.appendChild(el("span", "dt-ans-head", fmtTime(p.at) + (p.target_id ? " - cible " + p.target_id : "") +
+                " - la camera signale : " + (BOX_LABEL[p.type] || "une cible") + (p.rect ? "" : " (sans cadre)")));
             var pa = p.ai;
-            // Qui dit quoi : la camera (cadre orange) contre l'IA (pointilles)
-            info.appendChild(el("span", "", "La camera a signale : " + (BOX_LABEL[p.type] || "une cible")));
             if (pa) {
-                var det = (pa.detections || []).filter(function (d) { return d.category !== "objet"; })[0];
-                var real = pa.decision === "confirmed" || (pa.real_conf || 0) >= 0.3;
-                var top = aiTop(pa);  // pourcentage le plus haut de l'IA, quel qu'il soit
-                var pd = real ? null : aiDoubt({ status: "filtered", guess: pa.guess });
-                var concl = el("span", "dt-ai-concl " + (real ? "is-real" : pd ? "is-doubt" : "is-false"));
-                concl.textContent = "L'IA voit surtout : " + (top ? (AI_NAME[top.label] || top.label).toLowerCase() + " (" + Math.round(top.p * 100) + " %)" : "rien") +
-                    (real ? " - intrusion confirmee" : pd ? " - a verifier, le detecteur n'a rien trouve" : " - fausse alerte probable");
+                // Une seule reponse de l'IA ; le detail des deux modeles en infobulle
+                var decided = pa.decision === "confirmed" || (!pa.decision && (pa.real_conf || 0) >= 0.3);
+                var top = aiAnswer(p);
+                // Personne / vehicule DANS le cadre orange (pas ailleurs sur la photo)
+                var onTarget = !!top && (top.label === "personne" || top.label === "vehicule") && (top.src !== "avis" || top.p >= 0.6);
+                var pd = onTarget ? null : aiDoubt({ status: "filtered", guess: pa.guess });
+                var concl = el("span", "dt-ai-concl " + (onTarget ? "is-real" : pd || decided ? "is-doubt" : "is-false"));
+                concl.textContent = "L'IA repond : " + (top ? (AI_NAME[top.label] || top.label).toLowerCase() + " (" + Math.round(top.p * 100) + " %)" : "rien") +
+                    (onTarget ? (decided ? " - intrusion confirmee" : " - sous le seuil d'alerte")
+                        : decided ? " - a verifier : l'alerte est passee pour une personne / un vehicule hors du cadre"
+                        : pd ? " - a verifier" : " - fausse alerte probable");
+                concl.title = aiDetail(pa, top);
                 info.appendChild(concl);
-                info.appendChild(el("span", "", "Detecteur IA : " + (det ? (AI_NAME[det.category] || det.category) + " " + Math.round(det.conf * 100) + " %" : "ni personne ni vehicule")));
-                if (pa.guess && pa.guess.length) {
-                    var gl = el("div", "dt-ai-guess");
-                    gl.appendChild(el("span", "", "Selon l'IA :"));
-                    pa.guess.slice(0, 3).forEach(function (gs, i) {
-                        if (i && gs.p < 0.03) return;
-                        gl.appendChild(el("span", "chip" + (i ? "" : " is-top"), (AI_NAME[gs.label] || gs.label) + " " + Math.round(gs.p * 100) + " %"));
-                    });
-                    info.appendChild(gl);
-                }
             }
             if (p.label) {
                 var nb = { personne: 0, vehicule: 0 };
@@ -1163,6 +1289,7 @@
             if (g.ep) {
                 if (!pa && !p.verifying && !p.ai_failed) verifyPhoto(g, p, g.idx);
                 info.appendChild(photoTruthPicker(g, p, g.idx));
+                if (detOthers(p).length) info.appendChild(detFeedback(g, p, g.idx));
                 var ab = el("button", "dt-btn dt-annot-open"); ab.type = "button";
                 ab.appendChild(icon("ads_click"));
                 ab.appendChild(document.createTextNode(p.label ? "Corriger les cadres" : "Indiquer personne / vehicule"));
@@ -1172,7 +1299,7 @@
                 });
                 info.appendChild(ab);
             }
-            side.appendChild(info);
+            answers.appendChild(info);
             g.marks();
         };
         // Vignettes : photo courante + photos deja repondues
@@ -1188,8 +1315,10 @@
             if (strip && strip.children[g.idx]) strip.children[g.idx].scrollIntoView({ block: "nearest", inline: "nearest" });
         };
         if (photos.length > 1) onSwipe(stage, function (d) { g.go(g.idx + d); });
-        g.root.appendChild(stage);
-        g.root.appendChild(side);
+        vrow.appendChild(stage);
+        vrow.appendChild(side);
+        visual.appendChild(vrow);
+        g.root.appendChild(visual);
         if (strip) {
             photos.forEach(function (p, i) {
                 var b = el("button"); b.type = "button"; b.title = fmtTime(p.at);
@@ -1198,8 +1327,9 @@
                 b.addEventListener("click", function () { g.go(i); });
                 strip.appendChild(b);
             });
-            g.root.appendChild(strip);
+            visual.appendChild(strip);
         }
+        g.root.appendChild(answers);
         g.render();
         return g;
     }

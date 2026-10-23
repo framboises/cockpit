@@ -198,6 +198,47 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   "Non verifiee", filtre `ai=filtered|alerted|voted`, bloc "Verification IA"
   avec pilules dans la fiche. Les avis (photo + cadre + verdict + avis) servent a regler le seuil
   et a constituer un jeu d'entrainement ; aucun reentrainement automatique.
+- UNE SEULE reponse de l'IA a l'ecran, SUR LA CIBLE DU CADRE ORANGE
+  (16/10/2026) : `detection._ai_answer(photo_ai, rect)` publie `answer
+  {label, p, src, k?}` par photo et `ai.answer` + `ai.photo` (photo qui a
+  decide) pour l'episode et la galerie (dont la carte montre CETTE photo).
+  QUI EST QUI (regle unique, 16/10/2026 soir) : cadre orange = alerte de la
+  camera = ce que l'operateur classe ("c'est quoi ?"). Le cadre du detecteur
+  qui EST cette cible = `_target_det` : meilleur IoU avec le cadre orange
+  (candidat si IoU >= 0.1 ou centre dans le cadre elargi de 25 %), JAMAIS la
+  meilleure confiance (sinon un grand vehicule qui deborde sur un petit
+  cadre de personne gagnait : 137 08:44:42, IA 1 vehicule 47 % contre IA 2
+  personne 35 % dedans). La reponse affichee = classe et confiance de CE
+  cadre (k), sans substitution "detecteur+avis" (elle donnait "vehicule" sur
+  un cadre "personne") ; sans cadre coincident : 1er de l'avis SigLIP
+  (calcule sur le cadrage du cadre orange), sans k. Le front dessine
+  toujours le cadre k (meme < 20 %), cercle sa pastille d'orange et la
+  question le nomme ("= cadre IA n"). Le detecteur voit TOUTE la photo : avant, une voiture garee a cote
+  (137 du 16/10 12:07, personne dans le cadre) donnait "vehicule 77 %". Seule
+  la pilule de la reponse porte un pourcentage "(IA N %)" ; detail en
+  infobulle (`aiDetail`). Mesure sur 4455 confirmees : 346 sans personne /
+  vehicule du detecteur dans le cadre, dont 306 ou l'avis y voit bien une
+  cible (> 60 %, ex. vehicule ebloui par ses phares), 27 douteuses, 13
+  probablement confirmees a tort par un objet hors cadre (025, 901). La
+  DECISION du verificateur n'est pas changee (tout le cadrage compte).
+- Retour PAR CADRE DU DETECTEUR (pointilles, 16/10/2026) : sous les pilules
+  de la photo, une ligne par cadre IA (numerote "IA 1", "IA 2"... comme sur
+  la photo ; survol = le cadre ressort, clic sur l'etiquette = sa ligne) :
+  Juste / Faux / "C'est une personne|un vehicule".
+  `POST /api/detection/episodes/<id>/photos/<idx>/detections/<k>` {photo,
+  verdict: juste|faux|personne|vehicule|null} -> `photos.N.det_fb.<k>`
+  {verdict, ai_category, ai_class, conf, box, by, at} (k = index dans
+  `ai.detections`, copie du cadre au cas ou). Reclasser vers sa propre
+  classe = "juste". Le cadre qui EST la cible de la camera (`answer.k`,
+  choisi par `_ai_answer`) n'a PAS de ligne : son retour est deduit de la
+  reponse "c'est quoi ?" de la photo (`set_photo_truth`, `auto: "photo"` :
+  meme classe = juste, autre personne/vehicule = reclasse, velo = personne,
+  le reste = faux ; retire avec la reponse ; un retour manuel n'est jamais
+  ecrase). Bloc masque s'il n'y a pas d'autre cadre. DISTINCT de `label` (cadres dessines = verite complete
+  de la photo) : un retour par cadre ne dit rien des cibles ratees.
+  Destination : reentrainement du detecteur YOLO (niveau 3, PAS encore
+  automatise, aucun script ne lit det_fb aujourd'hui). La case du zoom garde son 4:3 (`align-self: flex-start`) :
+  etiree par la colonne d'a cote, le recadrage CSS tombait a cote de la cible.
 - Reponse PHOTO PAR PHOTO (15/10/2026) : une photo = une cible de la camera
   (verifie : 6467 photos pour 6425 targetID sur 3 jours), et un episode peut
   en cumuler 30. `photos.N.truth {truth, note, vote?, by, at}` via

@@ -868,7 +868,10 @@ def gallery():
             if mode == "revoir" and not rv["score"]:
                 continue
             ph = e.get("photos") or []
-            cover = ph[-1]
+            # La carte montre la photo qui a DECIDE (ai.photo) : c'est sur son
+            # cadre orange que portent la reponse de l'IA et l'avis d'episode
+            dp = (e.get("ai") or {}).get("photo")
+            cover = next((p for p in ph if dp and p.get("photo") == dp), ph[-1])
             items.append({
                 "kind": "intrusion", "id": str(e["_id"]), "at": _iso(e.get("started_at")),
                 "camera_name": e.get("camera_name", ""), "channel_name": e.get("channel_name", ""),

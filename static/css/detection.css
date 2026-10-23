@@ -222,7 +222,33 @@
 /* Cadre de l'IA locale (pointilles) : etiquette sous le cadre, pour ne pas
    recouvrir celle de la camera */
 .dt-box.dt-box-ai { border-style: dashed; border-width: 2px; }
-.dt-box.dt-box-ai .dt-box-tag { bottom: auto; top: 100%; border-radius: 0 2px 2px 2px; }
+.dt-box.dt-box-ai .dt-box-tag { bottom: auto; top: 100%; border-radius: 0 2px 2px 2px; cursor: pointer; }
+/* Numero du cadre IA (meme numero que sa ligne de retour), sous son coin
+   gauche ; decale par spreadNums() s'il en chevauche un autre */
+.dt-box-num { position: absolute; left: -2px; top: 100%; margin-top: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--bc, #7c3aed); color: #fff; font: 700 .62rem/16px 'JetBrains Mono', monospace; text-align: center;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .85); pointer-events: auto; cursor: pointer; white-space: nowrap; }
+.dt-box.dt-box-ai.is-fb-faux .dt-box-num { text-decoration: line-through; }
+.dt-box-num.is-target { box-shadow: 0 0 0 2px #f97316; }
+.dt-q-orange { color: #ea580c; }
+.dt-photo-big .dt-box-num, .dt-zoom-big .dt-box-num { min-width: 20px; height: 20px; border-radius: 10px; font-size: .74rem; line-height: 20px; }
+/* Retour de l'operateur sur un cadre de l'IA : juste = trait plein,
+   faux = estompe, autre classe = trait plein orange ; survol de sa ligne */
+.dt-box.dt-box-ai.is-fb-juste { border-style: solid; }
+.dt-box.dt-box-ai.is-fb-faux { opacity: .45; }
+.dt-box.dt-box-ai.is-fb-faux .dt-box-tag { text-decoration: line-through; }
+.dt-box.dt-box-ai.is-fb-reclass { border-style: solid; --bc: #ea580c; }
+.dt-box.dt-box-ai.is-hl { z-index: 3; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--bc); opacity: 1; }
+.dt-detfb { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line, #e2e8f0); }
+.dt-detfb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 3px 4px; border-radius: 8px; transition: background .3s; }
+.dt-detfb-row:hover, .dt-detfb-row.is-flash { background: #f5f3ff; }
+.dt-detfb-n { min-width: 20px; height: 20px; border-radius: 10px; background: #0f172a; color: #fff; font: 700 .7rem/20px 'JetBrains Mono', monospace; text-align: center; }
+.dt-detfb-lab { font-size: .8rem; font-weight: 600; color: var(--text); margin-right: 2px; }
+.dt-detfb .chip.dt-detfb-btn { cursor: pointer; border: 1px solid transparent; background: #f1f5f9; color: var(--text); font-size: .74rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; }
+.dt-detfb .chip.dt-detfb-btn.is-juste.is-on { background: #16a34a; color: #fff; }
+.dt-detfb .chip.dt-detfb-btn.is-faux.is-on { background: #dc2626; color: #fff; }
+.dt-detfb .chip.dt-detfb-btn.is-reclass.is-on { background: #ea580c; color: #fff; }
+.dt-detfb-hint { font-size: .72rem; color: var(--muted); }
 .dt-ai-guess { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .dt-ai-guess .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px;
   background: #f5f3ff; color: #6d28d9; font-size: .74rem; font-weight: 600; }
@@ -259,12 +285,27 @@ button.chip.dt-truth.is-on { background: #16a34a; border-color: #16a34a; color: 
 .dt-nav .material-symbols-outlined { font-size: 26px; }
 .dt-counter { position: absolute; right: 8px; bottom: 8px; padding: 2px 9px; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: .72rem; font-weight: 700; line-height: 1.5; }
 .dt-zoom-wrap { display: flex; gap: 12px; align-items: stretch; }
-.dt-zoom { position: relative; flex: 0 0 56%; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 10px; background: #0f172a; cursor: zoom-in; display: flex; align-items: center; justify-content: center; color: #64748b; }
+.dt-zoom { position: relative; flex: 0 0 56%; aspect-ratio: 4 / 3; align-self: flex-start; overflow: hidden; border-radius: 10px; background: #0f172a; cursor: zoom-in; display: flex; align-items: center; justify-content: center; color: #64748b; }
 .dt-zoom img { position: absolute; max-width: none; height: auto; display: block; }
 .dt-zoom .dt-box { z-index: 1; }
 .dt-zoom-x { position: absolute; left: 8px; bottom: 8px; z-index: 2; padding: 1px 7px; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font: 700 .68rem/1.5 'JetBrains Mono', monospace; }
 .dt-zoom-info { display: flex; flex-direction: column; gap: 4px; justify-content: center; font-size: .8rem; color: var(--muted); min-width: 0; }
 .dt-zoom-info b { color: var(--text); font-size: .9rem; }
+/* Bloc visuel colle en haut de la fiche (photo + zoom cote a cote,
+   vignettes) : les questions defilent dessous, la photo reste visible.
+   top / marge negatifs = le padding haut de .dt-detail-body */
+.dt-visual { position: sticky; top: -14px; z-index: 5; margin-top: -14px; padding: 14px 0 8px; background: var(--card);
+  display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 10px -10px rgba(15, 23, 42, .35); }
+.dt-visual-row { display: flex; gap: 8px; align-items: flex-start; }
+.dt-visual-row .dt-stage { flex: 1.45 1 0; min-width: 0; }
+.dt-visual-row .dt-zoom-wrap { flex: 1 1 0; min-width: 0; display: block; }
+.dt-visual-row .dt-zoom { flex: none; width: 100%; }
+.dt-visual .dt-photo-cap { font-size: .66rem; padding: 2px 6px; }
+.dt-visual .dt-nav { width: 32px; height: 32px; }
+.dt-visual .dt-strip button { width: 64px; height: 48px; }
+.dt-answers .dt-zoom-info { gap: 6px; justify-content: flex-start; }
+.dt-ans-head { font-size: .76rem; color: var(--muted); }
+.dt-answers .dt-photo-truth { margin-top: 2px; padding-top: 6px; }
 .dt-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 .dt-strip button { flex: none; width: 92px; height: 69px; padding: 0; border: 2px solid transparent; border-radius: 7px; overflow: hidden; background: #e2e8f0; cursor: pointer; }
 .dt-strip button.is-current { border-color: var(--brand); }
@@ -430,6 +471,9 @@ button.chip.dt-truth.is-on { background: #16a34a; border-color: #16a34a; color: 
   .dt-zoom-wrap { flex-direction: column; }
   .dt-zoom { flex: none; width: 100%; }
   .dt-strip button { width: 84px; height: 63px; }
+  .dt-visual { top: -10px; margin-top: -10px; padding-top: 10px; }
+  .dt-visual .dt-nav { width: 36px; height: 36px; }
+  .dt-visual .dt-strip button { width: 56px; height: 42px; }
   .dt-facts { grid-template-columns: repeat(3, 1fr); }
 
   /* Visionneuse : plein ecran, glisser pour naviguer */

@@ -257,13 +257,75 @@ def _zones_of(ep, zones):
     return out
 
 
+_REAL_CATS = ("personne", "vehicule")
+
+
+def _iou(a, b):
+    iw = max(0.0, min(a["x"] + a["w"], b["x"] + b["w"]) - max(a["x"], b["x"]))
+    ih = max(0.0, min(a["y"] + a["h"], b["y"] + b["h"]) - max(a["y"], b["y"]))
+    inter = iw * ih
+    union = a["w"] * a["h"] + b["w"] * b["h"] - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _match_score(b, r):
+    """Le cadre b (detecteur) est-il LA cible signalee par la camera (cadre
+    r) ? Score = IoU (position ET taille : un grand vehicule qui deborde sur
+    un petit cadre de personne n'est pas cette cible). Candidat si IoU >=
+    0.1 ou si le centre de b tombe dans r elargi de 25 % (cadres camera
+    approximatifs). 0 sinon."""
+    iou = _iou(b, r)
+    cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
+    mx, my = r["w"] * 0.25, r["h"] * 0.25
+    inside = r["x"] - mx <= cx <= r["x"] + r["w"] + mx and r["y"] - my <= cy <= r["y"] + r["h"] + my
+    return max(iou, 0.01) if iou >= 0.1 or inside else 0.0
+
+
+def _target_det(pai, rect):
+    """Index du cadre du detecteur qui EST la cible de la camera, ou None.
+    Un seul : le meilleur recouvrement (pas la meilleure confiance)."""
+    best_i, best_s = None, 0.0
+    for i, d in enumerate((pai or {}).get("detections") or []):
+        if d.get("category") not in _REAL_CATS or not d.get("box"):
+            continue
+        s = _match_score(d["box"], rect) if rect else 0.0
+        if s > best_s:
+            best_i, best_s = i, s
+    return best_i
+
+
+def _ai_answer(pai, rect):
+    """LA reponse de l'IA sur la cible signalee (cadre orange de la camera),
+    une seule, toujours rattachee a ce que l'operateur voit :
+    - un cadre du detecteur coincide avec le cadre orange (_target_det) :
+      sa classe et sa confiance, k = son index (pastille cerclee d'orange,
+      jugee par la reponse "c'est quoi ?" de la photo) ;
+    - sinon le 1er de l'avis SigLIP (calcule sur le cadrage du cadre
+      orange), sans k.
+    Jamais de melange : la classe affichee est celle du cadre k.
+    -> {label, p, src, k?} ou None."""
+    if not pai:
+        return None
+    k = _target_det(pai, rect)
+    if k is not None:
+        d = pai["detections"][k]
+        return {"label": d["category"], "p": round(d.get("conf") or 0, 3), "src": "detecteur", "k": k}
+    guess = pai.get("guess") or []
+    if guess:
+        return {"label": guess[0].get("label"), "p": guess[0].get("p"), "src": "avis"}
+    return None
+
+
 def _pub_ai(ep):
     """Verdict de la verification IA locale (recepteur + service
     IntrusionVerifier) et avis de l'operateur (pouce). None si non verifiee."""
     ai, vote = ep.get("ai") or {}, ep.get("ai_vote") or {}
     if not ai and not vote:
         return None
-    return {"status": ai.get("status"), "label": ai.get("label"), "conf": ai.get("conf"),
+    # Reponse de l'IA sur la photo qui a decide (sa cible)
+    dp = next((p for p in ep.get("photos") or [] if ai.get("photo") and p.get("photo") == ai.get("photo")), None)
+    answer = _ai_answer(dp.get("ai"), dp.get("rect")) if dp else None
+    return {"answer": answer, "photo": _img(ai.get("photo")) if ai.get("photo") else None, "status": ai.get("status"), "label": ai.get("label"), "conf": ai.get("conf"),
             "real_conf": ai.get("real_conf"), "reason": ai.get("reason"), "guess": ai.get("guess") or [],
             "by": ai.get("by"),  # "detecteur" ou "detecteur+avis" (verificateur du 14/10/2026)
             "vote": vote.get("vote"), "truth": vote.get("truth"), "note": vote.get("note", ""),
@@ -307,6 +369,9 @@ def _pub_episode(ep, zones, now, full=False):
                            "type": p.get("type"), "rect": p.get("rect"), "target_id": p.get("target_id"),
                            "ai": p.get("ai"), "label": _pub_label(p.get("label")),
                            "truth": _pub_truth(p.get("truth")),
+                           "answer": _ai_answer(p.get("ai"), p.get("rect")),
+                           # Retours sur les cadres du detecteur {index: {verdict, by, at}}
+                           "det_fb": {str(kk): _pub_det_fb(v) for kk, v in (p.get("det_fb") or {}).items()},
                            # Capture de Cockpit (camera sans photo, detection_snapshot.py)
                            "snapshot": bool(p.get("snapshot")), "snap_delay_s": p.get("snap_delay_s")}
                           for p in ep.get("photos") or []]
@@ -884,6 +949,24 @@ def set_photo_truth(eid, idx):
         upd["$set"] = {"photos.%d.truth" % idx: doc}
     else:
         upd["$unset"] = {"photos.%d.truth" % idx: ""}
+    # Le cadre du detecteur qui EST la cible de la camera recoit le retour
+    # deduit de la reponse (pas de ligne a part), sauf retour donne a la main
+    ans = _ai_answer(p.get("ai"), p.get("rect"))
+    k = ans.get("k") if ans else None
+    dets = (p.get("ai") or {}).get("detections") or []
+    if k is not None and k < len(dets):
+        cur = (p.get("det_fb") or {}).get(str(k))
+        key = "photos.%d.det_fb.%d" % (idx, k)
+        if not cur or cur.get("auto"):
+            if truth:
+                d = dets[k]
+                cls = "personne" if truth == "velo" else truth
+                verdict = "juste" if cls == d.get("category") else cls if cls in _REAL_CATS else "faux"
+                upd.setdefault("$set", {})[key] = {
+                    "verdict": verdict, "ai_category": d.get("category"), "ai_class": d.get("class"),
+                    "conf": d.get("conf"), "box": d.get("box"), "by": _who(), "at": now, "auto": "photo"}
+            elif cur:
+                upd.setdefault("$unset", {})[key] = ""
     ai, ev = ep.get("ai") or {}, ep.get("ai_vote") or {}
     if ai.get("photo") == p.get("photo") and ai.get("status") in ("confirmed", "filtered") \
             and (not ev or ev.get("auto") == "photo"):
@@ -906,6 +989,53 @@ def _pub_truth(t):
             "by": t.get("by", ""), "at": _iso(t.get("at"))}
 
 
+DET_VERDICTS = ("juste", "faux", "personne", "vehicule")
+
+
+@detection_bp.route("/api/detection/episodes/<eid>/photos/<int:idx>/detections/<int:k>", methods=["POST"])
+def set_detection_feedback(eid, idx, k):
+    """Retour de l'operateur sur UN cadre du detecteur (pointilles) d'une
+    photo : {photo, verdict: juste|faux|personne|vehicule|null}. Stocke dans
+    photos.N.det_fb.<k> avec une copie du cadre et de la classe de l'IA
+    (exemples pour reentrainer le detecteur, niveau 3). Distinct de `label`
+    (cadres dessines = verite COMPLETE de la photo) : un retour par cadre ne
+    dit rien des cibles que l'IA a ratees."""
+    db = _ensure_db()
+    oid = _oid(eid)
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"photos": 1}) if oid else None
+    if not ep:
+        return jsonify({"error": "Intrusion introuvable"}), 404
+    data = request.get_json(silent=True) or {}
+    p = _photo_at(ep, idx, data.get("photo"))
+    if not p:
+        return jsonify({"error": "Photo introuvable (la liste a change, rouvrez la fiche)"}), 409
+    dets = (p.get("ai") or {}).get("detections") or []
+    if k < 0 or k >= len(dets) or not dets[k].get("box"):
+        return jsonify({"error": "Cadre de l'IA introuvable"}), 409
+    verdict = data.get("verdict")
+    if verdict is not None and verdict not in DET_VERDICTS:
+        return jsonify({"error": "Retour invalide"}), 400
+    d = dets[k]
+    key = "photos.%d.det_fb.%d" % (idx, k)
+    if verdict:
+        # "personne" / "vehicule" sur un cadre deja de cette classe = juste
+        if verdict == d.get("category"):
+            verdict = "juste"
+        doc = {"verdict": verdict, "ai_category": d.get("category"), "ai_class": d.get("class"),
+               "conf": d.get("conf"), "box": d["box"], "by": _who(), "at": datetime.now(timezone.utc)}
+        db["hik_intrusions"].update_one({"_id": oid, "photos.%d.photo" % idx: p.get("photo")}, {"$set": {key: doc}})
+    else:
+        doc = None
+        db["hik_intrusions"].update_one({"_id": oid, "photos.%d.photo" % idx: p.get("photo")}, {"$unset": {key: ""}})
+    return jsonify({"ok": True, "k": k, "fb": _pub_det_fb(doc)})
+
+
+def _pub_det_fb(f):
+    if not f:
+        return None
+    return {"verdict": f.get("verdict"), "by": f.get("by", ""), "at": _iso(f.get("at"))}
+
+
 VERIFIER_URL = os.getenv("INTRUSION_VERIFIER_URL", "http://127.0.0.1:4011/verify")
 
 
@@ -926,7 +1056,7 @@ def verify_photo(eid, idx):
     if not p:
         return jsonify({"error": "Photo introuvable (la liste a change, rouvrez la fiche)"}), 409
     if p.get("ai"):
-        return jsonify({"ok": True, "ai": p["ai"]})
+        return jsonify({"ok": True, "ai": p["ai"], "answer": _ai_answer(p["ai"], p.get("rect"))})
     try:
         req = urllib.request.Request(VERIFIER_URL, data=json.dumps({"photo": p.get("photo"), "rect": p.get("rect")}).encode(),
                                      headers={"Content-Type": "application/json"})
@@ -940,7 +1070,7 @@ def verify_photo(eid, idx):
           "detections": res.get("detections") or [], "guess": res.get("guess") or [], "on_demand": True}
     db["hik_intrusions"].update_one({"_id": oid, "photos.%d.photo" % idx: p.get("photo")},
                                     {"$set": {"photos.%d.ai" % idx: ai}})
-    return jsonify({"ok": True, "ai": ai})
+    return jsonify({"ok": True, "ai": ai, "answer": _ai_answer(ai, p.get("rect"))})
 
 
 LABEL_CATEGORIES = ["personne", "vehicule"]

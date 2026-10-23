@@ -1761,10 +1761,10 @@
             });
         } else {
             var ai = it.ai || {};
+            // LA reponse de l'IA sur la cible du cadre orange (serveur :
+            // detection._ai_answer), comme la page Intrusions
+            var top = ai.answer || null;
             if (ai.status) {
-                // Pourcentage le plus haut de l'IA (detecteur ou avis), comme la page Intrusions
-                var top = ai.label && ai.label !== "rien" ? { label: ai.label, p: ai.conf || 0 } : null;
-                if (ai.guess && ai.guess[0] && (!top || ai.guess[0].p > top.p)) top = ai.guess[0];
                 var lab = top ? (AI_NAME[top.label] || top.label) + " " + Math.round(top.p * 100) + " %" : "rien";
                 verdict.appendChild(chip(ai.status === "filtered" ? "is-alerts" : ai.status === "confirmed" ? "" : "is-obs",
                     ai.status === "filtered" ? "filter_alt" : "verified", (ai.status === "filtered" ? "Filtree : " : "IA : ") + lab));
@@ -1776,13 +1776,13 @@
             var row = el("div", "ia-gal-truths");
             var props = (ai.guess || []).filter(function (g) { return g.p >= 0.03; }).slice(0, 3).map(function (g) { return g.label; });
             ["personne", "vehicule"].forEach(function (l) { if (props.indexOf(l) < 0) props.push(l); });
+            if (top) props = [top.label].concat(props.filter(function (l) { return l !== top.label; }));
             if (ai.truth && props.indexOf(ai.truth) < 0) props.unshift(ai.truth);
-            var pc = {};
-            (ai.guess || []).forEach(function (g) { pc[g.label] = g.p; });
             props.forEach(function (l) {
-                var on = ai.truth === l;
+                var on = ai.truth === l, isAns = top && top.label === l;
                 var bt = el("button", "ia-itruth" + (on ? " is-on" : "")); bt.type = "button";
-                bt.textContent = (AI_NAME[l] || l) + (pc[l] >= 0.03 ? " " + Math.round(pc[l] * 100) + " %" : "");
+                // Seule la reponse de l'IA porte un pourcentage
+                bt.textContent = (AI_NAME[l] || l) + (isAns ? " (IA " + Math.round(top.p * 100) + " %)" : "");
                 bt.title = on ? "Retirer mon avis" : "C'est ca";
                 bt.addEventListener("click", function () {
                     var nv = on ? null : l;
