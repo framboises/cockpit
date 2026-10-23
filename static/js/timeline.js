@@ -623,7 +623,7 @@ function applyPreparationStatus(cardEl, statusStr) {
   // pastille dans le résumé
   let chip = cardEl.querySelector('.prep-chip');
   if (!chip) {
-    const timeCol = cardEl.querySelector('.event-time');
+    const timeCol = cardEl.querySelector('.event-time') || cardEl.querySelector('.ev2-side');
     if (timeCol) {
       chip = document.createElement('span');
       chip.className = 'prep-chip';
@@ -665,15 +665,8 @@ function createEventItem(date, item) {
     eventItem.setAttribute('data-minute', getItemSortMinute(item)); // pour l'auto-scroll
     eventItem.classList.add("event-item");
 
-    // Définir une icône selon la catégorie
-    let iconHtml = "";
-    if (item.category.indexOf("Motos") !== -1) {
-        iconHtml = `<span class="material-icons">motorcycle</span>`;
-    } else if (item.category.indexOf("Evénement") !== -1) {
-        iconHtml = `<span class="material-icons">event</span>`;
-    } else {
-        iconHtml = `<span class="material-icons">info</span>`;
-    }
+    // Icone selon la nature de la vignette (porte, parking, piste...)
+    let iconHtml = '<span class="material-symbols-outlined ev2-ic" aria-hidden="true">' + _tlIconFor(item) + '</span>';
     // Evenement voisin (Antares, MSB, Le Mans FC) : carte distincte, icone du
     // type, badge du lieu ; les vignettes de flux (arrivees / sortie) sont
     // plus discretes (cf. voisins_sync._vignettes).
@@ -689,20 +682,20 @@ function createEventItem(date, item) {
 
     const fullTitle = (item.activity || '').split('/')[0].trim();
     const fullPlace = (item.place || '').split('/')[0].trim();
-    const truncatedTitle = truncateText(fullTitle || 'Sans titre', 50);
 
-    // Gestion de l'affichage des heures (normalise "HHhMM" -> "HH:MM")
-    let timeInfo = "";
-    if (item.start && item.start.trim() !== "" && item.start.toUpperCase() !== "TBC") {
-        timeInfo = formatHHMM(item.start);
-        if (item.end && item.end.trim() !== "" && item.end.toUpperCase() !== "TBC") {
-            timeInfo += " - " + formatHHMM(item.end);
-        }
-    } else if (item.end && item.end.trim() !== "" && item.end.toUpperCase() !== "TBC") {
-        timeInfo = formatHHMM(item.end);
-    } else {
-        timeInfo = "TBC";
+    // Ligne secondaire : lieu, categorie hors palette (plateau, client...),
+    // heure de fin. Les categories connues sont portees par la couleur du bord.
+    const subParts = [];
+    if (fullPlace) subParts.push(_acoEsc(fullPlace));
+    if (tlCatIsFallback(item.category)) subParts.push(_acoEsc(String(item.category).replace(/\s+/g, ' ').trim()));
+    const ocKind = getOpenCloseKind(item);
+    if (isValidHHMM(item.end) && ocKind !== 'close' && !(isValidHHMM(item.start) && formatHHMM(item.start) === formatHHMM(item.end))) {
+        subParts.push((ocKind === 'open' ? 'fermeture ' : "jusqu'à ") + formatHHMM(item.end));
     }
+    const subHtml = subParts.join(' · ');
+    eventItem.classList.add(...tlCatClasses(item.category));
+    const tasks = splitTodo(item.todo || "");
+    const doneTasks = tasks.filter(t => t.done).length;
 
     // statut “métier” (base)
     const baseStatus = getPrepStatus(item);
@@ -710,45 +703,34 @@ function createEventItem(date, item) {
     const _now = TimelineClock.get();
     const _nowYMD = ymdLocal(_now);
     const _nowMin = _now.getHours()*60 + _now.getMinutes();
-    const displayStatus = getRuntimeDisplayStatus(baseStatus, item, date, _nowYMD, _nowMin);
+    // Pas de preparation (ni statut ni taches : creneau piste, voisin...) :
+    // pas de pastille, sinon il passerait "En retard" des son debut
+    const displayStatus = baseStatus ? getRuntimeDisplayStatus(baseStatus, item, date, _nowYMD, _nowMin) : null;
 
     const prepHtml = displayStatus
     ? `<span class="prep-chip prep-${displayStatus}" title="Préparation : ${getPrepLabel(displayStatus)}">${getPrepLabel(displayStatus)}</span>`
     : "";
 
-    // Construction du résumé en deux colonnes
+    // Vignette compacte : titre + ligne secondaire, une colonne d'etat a
+    // droite (compte a rebours pose par _tlTick). Le detail complet est dans
+    // le tiroir (clic sur la vignette) ; seules les taches se deplient ici.
     eventItem.innerHTML = `
-        <div class="event-summary">
-            <div class="event-title">
-                ${iconHtml}
-                <h5>${truncatedTitle}</h5>
+        <div class="ev2">
+            <div class="ev2-main">
+                <div class="ev2-ttl">${iconHtml}<span class="ev2-tx">${_acoEsc(fullTitle || 'Sans titre')}</span></div>
+                ${subHtml ? `<div class="ev2-sub">${subHtml}</div>` : ''}
             </div>
-            <div class="event-time">
-                <p class="time-info">${timeInfo}</p>
-                ${vz ? _vzCardBadgeHtml(item) : getCategoryChipHtml(item.category)}
+            <div class="ev2-side">
+                <span class="ev2-cd"></span>
+                ${vz ? _vzCardBadgeHtml(item) : ''}
                 ${_acoBadgeHtml(item)}
                 ${getAccessChipHtml(item)}
-                <p class="event-location">${fullPlace}</p>
                 ${prepHtml}
-            </div>
-            <div class="buttons-container">
+                ${tasks.length ? `<button type="button" class="ev2-todo" title="Tâches de préparation" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">checklist</span>${doneTasks}/${tasks.length}</button>` : ''}
                 ${_plCardBtnHtml(item)}
-                <button class="expand-btn">
-                    <span class="material-icons">expand_more</span>
-                </button>
             </div>
         </div>
-        <div class="toggle-content">
-            <!-- Version détaillée -->
-            <p><strong>Titre complet :</strong> ${fullTitle}</p>
-            <p><strong>Heure de début :</strong> ${formatHHMM(item.start) || "TBC"}</p>
-            <p><strong>Heure de fin :</strong> ${formatHHMM(item.end) || "TBC"}</p>
-            <p><strong>Durée :</strong> ${item.duration}</p>
-            <p><strong>Département :</strong> ${item.department}</p>
-            <p><strong>Lieu détaillé :</strong> ${item.place ? item.place : "Non spécifié"}</p>
-            <p><strong>Commentaires :</strong> ${item.remark ? item.remark : "Non spécifié"}</p>
-            ${renderTodoSticky(item)}
-        </div>
+        ${tasks.length ? `<div class="toggle-content">${renderTodoSticky(item)}</div>` : ''}
     `;
 
     const sticky = eventItem.querySelector('.todo-sticky');
@@ -771,6 +753,8 @@ function createEventItem(date, item) {
 
         const txt = li.querySelector('.todo-text');
         if (txt) txt.classList.toggle('todo-done', input.checked);
+        const todoBtn = eventItem.querySelector('.ev2-todo');
+        if (todoBtn && todoBtn.lastChild) todoBtn.lastChild.nodeValue = tasks.filter(t => t.done).length + '/' + tasks.length;
 
         // 2) sauvegarde TODO (toujours)
         fetch('/update_timetable_event', {
@@ -849,20 +833,21 @@ function createEventItem(date, item) {
       });
     }
 
-    // Attacher l'écouteur sur le bouton d'extension
-    const expandBtn = eventItem.querySelector(".expand-btn");
-    if (expandBtn) {
-        expandBtn.addEventListener("click", function(e) {
-            e.stopPropagation(); // Empêche l'ouverture de la modale lors du clic sur ce bouton
-            toggleDetails(e, this);
+    // Bouton des taches : deplie la liste a cocher sans ouvrir le tiroir
+    const todoToggle = eventItem.querySelector(".ev2-todo");
+    if (todoToggle) {
+        todoToggle.addEventListener("click", function(e) {
+            e.stopPropagation();
+            const open = eventItem.classList.toggle('expanded');
+            todoToggle.setAttribute('aria-expanded', String(open));
         });
     }
 
     _plWireCardBtn(eventItem.querySelector('.pl-open-btn'), item, date);
 
-    // Rendre la vignette cliquable pour ouvrir la modale détaillée (en dehors du bouton d'extension)
+    // Vignette cliquable : tiroir de detail (sauf boutons et liste de taches)
     eventItem.addEventListener('click', function(e) {
-    if (!e.target.closest(".expand-btn")) {
+    if (!e.target.closest(".expand-btn, .ev2-todo, .toggle-content")) {
         openEventDrawer(date, item);
     }
     });
@@ -905,45 +890,45 @@ function createClusterItem(date, cluster) {
   el.setAttribute('data-minute', getClusterSortMinute(cluster));
   el.__clusterData = { cluster, date }; // 👈 pour les recalculs live
 
+  // Regroupement sur une vignette : "Ouverture · 12 parkings", lieux en
+  // ligne secondaire, compteur de vignettes pretes ; depliage = lieux en puces.
+  const names = cluster.items.map(ch => (ch.place || '').split('/')[0].trim()).filter(Boolean);
+  const readyN = cluster.items.filter(ch => getPrepStatus(ch) === 'ready').length;
+  el.classList.add('is-cluster', ...tlCatClasses(cluster.items?.[0]?.category));
   el.innerHTML = `
-    <div class="event-summary">
-      <div class="event-title">
-        <span class="material-symbols-outlined">${headerIcon}</span>
-        <h5>${cfg.label} — ${kindLabel} ${timeInfo} (${count})</h5>
+    <div class="ev2">
+      <div class="ev2-main">
+        <div class="ev2-ttl"><span class="material-symbols-outlined ev2-ic" aria-hidden="true">${headerIcon}</span><span class="ev2-tx">${kindLabel} · ${count} ${_acoEsc(String(cfg.label || cluster.type || '').toLowerCase())}</span></div>
+        <div class="ev2-sub">${_acoEsc(names.join(', '))}</div>
       </div>
-      <div class="event-time">
-        <p class="time-info">${timeInfo}</p>
-        ${getCategoryChipHtml(cluster.items?.[0]?.category)}
-        <p class="event-location">Regroupement</p>
+      <div class="ev2-side">
+        <span class="ev2-cd"></span>
         ${clusterPrepHtml}
-      </div>
-      <div class="buttons-container">
-        <button class="expand-btn"><span class="material-icons">expand_more</span></button>
+        <span class="ev2-agg" title="Vignettes prêtes">${readyN}/${count} prêts</span>
+        <button type="button" class="expand-btn" aria-label="Voir les lieux"><span class="material-icons">expand_more</span></button>
       </div>
     </div>
     <div class="toggle-content">
-      <ul class="cluster-list" style="list-style:none; padding-left:0; margin:0;">
+      <ul class="cluster-list">
         ${cluster.items.map(ch => {
           const title = (ch.activity||'Sans titre').split('/')[0].trim();
-          const place = (ch.place||'—').split('/')[0].trim();
-          const hours = (ch.start && ch.start!=='TBC' ? formatHHMM(ch.start) : '') +
-                        (ch.end   && ch.end  !=='TBC' ? (' - '+formatHHMM(ch.end)) : '');
+          const place = (ch.place||'').split('/')[0].trim() || title;
+          const sfx = (/\s-\s([^-]+)$/.exec(title) || [])[1] || '';
+          const hs = isValidHHMM(ch.start) ? formatHHMM(ch.start) : '';
+          const he = isValidHHMM(ch.end) ? formatHHMM(ch.end) : '';
+          const hours = hs && he ? hs + ' - ' + he : (hs || he);
           // chip individuel (base métier, pas besoin runtime ici dans la sous-ligne)
           const s = getPrepStatus(ch);
           const chip = s ? `<span class="prep-chip prep-${s} sm" title="Préparation : ${getPrepLabel(s)}">${getPrepLabel(s)}</span>` : '';
           return `
-            <li class="cluster-line" data-child-id="${ch._id}" style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer;">
-              <span class="material-icons" style="font-size:18px; opacity:.8;">chevron_right</span>
-              <div style="flex:1; display:flex; align-items:center; gap:8px;">
-                <div style="flex:1;">
-                  <div style="font-weight:700;">${title}</div>
-                  <div style="opacity:.8; font-size:12px;">${place} ${hours?('• '+hours):''}</div>
-                </div>
-                ${_acoBadgeHtml(ch, true)}
-                ${getAccessChipHtml(ch)}
-                ${chip}
-                ${_plCardBtnHtml(ch, true)}
-              </div>
+            <li class="cluster-line" data-child-id="${ch._id}" title="${_acoEsc(title)}">
+              <span class="cl-name">${_acoEsc(place)}</span>
+              ${sfx ? `<span class="cl-sfx">${_acoEsc(sfx.trim())}</span>` : ''}
+              ${hours ? `<span class="cl-hours">${hours}</span>` : ''}
+              ${_acoBadgeHtml(ch, true)}
+              ${getAccessChipHtml(ch)}
+              ${chip}
+              ${_plCardBtnHtml(ch, true)}
             </li>`;
         }).join('')}
       </ul>
@@ -967,9 +952,9 @@ function createClusterItem(date, cluster) {
     });
   });
 
-  // clic sur la carte -> expand
+  // clic sur la carte -> expand (pas sur un lieu : il ouvre son tiroir)
   el.addEventListener('click', (e)=>{
-    if (!e.target.closest('.expand-btn')) {
+    if (!e.target.closest('.expand-btn, .cluster-line')) {
       el.classList.toggle('expanded');
       const icon = el.querySelector('.expand-btn .material-icons');
       icon.textContent = el.classList.contains('expanded') ? 'expand_less' : 'expand_more';
@@ -1339,6 +1324,7 @@ async function _siFetch(from, to) {
 }
 
 function _siTeardown() {
+  SaisonInd.local = false;
   ['si-legend', 'si-legend-btn', 'si-legend-pop', 'si-cal-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.remove();
@@ -1357,6 +1343,18 @@ function _siDecorate(dates, pills) {
   const seq = ++SaisonInd.seq;
   _siFetch(dates[0], dates[dates.length - 1]).then(data => {
     if (seq !== SaisonInd.seq || !_isSaisonSelected()) return;
+    SaisonInd.local = false;
+    _siPaint(dates, pills, data, true);
+  }).catch(err => {
+    console.warn('[SAISON] indicateurs indisponibles :', err);
+  });
+}
+
+// Pose pastilles / points / infobulles sur les puces des jours. data =
+// {indicators, days} : API SAISON, ou calcule depuis la timetable pour une
+// epreuve (_epDecorate). withCal : bouton calendrier d'occupation (SAISON).
+function _siPaint(dates, pills, data, withCal) {
+  {
     const inds = data.indicators || [];
     if (!inds.length) { _siTeardown(); return; }
     const byId = {};
@@ -1460,14 +1458,17 @@ function _siDecorate(dates, pills) {
       }, { passive: false }));
     });
     _siRenderLegend(inds);
-    _siRenderCalBtn();
+    if (withCal) _siRenderCalBtn();
+    else document.getElementById('si-cal-btn')?.remove();
     _siApplyFilter();
-  }).catch(err => {
-    console.warn('[SAISON] indicateurs indisponibles :', err);
-  });
+  }
 }
 
 function _siScrollTo(target) {
+  _tlReveal(target);
+  // En-tete du jour colle en haut : la vignette ne doit pas passer dessous
+  const stickyH = target.classList && target.classList.contains('event-item')
+    ? (target.closest('.timetable-date-section')?.querySelector('.tl-dh')?.offsetHeight || 0) : 0;
   let scrollEl = target.parentElement;
   while (scrollEl && scrollEl !== document.body) {
     const oy = getComputedStyle(scrollEl).overflowY;
@@ -1478,7 +1479,7 @@ function _siScrollTo(target) {
     const navBar = document.getElementById('day-nav-bar');
     const navOffset = (navBar && getComputedStyle(navBar).position === 'sticky') ? navBar.offsetHeight : 0;
     const offset = target.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop - navOffset;
-    scrollEl.scrollTo({ top: Math.max(0, offset - 4), behavior: 'smooth' });
+    scrollEl.scrollTo({ top: Math.max(0, offset - 4 - stickyH), behavior: 'smooth' });
   } else {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -2680,7 +2681,7 @@ function _siShowTooltip(pill, ds, inds, state, opts) {
         b.textContent = 'bloqué';
         b.title = 'Dates bloquees a la vente dans Momentus (epreuve, roulage)';
         line.appendChild(b);
-      } else if (ind.source_type !== 'visites') {
+      } else if (ind.source_type !== 'visites' && ind.source_type !== 'epreuve') {
         const b = document.createElement('span');
         b.className = 'si-tip-flag';
         b.textContent = det.status === 'option' ? 'option' : 'reserve';
@@ -3708,6 +3709,8 @@ function _siToggleFilter(id, ds) {
 
 function _siItemMatches(item, ind, st) {
   if (!item || !st || !st.active) return false;
+  // Indicateurs d'epreuve (_epBuild) : regle portee par l'indicateur
+  if (ind.source_type === 'epreuve') return typeof ind.match === 'function' && !!ind.match(item);
   if (ind.source_type === 'visites') {
     const txt = ((item.activity || '') + ' ' + (item.remark || '')).toLowerCase();
     return /au public|visite/.test(txt);
@@ -3735,7 +3738,7 @@ function _siApplyFilter(focusDay) {
   document.querySelectorAll('#day-nav-bar .si-sel').forEach(el => el.classList.remove('si-sel'));
   const id = SaisonInd.filter;
   const data = SaisonInd.data;
-  if (!id || !data || !_isSaisonSelected()) {
+  if (!id || !data || !(_isSaisonSelected() || SaisonInd.local)) {
     list.classList.remove('si-filtering');
     return;
   }
@@ -3856,6 +3859,7 @@ function _buildDayNav(dates, sectionsByDate) {
     pill.addEventListener('click', () => {
       const section = sectionsByDate[dateStr];
       if (!section) return;
+      _tlOpenDay(dateStr);   // jour passe replie : on le deplie
       _dayNavPin(dateStr);
       _dayNavScrollTo(section, 'smooth');
     });
@@ -3881,8 +3885,9 @@ function _buildDayNav(dates, sectionsByDate) {
   _setupDayNavObserver(sectionsByDate, pills);
 
   // SAISON : pastilles / points d'indicateurs (asynchrone, sans effet ailleurs)
+  // Epreuves : memes pastilles / points, calcules depuis la timetable
   if (_isSaisonSelected()) _siDecorate(dates, pills);
-  else _siTeardown();
+  else _epDecorate(dates, pills);
 }
 
 function _dayNavScrollTo(section, behavior) {
@@ -4034,21 +4039,32 @@ async function fetchTimetable() {
                     dateSection.dataset.date = date;  
                     sectionsByDate[date] = dateSection;
 
-                    // Créer un container pour le header de la date
+                    // En-tete du jour sur une ligne (colle en haut au defilement) :
+                    // date, ouverture au public, nombre d'elements, depliage des jours passes
                     const dateHeaderContainer = document.createElement("div");
-                    dateHeaderContainer.classList.add("date-header-container");
+                    dateHeaderContainer.classList.add("date-header-container", "tl-dh");
 
-                    const d = new Date(date);
+                    const d = new Date(date + 'T12:00:00');
                     const dateHeader = document.createElement("h5");
-                    dateHeader.textContent = d.toLocaleDateString("fr-FR");
+                    dateHeader.textContent = d.toLocaleDateString("fr-FR", { weekday: 'long', day: 'numeric', month: 'long' });
                     dateHeaderContainer.appendChild(dateHeader);
 
-                    // Vérifier si la journée a des dates ouvertes au public
                     const bannerInfo = getPublicBannerForDateStr(date); // <- date au format YYYY-MM-DD
-                    const banner = document.createElement("p");
-                    banner.textContent = bannerInfo.text;
-                    banner.classList.add(bannerInfo.className);
+                    const banner = document.createElement("span");
+                    banner.className = 'tl-dh-pub ' + bannerInfo.className;
+                    banner.textContent = _tlSentenceCase(bannerInfo.text);
                     dateHeaderContainer.appendChild(banner);
+
+                    const dayCount = document.createElement("span");
+                    dayCount.className = 'tl-dh-count';
+                    dateHeaderContainer.appendChild(dayCount);
+
+                    const dayToggle = document.createElement("button");
+                    dayToggle.type = 'button';
+                    dayToggle.className = 'tl-dh-toggle';
+                    dayToggle.hidden = true;
+                    dayToggle.addEventListener('click', (e) => { e.stopPropagation(); _tlToggleDay(date); });
+                    dateHeaderContainer.appendChild(dayToggle);
 
                     dateSection.appendChild(dateHeaderContainer);
 
@@ -4076,19 +4092,27 @@ async function fetchTimetable() {
                         return labelForNode(a).localeCompare(labelForNode(b));
                     });
 
-                    // 4) Rendu chronologique
+                    // 4) Rendu chronologique, par blocs horaires (l'heure une seule fois)
+                    let block = null, blockMin = null, nCards = 0;
                     combined.forEach(node=>{
+                        let card;
                         if (node.kind === 'cluster') {
-                        const card = createClusterItem(date, node.data);
-                        dateSection.appendChild(card);
+                        card = createClusterItem(date, node.data);
                         } else {
                         // on garde le filtre "General / Ouverture au public" si nécessaire
                         const it = node.data;
                         if (it.category === "General" && it.activity?.trim()?.toLowerCase() === "ouverture au public") return;
-                        const card = createEventItem(date, it);
-                        dateSection.appendChild(card);
+                        card = createEventItem(date, it);
                         }
+                        if (!block || blockMin !== node.minute) {
+                            blockMin = node.minute;
+                            block = _tlTimeBlock(node.minute);
+                            dateSection.appendChild(block);
+                        }
+                        block.lastChild.appendChild(card);
+                        nCards++;
                     });
+                    dayCount.textContent = nCards + (nCards > 1 ? ' éléments' : ' élément');
 
                     eventList.appendChild(dateSection);
                 });
@@ -4099,6 +4123,9 @@ async function fetchTimetable() {
                 eventList.appendChild(p);
             }
 
+            // Passe replie, comptes a rebours, mode TV a jour (avant la barre
+            // des jours, qui defile jusqu'au jour courant)
+            _tlAfterRender();
             // Construire la barre de navigation par jour
             _buildDayNav(Object.keys(sectionsByDate).sort(), sectionsByDate);
         })
@@ -6001,14 +6028,43 @@ async function openEditModalFromDrawer(dateStr, item) {
   // ---------- Bouton UI ----------
   document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('nowline-toggle');
-    if (btn) {
-      btn.addEventListener('click', () => {
-        NowLineController.toggle();
+    const sync = () => {
+      if (btn) {
         btn.title = NowLineController._enabled ? 'Auto-scroll arrêt' : 'Auto-scroll maintenant';
         const icon = btn.querySelector('.material-symbols-outlined');
         if (icon) icon.textContent = NowLineController._enabled ? 'pause_circle' : 'schedule';
+      }
+      try { localStorage.setItem('tl_follow_now', NowLineController._enabled ? '1' : '0'); } catch (e) { /* stockage indisponible */ }
+    };
+    const back = () => document.getElementById('tl-backnow');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        NowLineController.toggle();
+        if (back()) back().hidden = true;
+        sync();
       });
     }
+    // Defilement par l'operateur pendant le suivi : on arrete de suivre (sinon
+    // le recalage toutes les 15 s le ramene) et on propose d'y revenir.
+    const main = document.getElementById('timeline-main');
+    if (main) ['wheel', 'touchmove'].forEach(t => main.addEventListener(t, (e) => {
+      if (!NowLineController._enabled) return;
+      if (e.target && e.target.closest && e.target.closest('.tl-toolbar')) return;
+      NowLineController.stop();
+      sync();
+      if (back()) back().hidden = false;
+    }, { passive: true }));
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest || !e.target.closest('#tl-backnow')) return;
+      const b = back();
+      if (b) b.hidden = true;
+      NowLineController.start();
+      sync();
+    });
+    // Suivi memorise : il reprend au rechargement si l'operateur l'avait active
+    let saved = null;
+    try { saved = localStorage.getItem('tl_follow_now'); } catch (e) { /* stockage indisponible */ }
+    if (saved === '1') { NowLineController.start(); sync(); }
   });
 
   // ---------- Recalage après rendu de la timeline ----------
@@ -6065,6 +6121,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     // On cible l'élément principal à mettre sous la "ligne" top (comme NowLineController)
     let targetEl = row.el || row.clusterEl;
     if (!targetEl) return;
+    _tlReveal(targetEl);   // jour passe replie ou passe du jour masque
 
     // Si c'est un cluster-child, on ouvre le cluster pour révéler la sous-ligne
     if (row.kind === 'cluster-child' && row.clusterEl) {
@@ -6409,6 +6466,7 @@ async function openEditModalFromDrawer(dateStr, item) {
       // Cache la section entière si elle ne contient rien de visible
       section.style.display = sectionHasVisible ? '' : 'none';
     });
+    _tlSyncBlocks();   // blocs horaires vides apres filtrage
 
     // Cache aussi la liste de suggestions si un filtre vient d'être appliqué
     document.getElementById('timeline-search-results')?.classList.remove('show');
@@ -6637,6 +6695,7 @@ async function openEditModalFromDrawer(dateStr, item) {
       if (!card && c.dataset.vzId === id) card = c;
     });
     if (!card) return false;
+    _tlReveal(card);
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     card.classList.remove('vz-flash');
     void card.offsetWidth;
@@ -6710,3 +6769,565 @@ async function openEditModalFromDrawer(dateStr, item) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 })();
+
+// ============================================================================
+// Timeline v2 (22/10/2026) : vignettes groupees par heure, jours passes et
+// passe du jour replies, comptes a rebours, indicateurs de jour des epreuves
+// (meme mecanique que SAISON : _siPaint), recherche derriere une loupe, mode
+// TV (ecran mural). Styles : static/css/timeline_v2.css.
+// ============================================================================
+
+// Couleur du bord de vignette : classes tlc-* (jamais cat-* qui colore le fond)
+function tlCatClasses(cat) {
+  const slug = _categorySlug(cat);
+  if (!slug) return ['tlc-none'];
+  return _CAT_KNOWN.has(slug) ? ['tlc-' + slug] : ['tlc-fb', 'tlc-fb-' + _categoryFallbackIdx(slug)];
+}
+
+function tlCatIsFallback(cat) {
+  const slug = _categorySlug(cat);
+  return !!slug && !_CAT_KNOWN.has(slug);
+}
+
+function _tlIconFor(item) {
+  const c = String(item.category || '');
+  if (c.indexOf('Motos') !== -1) return 'two_wheeler';
+  const type = detectClusterType(item);
+  const ic = type && CLUSTER_CONFIG[type] ? CLUSTER_CONFIG[type].icon : '';
+  if (/^[a-z0-9_]{1,40}$/.test(ic || '')) return ic;
+  if (item.origin === 'timetable') return /parade|demo|bapt/i.test(item.activity || '') ? 'flag' : 'sports_motorsports';
+  if (/v[eé]nement/i.test(c)) return 'event';
+  if (/accr/i.test(c)) return 'badge';
+  return 'event_note';
+}
+
+// "OUVERT AU PUBLIC — 24/24" -> "Ouvert au public — 24/24"
+function _tlSentenceCase(t) {
+  return String(t || '').replace(/^[A-ZÀ-Ý][A-ZÀ-Ý' ]*[A-ZÀ-Ý]/, m => m.charAt(0) + m.slice(1).toLowerCase());
+}
+
+function _tlHHMM(m) {
+  return String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+
+function _tlTimeBlock(minute) {
+  const b = document.createElement('div');
+  b.className = 'tl-tb';
+  b.dataset.minute = String(minute);
+  const t = document.createElement('div');
+  t.className = 'tl-tb-t';
+  t.textContent = Number.isFinite(minute) ? _tlHHMM(minute) : 'TBC';
+  const items = document.createElement('div');
+  items.className = 'tl-tb-items';
+  b.appendChild(t);
+  b.appendChild(items);
+  return b;
+}
+
+// showPast : bouton "passe" (tout deplier) ; todayOpen : passe du jour deplie
+// seul (ligne "Deja passe", recherche) ; openDays : jours passes deplies un a un
+const TlState = { showPast: false, todayOpen: false, openDays: new Set(), key: '' };
+
+function _tlNow() {
+  const n = window.TimelineClock ? window.TimelineClock.get() : new Date();
+  return { ymd: ymdLocal(n), min: n.getHours() * 60 + n.getMinutes() };
+}
+
+// En cours = debut et fin valides, maintenant entre les deux (pas les
+// ouvertures / fermetures, ponctuelles par nature)
+function _tlIsLive(item, now) {
+  if (!item || getOpenCloseKind(item)) return false;
+  if (!isValidHHMM(item.start) || !isValidHHMM(item.end)) return false;
+  const s = timeToMinutes(item.start), e = timeToMinutes(item.end);
+  return e > s && s <= now.min && now.min < e;
+}
+
+function _tlSyncPastBtn() {
+  const b = document.getElementById('tl-past-btn');
+  if (!b) return;
+  b.setAttribute('aria-pressed', String(TlState.showPast));
+  b.title = TlState.showPast ? 'Replier ce qui est passé' : 'Afficher ce qui est passé';
+}
+
+// Jours passes replies (si un jour courant ou a venir existe) et, le jour
+// meme, blocs passes derriere une ligne "Deja passe" (sauf ce qui est en cours
+// et sauf s'il ne reste rien a venir : la ligne "maintenant" s'y cale).
+function _tlApplyPast() {
+  const list = document.getElementById('event-list');
+  if (!list) return;
+  const key = window.selectedEvent + '|' + window.selectedYear;
+  if (key !== TlState.key) { TlState.key = key; TlState.openDays = new Set(); TlState.showPast = false; TlState.todayOpen = false; _tlSyncPastBtn(); }
+  const now = _tlNow();
+  const sections = Array.from(list.querySelectorAll('.timetable-date-section'));
+  const hasCurrent = sections.some(s => (s.dataset.date || '') >= now.ymd);
+  sections.forEach(sec => {
+    const ds = sec.dataset.date || '';
+    const head = sec.querySelector(':scope > .tl-dh');
+    const tog = head && head.querySelector('.tl-dh-toggle');
+    const pastDay = hasCurrent && ds < now.ymd;
+    const collapsed = pastDay && !TlState.showPast && !TlState.openDays.has(ds);
+    sec.classList.toggle('tl-day-past', pastDay);
+    sec.classList.toggle('tl-collapsed', collapsed);
+    if (tog) {
+      tog.hidden = !pastDay;
+      tog.textContent = collapsed ? 'Afficher' : 'Replier';
+    }
+    let bar = sec.querySelector(':scope > .tl-pastbar');
+    const blocks = Array.from(sec.querySelectorAll(':scope > .tl-tb'));
+    blocks.forEach(b => b.classList.remove('tl-tb-past', 'tl-tb-hidden'));
+    if (ds !== now.ymd) { if (bar) bar.remove(); return; }
+    const past = blocks.filter(b => {
+      const m = Number(b.dataset.minute);
+      if (!Number.isFinite(m) || m >= now.min) return false;
+      return !Array.from(b.querySelectorAll('.event-item')).some(c => _tlIsLive(c.__itemData, now));
+    });
+    past.forEach(b => b.classList.add('tl-tb-past'));
+    const anyFuture = blocks.length > past.length;
+    if (!past.length || !anyFuture || TlState.showPast || TlState.todayOpen) { if (bar) bar.remove(); return; }
+    past.forEach(b => b.classList.add('tl-tb-hidden'));
+    const n = past.reduce((a, b) => a + b.querySelectorAll('.event-item').length, 0);
+    if (!bar) {
+      bar = document.createElement('button');
+      bar.type = 'button';
+      bar.className = 'tl-pastbar';
+      bar.addEventListener('click', () => { TlState.todayOpen = true; _tlApplyPast(); });
+      if (head) head.after(bar); else sec.prepend(bar);
+    }
+    bar.textContent = '';
+    const ic = document.createElement('span');
+    ic.className = 'material-symbols-outlined';
+    ic.textContent = 'history';
+    const tx = document.createElement('span');
+    tx.textContent = "Déjà passé aujourd'hui : " + n + (n > 1 ? ' éléments' : ' élément');
+    const rg = document.createElement('span');
+    rg.className = 'tl-pastbar-range';
+    rg.textContent = past[0].firstChild.textContent + ' → ' + past[past.length - 1].firstChild.textContent;
+    const cta = document.createElement('span');
+    cta.className = 'tl-pastbar-cta';
+    cta.textContent = 'Afficher';
+    bar.append(ic, tx, rg, cta);
+  });
+  _tlSyncBlocks();
+}
+
+// Bloc horaire dont toutes les vignettes sont filtrees (departement) : masque
+function _tlSyncBlocks() {
+  document.querySelectorAll('#event-list .tl-tb').forEach(b => {
+    const any = Array.from(b.querySelectorAll('.event-item')).some(c => c.style.display !== 'none');
+    b.classList.toggle('tl-tb-empty', !any);
+  });
+}
+
+function _tlToggleDay(ds) {
+  if (TlState.openDays.has(ds)) TlState.openDays.delete(ds);
+  else TlState.openDays.add(ds);
+  _tlApplyPast();
+}
+
+function _tlOpenDay(ds) {
+  if (TlState.openDays.has(ds)) return;
+  TlState.openDays.add(ds);
+  _tlApplyPast();
+}
+
+// Rend visible un element masque par le repli (recherche, filtre, voisins)
+function _tlReveal(el) {
+  const sec = el && el.closest ? el.closest('.timetable-date-section') : null;
+  if (!sec) return;
+  let changed = false;
+  if (sec.classList.contains('tl-collapsed')) { TlState.openDays.add(sec.dataset.date); changed = true; }
+  const tb = el.closest('.tl-tb');
+  if (tb && tb.classList.contains('tl-tb-hidden')) { TlState.todayOpen = true; changed = true; }
+  if (changed) _tlApplyPast();
+}
+
+// Comptes a rebours ("dans 12 min", "En cours · fin 15:10") du jour courant
+function _tlTick() {
+  const list = document.getElementById('event-list');
+  if (!list) return;
+  const now = _tlNow();
+  const sec = list.querySelector('.timetable-date-section[data-date="' + now.ymd + '"]');
+  list.querySelectorAll('.event-item').forEach(card => {
+    const cd = card.querySelector('.ev2-cd');
+    if (!cd) return;
+    let txt = '', cls = 'ev2-cd', live = false;
+    if (sec && sec.contains(card)) {
+      const it = card.__itemData;
+      live = _tlIsLive(it, now);
+      const m = Number(card.getAttribute('data-minute'));
+      if (live) { txt = 'En cours · fin ' + formatHHMM(it.end); cls += ' is-live'; }
+      else if (Number.isFinite(m) && m > now.min && m - now.min <= 60) { txt = 'dans ' + (m - now.min) + ' min'; cls += ' is-soon'; }
+    }
+    card.classList.toggle('is-live', live);
+    if (cd.textContent !== txt) cd.textContent = txt;
+    if (cd.className !== cls) cd.className = cls;
+  });
+  _tlApplyPast();
+}
+
+function _tlAfterRender() {
+  try {
+    _tlEnsureUi();
+    _tlTick();
+    _tvRender();
+  } catch (e) { console.warn('[Timeline] mise a jour v2 impossible :', e); }
+}
+
+// ---------------------------------------------------------------------------
+// Indicateurs de jour des epreuves : pastilles (public, course, piste, nuit)
+// et points a place fixe (ouvertures par type de regroupement, retards de
+// preparation du jour). Calcules depuis la timetable, peints par _siPaint.
+// ---------------------------------------------------------------------------
+const _EP_PALETTE = ['#0072B2', '#7E3FBF', '#009E73', '#E69F00', '#CC79A7', '#56B4E9', '#8C6D31', '#E6C200'];
+
+function _epShort(label) {
+  return String(label || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || '?';
+}
+function _epIsTimetable(it) { return !!it && it.origin === 'timetable'; }
+function _epIsNight(it) {
+  if (!_epIsTimetable(it) || !isValidHHMM(it.start)) return false;
+  const m = timeToMinutes(it.start);
+  return m >= 21 * 60 || m < 5 * 60;
+}
+// Apres minuit et avant 5 h : fin de la nuit precedente (tri des creneaux)
+function _epOrd(m) { return m < 300 ? m + 1440 : m; }
+function _epTitle(it) {
+  const t = (it.activity || '').split(' / ')[0].trim() || 'Sans titre';
+  return _epIsTimetable(it) && it.category ? t + ' (' + String(it.category).replace(/\s+/g, ' ').trim() + ')' : t;
+}
+// En retard = a une preparation (statut ou taches) non prete apres son heure
+function _epIsLate(it, ds, now) {
+  return !!getPrepStatus(it) && getItemDisplayStatus(it, ds, now.ymd, now.min) === 'late';
+}
+function _epState(id, list, toDet) {
+  const MAX = 4;
+  return { id, active: list.length > 0, details: list.slice(0, MAX).map(toDet), more: Math.max(0, list.length - MAX) };
+}
+
+function _epBuild(dates) {
+  const raw = window._timetableRaw || {};
+  const now = _tlNow();
+  const raceRaw = window.parametrage?.race || window.parametrage?.data?.race || '';
+  const raceDate = typeof raceRaw === 'string' ? raceRaw.slice(0, 10) : '';
+  const ep = (o) => Object.assign({ source_type: 'epreuve' }, o);
+  const isPublicItem = it => /\bpublic\b/i.test((it.activity || '') + ' ' + (it.remark || ''));
+  const inds = [
+    ep({ id: 'ep-pub', short: 'PUB', label: 'Ouvert au public', color: '#047857', rank: 'pill', icon: 'groups', match: isPublicItem }),
+    ep({ id: 'ep-crs', short: 'CRS', label: 'Jour de course', color: '#B45309', rank: 'pill', icon: 'flag', match: _epIsTimetable }),
+    ep({ id: 'ep-pis', short: 'PIS', label: 'Piste (programme sportif)', color: '#BE123C', rank: 'pill', icon: 'sports_motorsports', match: _epIsTimetable }),
+    ep({ id: 'ep-nuit', short: 'NUIT', label: 'Roulage de nuit (après 21:00)', color: '#1E3A8A', rank: 'pill', icon: 'dark_mode', match: _epIsNight }),
+  ];
+  const clKeys = Object.keys(CLUSTER_CONFIG);
+  clKeys.forEach((key, i) => {
+    const cfg = CLUSTER_CONFIG[key];
+    inds.push(ep({
+      id: 'ep-cl-' + key, short: _epShort(cfg.label), label: cfg.label + ' : ouvertures', color: _EP_PALETTE[i % _EP_PALETTE.length],
+      rank: 'dot', icon: /^[a-z0-9_]{1,40}$/.test(cfg.icon || '') ? cfg.icon : '',
+      match: it => detectClusterType(it) === key && getOpenCloseKind(it) === 'open'
+    }));
+  });
+  inds.push(ep({
+    id: 'ep-ret', short: 'RET', label: "Préparation en retard (aujourd'hui)", color: '#DC2626', rank: 'dot', icon: 'running_with_errors',
+    match: it => _epIsLate(it, now.ymd, now)
+  }));
+
+  const byStart = (a, b) => _epOrd(getItemSortMinute(a)) - _epOrd(getItemSortMinute(b));
+  const hm = it => { const m = getItemSortMinute(it); return Number.isFinite(m) ? _tlHHMM(m) : ''; };
+  const days = {};
+  dates.forEach(ds => {
+    const items = (raw[ds] || []).filter(it => it && typeof it === 'object');
+    const row = [];
+    const pub = window.publicDatesMap?.[ds];
+    row.push({ id: 'ep-pub', active: !!pub, details: pub ? [{ is24h: pub.is24h, start: pub.openTime, end: pub.closeTime, event: 'Ouvert au public' }] : [] });
+    const tt = items.filter(_epIsTimetable).filter(it => isValidHHMM(it.start)).sort(byStart);
+    const ttDet = it => ({ start: formatHHMM(it.start), end: isValidHHMM(it.end) ? formatHHMM(it.end) : '', event: _epTitle(it) });
+    row.push({ id: 'ep-crs', active: ds === raceDate, details: ds === raceDate ? [{ event: 'Jour de course' }] : [] });
+    row.push(_epState('ep-pis', tt, ttDet));
+    row.push(_epState('ep-nuit', tt.filter(_epIsNight), ttDet));
+    clKeys.forEach(key => {
+      const l = items.filter(it => detectClusterType(it) === key && getOpenCloseKind(it) === 'open').sort(byStart);
+      row.push(_epState('ep-cl-' + key, l, it => ({ start: hm(it), event: (it.place || '').split('/')[0].trim() || _epTitle(it) })));
+    });
+    const late = ds === now.ymd ? items.filter(it => _epIsLate(it, ds, now)).sort(byStart) : [];
+    row.push(_epState('ep-ret', late, it => ({ start: hm(it), event: _epTitle(it) })));
+    days[ds] = row;
+  });
+  // Seuls les indicateurs actifs au moins un jour gardent une place
+  const used = new Set();
+  Object.values(days).forEach(r => r.forEach(x => { if (x.active) used.add(x.id); }));
+  return { indicators: inds.filter(i => used.has(i.id)), days };
+}
+
+function _epDecorate(dates, pills) {
+  if (!dates.length) { _siTeardown(); return; }
+  let data;
+  try { data = _epBuild(dates); }
+  catch (e) { console.warn('[Timeline] indicateurs des jours indisponibles :', e); _siTeardown(); return; }
+  if (!data.indicators.length) { _siTeardown(); return; }
+  SaisonInd.seq++;          // une reponse SAISON encore en vol est ignoree
+  SaisonInd.local = true;
+  _siPaint(dates, pills, data, false);
+}
+
+// ---------------------------------------------------------------------------
+// Barre d'outils (loupe, passe), bouton "Revenir a maintenant".
+// Crees ici si le gabarit servi ne les a pas encore (gabarit en cache tant
+// par le navigateur) : la feuille timeline_v2.css aussi.
+// ---------------------------------------------------------------------------
+function _tlEnsureUi() {
+  if (!document.querySelector('link[href*="timeline_v2.css"]')) {
+    const ref = document.querySelector('link[href*="css/style.css"]');
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = ref ? ref.href.replace(/css\/style\.css.*$/, 'css/timeline_v2.css') : '/static/css/timeline_v2.css';
+    document.head.appendChild(l);
+  }
+  const main = document.getElementById('timeline-main');
+  const bar = document.getElementById('day-nav-bar');
+  if (main && bar && !document.getElementById('tl-toolbar')) {
+    const tb = document.createElement('div');
+    tb.className = 'tl-toolbar';
+    tb.id = 'tl-toolbar';
+    bar.parentNode.insertBefore(tb, bar);
+    tb.appendChild(bar);
+    const tools = document.createElement('div');
+    tools.className = 'tl-tools';
+    [['tl-search-btn', 'search', 'Rechercher dans la timeline'], ['tl-past-btn', 'history', 'Afficher ce qui est passé']].forEach(([id, icon, title]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tl-tool';
+      b.id = id;
+      b.title = title;
+      b.setAttribute('aria-pressed', 'false');
+      const s = document.createElement('span');
+      s.className = 'material-symbols-outlined';
+      s.textContent = icon;
+      b.appendChild(s);
+      tools.appendChild(b);
+    });
+    tb.appendChild(tools);
+  }
+  if (main && !document.getElementById('tl-backnow')) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tl-backnow';
+    b.id = 'tl-backnow';
+    b.hidden = true;
+    const s = document.createElement('span');
+    s.className = 'material-symbols-outlined';
+    s.textContent = 'vertical_align_center';
+    b.append(s, 'Revenir à maintenant');
+    main.appendChild(b);
+  }
+}
+
+// Recherche : repliee derriere la loupe en vue timeline ; la vue carte garde
+// sa barre (filtre des categories de la carte).
+function _tlSyncView() {
+  const isMap = !!(window.CockpitMapView && window.CockpitMapView.currentView && window.CockpitMapView.currentView() === 'map');
+  document.body.classList.toggle('tl-view-map', isMap);
+}
+
+function _tlSearchOpen(open) {
+  document.body.classList.toggle('tl-search-open', !!open);
+  const b = document.getElementById('tl-search-btn');
+  if (b) b.setAttribute('aria-pressed', String(!!open));
+  if (open) setTimeout(() => document.getElementById('timeline-search-input')?.focus(), 0);
+}
+
+(function () {
+  function wire() {
+    _tlEnsureUi();
+    _tlSyncPastBtn();
+    _tlSyncView();
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      if (t.closest('#tl-search-btn')) { _tlSearchOpen(!document.body.classList.contains('tl-search-open')); return; }
+      if (t.closest('#tl-past-btn')) {
+        TlState.showPast = !TlState.showPast;
+        if (!TlState.showPast) { TlState.openDays.clear(); TlState.todayOpen = false; }
+        _tlSyncPastBtn();
+        _tlApplyPast();
+        return;
+      }
+      if (t.closest('#view-timeline-btn, #view-map-btn, .mb-tab')) setTimeout(_tlSyncView, 0);
+    });
+    const input = document.getElementById('timeline-search-input');
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !document.body.classList.contains('tl-view-map')) _tlSearchOpen(false);
+      });
+      input.addEventListener('blur', () => setTimeout(() => {
+        const sb = document.getElementById('timeline-searchbar');
+        if (!input.value && !document.body.classList.contains('tl-view-map') && !(sb && sb.contains(document.activeElement))) _tlSearchOpen(false);
+      }, 200));
+    }
+    setInterval(_tlTick, 30000);
+    // Ecran TV : onglet ouvert par le menu "Ecrans TV > Timeline" (/?tv=1).
+    // Pilote par l'adresse, jamais memorise : l'onglet Cockpit de l'operateur
+    // ne bascule pas en TV a son rechargement.
+    try { localStorage.removeItem('cockpit_tv_mode'); } catch (e) { /* stockage indisponible */ }
+    if (new URLSearchParams(location.search).get('tv') === '1') tlTvOpen();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+  else wire();
+})();
+
+// ---------------------------------------------------------------------------
+// Mode TV : plein ecran sombre, horloge, "En cours" et "A venir sur 3 h".
+// Ouvert par /?tv=1 (reste en TV au rechargement de l'ecran mural). Echap ou
+// bouton : retour a la timeline (l'adresse perd ?tv=1).
+// ---------------------------------------------------------------------------
+const TlTv = { el: null, timer: null, wake: null, title: '' };
+
+function _tvEl(tag, cls, txt) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt != null) e.textContent = txt;
+  return e;
+}
+
+function _tvNodes(ds) {
+  const items = ((window._timetableRaw || {})[ds] || [])
+    .filter(it => it && !(it.category === 'General' && (it.activity || '').trim().toLowerCase() === 'ouverture au public'));
+  const { clusters, rest } = groupByClusters(items);
+  return clusters.map(c => ({ cluster: c, minute: getClusterSortMinute(c) }))
+    .concat(rest.map(it => ({ item: it, minute: getItemSortMinute(it) })))
+    .filter(n => Number.isFinite(n.minute))
+    .sort((a, b) => a.minute - b.minute);
+}
+
+function _tvRow(n, now, isNow) {
+  let title, sub, cat, live = false;
+  if (n.cluster) {
+    const cfg = CLUSTER_CONFIG[n.cluster.type] || {};
+    const kl = { open: 'Ouverture', close: 'Fermeture', switch_control: 'Bascule contrôlée', switch_free: 'Retour libre' }[n.cluster.kind] || 'Ouverture';
+    title = kl + ' · ' + n.cluster.items.length + ' ' + String(cfg.label || n.cluster.type || '').toLowerCase();
+    sub = n.cluster.items.map(i => (i.place || '').split('/')[0].trim()).filter(Boolean).join(', ');
+    cat = n.cluster.items[0] && n.cluster.items[0].category;
+  } else {
+    const it = n.item;
+    title = (it.activity || '').split('/')[0].trim() || 'Sans titre';
+    sub = [(it.place || '').split('/')[0].trim(), _epIsTimetable(it) ? it.category : ''].filter(Boolean).join(' · ');
+    cat = it.category;
+    live = _tlIsLive(it, now);
+  }
+  const row = _tvEl('div', 'tv-row ' + tlCatClasses(cat).join(' ') + (live ? ' is-live' : ''));
+  row.appendChild(_tvEl('span', 'tv-t', _tlHHMM(n.minute)));
+  const body = _tvEl('div');
+  body.style.minWidth = '0';
+  body.appendChild(_tvEl('div', 'tv-ttl', title));
+  if (sub) body.appendChild(_tvEl('div', 'tv-rsub', sub));
+  row.appendChild(body);
+  const r = _tvEl('span', 'tv-r');
+  const d = n.minute - now.min;
+  if (live) { r.textContent = 'En cours'; r.appendChild(_tvEl('small', null, 'fin ' + formatHHMM(n.item.end))); }
+  else if (isNow) { if (d === 0) r.textContent = 'Maintenant'; else r.appendChild(_tvEl('small', null, 'il y a ' + (-d) + ' min')); }
+  else if (d < 60) r.textContent = 'dans ' + d + ' min';
+  else r.appendChild(_tvEl('small', null, 'dans ' + Math.floor(d / 60) + ' h ' + String(d % 60).padStart(2, '0')));
+  row.appendChild(r);
+  return row;
+}
+
+function _tvRender() {
+  if (!TlTv.el || TlTv.el.hidden) return;
+  const now = _tlNow();
+  const nodes = _tvNodes(now.ymd);
+  const cur = nodes.filter(n => (n.item && _tlIsLive(n.item, now)) || (n.minute <= now.min && n.minute > now.min - 20));
+  const next = nodes.filter(n => n.minute > now.min && n.minute <= now.min + 180 && cur.indexOf(n) === -1);
+  const inHour = next.filter(n => n.minute <= now.min + 60).length;
+  const el = TlTv.el;
+  el.textContent = '';
+
+  const head = _tvEl('div', 'tv-head');
+  head.appendChild(_tvEl('div', 'tv-clock', _tlHHMM(now.min)));
+  const id = _tvEl('div');
+  id.appendChild(_tvEl('div', 'tv-day', new Date(now.ymd + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })));
+  const sub = _tvEl('div', 'tv-sub');
+  sub.appendChild(_tvEl('span', null, [window.selectedEvent, window.selectedYear].filter(Boolean).join(' ')));
+  if (window.publicDatesMap) {
+    const b = getPublicBannerForDateStr(now.ymd);
+    sub.appendChild(_tvEl('span', b.className === 'banner-open' ? 'tv-pub' : null, _tlSentenceCase(b.text)));
+  }
+  id.appendChild(sub);
+  head.appendChild(id);
+  const k = _tvEl('div', 'tv-kpis');
+  [[cur.length, 'en cours'], [inHour, "dans l'heure"]].forEach(([v, l]) => {
+    const x = _tvEl('div', 'tv-kpi');
+    x.appendChild(_tvEl('b', null, String(v)));
+    x.appendChild(document.createTextNode(l));
+    k.appendChild(x);
+  });
+  head.appendChild(k);
+  const exit = _tvEl('button', 'tv-exit');
+  exit.type = 'button';
+  exit.title = 'Quitter le mode TV (Echap)';
+  exit.appendChild(_tvEl('span', 'material-symbols-outlined', 'close'));
+  exit.addEventListener('click', tlTvClose);
+  head.appendChild(exit);
+  el.appendChild(head);
+
+  const cols = _tvEl('div', 'tv-cols');
+  const MAXN = 6, MAXX = 9;
+  const c1 = _tvEl('section', 'tv-col');
+  c1.appendChild(_tvEl('h3', null, 'En cours'));
+  if (cur.length) cur.slice(0, MAXN).forEach(n => c1.appendChild(_tvRow(n, now, true)));
+  else c1.appendChild(_tvEl('p', 'tv-empty', 'Rien en cours.'));
+  if (cur.length > MAXN) c1.appendChild(_tvEl('p', 'tv-more', '+ ' + (cur.length - MAXN) + ' autres'));
+  const c2 = _tvEl('section', 'tv-col');
+  c2.appendChild(_tvEl('h3', null, 'À venir · 3 heures'));
+  if (next.length) next.slice(0, MAXX).forEach(n => c2.appendChild(_tvRow(n, now, false)));
+  else c2.appendChild(_tvEl('p', 'tv-empty', nodes.length ? 'Rien de prévu dans les 3 prochaines heures.' : "Aucune activité aujourd'hui dans cette timeline."));
+  if (next.length > MAXX) c2.appendChild(_tvEl('p', 'tv-more', '+ ' + (next.length - MAXX) + " autres d'ici " + _tlHHMM(Math.min(1439, now.min + 180))));
+  cols.appendChild(c1);
+  cols.appendChild(c2);
+  el.appendChild(cols);
+}
+
+function _tvWake() {
+  if (!navigator.wakeLock || !navigator.wakeLock.request || !TlTv.el || TlTv.el.hidden) return;
+  navigator.wakeLock.request('screen').then(l => { TlTv.wake = l; }).catch(() => { /* refuse : sans effet */ });
+}
+
+function _tvKeys(e) {
+  if (e.key === 'Escape' && TlTv.el && !TlTv.el.hidden) tlTvClose();
+}
+
+function tlTvOpen() {
+  if (!TlTv.el) {
+    TlTv.el = _tvEl('div', 'tl-tv');
+    TlTv.el.id = 'tl-tv';
+    TlTv.el.setAttribute('role', 'dialog');
+    TlTv.el.setAttribute('aria-label', 'Mode TV de la timeline');
+    TlTv.el.hidden = true;
+    document.body.appendChild(TlTv.el);
+    document.addEventListener('keydown', _tvKeys);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) _tvWake(); });
+  }
+  TlTv.el.hidden = false;
+  document.body.classList.add('tl-tv-on');
+  TlTv.title = TlTv.title || document.title;
+  document.title = 'Timeline TV - COCKPIT';
+  _tvRender();
+  clearInterval(TlTv.timer);
+  TlTv.timer = setInterval(_tvRender, 10000);
+  _tvWake();
+}
+
+function tlTvClose() {
+  if (!TlTv.el) return;
+  TlTv.el.hidden = true;
+  document.body.classList.remove('tl-tv-on');
+  if (TlTv.title) document.title = TlTv.title;
+  if (new URLSearchParams(location.search).get('tv') === '1') {
+    const u = new URL(location.href);
+    u.searchParams.delete('tv');
+    history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+  }
+  clearInterval(TlTv.timer);
+  TlTv.timer = null;
+  if (TlTv.wake) { TlTv.wake.release().catch(() => {}); TlTv.wake = null; }
+}
+window.tlTvOpen = tlTvOpen;
+window.tlTvClose = tlTvClose;

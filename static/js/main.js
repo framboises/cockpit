@@ -2036,13 +2036,15 @@ function updateUpcomingEvents() {
             if (secDate > todayISO) isFuture = true;
             if (!isFuture) return;
 
-            var titleEl = card.querySelector(".event-title h5");
+            // .ev2-tx : vignettes de la timeline v2 (l'heure vient de data-minute)
+            var titleEl = card.querySelector(".event-title h5, .ev2-tx");
             var timeEl = card.querySelector(".time-info");
             if (!titleEl) return;
+            var hhmm = String(Math.floor(minute / 60)).padStart(2, "0") + ":" + String(minute % 60).padStart(2, "0");
 
             upcoming.push({
                 name: titleEl.textContent.trim(),
-                time: timeEl ? timeEl.textContent.trim() : "",
+                time: timeEl ? timeEl.textContent.trim() : hhmm,
                 date: secDate,
                 sortKey: secDate + "-" + String(minute).padStart(5, "0"),
                 cardEl: card

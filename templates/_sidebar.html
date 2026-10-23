@@ -81,11 +81,16 @@
             <span class="label">Wiki procedures</span>
         </a>{% endif %}
 
-        {# --- Ecrans TV et pages d'indicateurs (s'ouvrent dans un onglet).
+        {# --- Ecrans TV (s'ouvrent dans un onglet). Timeline : l'accueil en mode
+           TV (/?tv=1, timeline.js tlTvOpen).
            Portes / Parkings / Statistiques : onglet parametre par l'evenement et
            l'annee courants ; sidebar.js les relit dans localStorage, donc ils
            fonctionnent aussi sur les pages sans selecteur. --- #}
         {% set _g_tv %}
+        {% if page_allowed is not defined or page_allowed('cockpit') %}<a href="/?tv=1" class="nav-btn" target="_blank" rel="noopener" title="Timeline en mode TV : en cours et 3 prochaines heures (ecran mural)" data-nav-item>
+            <span class="material-symbols-outlined">view_timeline</span>
+            <span class="label">Timeline</span>
+        </a>{% endif %}
         {% if page_allowed is not defined or page_allowed('portes') %}<button type="button" class="nav-btn" id="doors-page-button" data-nav-item>
             <span class="material-symbols-outlined">door_front</span>
             <span class="label">Portes</span>
@@ -107,7 +112,7 @@
             <span class="label">Mur meteo</span>
         </a>{% endif %}
         {% endset %}
-        {{ nav_group('tv', 'tv', 'Ecrans TV & indicateurs', _g_tv) }}
+        {{ nav_group('tv', 'tv', 'Ecrans TV', _g_tv) }}
 
         {# --- Terrain : fiches vers les unites, constats, tablettes, PMV.
            File du service (dispatch_auto) : visible de tous, la page explique

@@ -22,6 +22,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/meteo_avance.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/musee_block.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/timeline_v2.css') }}">
 
     <!-- Libs JS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -215,7 +216,20 @@
 
             <!-- Timeline -->
             <main id="timeline-main">
-                <div id="day-nav-bar" class="day-nav-bar" hidden></div>
+                <div class="tl-toolbar" id="tl-toolbar">
+                    <div id="day-nav-bar" class="day-nav-bar" hidden></div>
+                    <div class="tl-tools">
+                        <button type="button" class="tl-tool" id="tl-search-btn" aria-pressed="false" title="Rechercher dans la timeline">
+                            <span class="material-symbols-outlined">search</span>
+                        </button>
+                        <button type="button" class="tl-tool" id="tl-past-btn" aria-pressed="false" title="Afficher ce qui est passé">
+                            <span class="material-symbols-outlined">history</span>
+                        </button>
+                    </div>
+                </div>
+                <button type="button" class="tl-backnow" id="tl-backnow" hidden>
+                    <span class="material-symbols-outlined">vertical_align_center</span>Revenir à maintenant
+                </button>
                 <div id="now-line" hidden>
                     <span class="now-badge">--:--</span>
                 </div>
