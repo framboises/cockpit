@@ -22,6 +22,7 @@
         reach: "/api/cameras/reachability",
         profiles: "/api/camera-profiles",
         planned: "/api/cameras/planned",
+        dossier: "/api/cameras/planned/dossier.pdf",
     };
     var REACH_MS = 60000;
 
@@ -265,6 +266,9 @@
     // canal ("p:<id>") pour reutiliser le volet du configurateur (optique, cone).
     var PLANNED_COLOR = "#8b5cf6";
     var PLANNED_STATUS = [["souhaitee", "Souhaitee"], ["validee", "Validee"], ["commandee", "Commandee"]];
+    // Support de pose (cameras.PLANNED_MOUNTS) : aide a la constitution du dossier travaux
+    var PLANNED_MOUNTS = [["", "A definir"], ["mat", "Mat"], ["angle_mur", "Angle de mur"], ["mur_plat", "Mur plat"]];
+    var REPLACE_RADIUS_M = 500;
     function plannedCam(p) {
         return { _id: "p:" + p._id, pid: p._id, planned: true, rec: p, name: p.name, enabled: true, channels: plannedChannels(p) };
     }
@@ -296,7 +300,11 @@
     function plannedTip(pc) {
         var r = pc.rec, box = el("div", "cm-tip cm-tip-planned");
         box.appendChild(el("div", "cm-tip-badge", "Camera en projet - " + statusLabel(r.status)));
-        box.appendChild(el("b", "", r.name));
+        box.appendChild(el("b", "", (r.priority ? "P" + r.priority + " - " : "") + r.name));
+        if (r.moves) box.appendChild(el("div", "cm-tip-line", "Deplacement de " + r.moves.name));
+        if ((r.replaces || []).length) box.appendChild(el("div", "cm-tip-line", "Remplace " + r.replaces.map(function (x) { return x.name; }).join(", ")));
+        var mnt = (PLANNED_MOUNTS.filter(function (m) { return m[0] === r.mount; })[0] || [])[1];
+        if (r.mount) box.appendChild(el("div", "cm-tip-line", "Pose : " + mnt + (r.mount_height ? ", " + String(r.mount_height).replace(".", ",") + " m" : "")));
         if (r.note) box.appendChild(el("div", "cm-tip-line", r.note));
         var drawn = pc.channels.filter(function (k) { return k.view; }).length;
         box.appendChild(el("div", "cm-tip-line", plannedMix(pc.channels) + " - " +
@@ -304,9 +312,27 @@
         box.appendChild(el("div", "cm-tip-line cm-tip-muted", "Ajoutee" + (r.by ? " par " + r.by : "") + (r.at ? " le " + new Date(r.at).toLocaleDateString("fr-FR") : "")));
         return box;
     }
+    function drawPlannedLinks(pc) {
+        var p = M.pos[pc._id], r = pc.rec;
+        (r.replaces || []).forEach(function (x) {
+            var q = M.pos[x._id];
+            if (!q) return;
+            L.polyline([[q.lat, q.lng], [p.lat, p.lng]], { color: "#dc2626", weight: 1.5, dashArray: "3 4", opacity: .8, interactive: false }).addTo(M.layer);
+            var cross = el("div", "cm-pin-removed");
+            cross.appendChild(icon("close"));
+            L.marker([q.lat, q.lng], { icon: L.divIcon({ html: cross, className: "", iconSize: [18, 18], iconAnchor: [9, 9] }),
+                interactive: false, zIndexOffset: 400 }).addTo(M.layer);
+        });
+        if (r.moves && M.pos[r.moves._id]) {
+            var o = M.pos[r.moves._id];
+            L.polyline([[o.lat, o.lng], [p.lat, p.lng]], { color: "#ea580c", weight: 2.5, dashArray: "6 5", interactive: false }).addTo(M.layer);
+            L.circleMarker([o.lat, o.lng], { radius: 6, color: "#ea580c", weight: 2, fillColor: "#fff", fillOpacity: 1, interactive: false }).addTo(M.layer);
+        }
+    }
     function drawPlanned() {
         (M.plannedCams || []).forEach(function (pc) {
             var p = M.pos[pc._id];
+            drawPlannedLinks(pc);
             var editing = M.coneEdit && M.coneEdit.c._id === pc._id;
             pc.channels.forEach(function (ch) {
                 if (!ch.view || editing && +M.coneEdit.no === +ch.no) return;
@@ -978,7 +1004,8 @@
         var c = E.c, ch = E.ch, f = E.form;
         var name = f.name.value.trim();
         if (!name) { toast("warning", "Donnez un nom a la camera en projet"); f.name.focus(); return; }
-        var body = { name: name, note: f.note.value, status: f.status.value };
+        var body = { name: name, note: f.note.value, status: f.status.value, priority: f.priority.value,
+            mount: f.mount.value, mount_height: f.height.value, replaces: f.replaces };
         // Le cone affiche est toujours enregistre, meme laisse aux valeurs par defaut
         body.ch = ch.no;
         body.view = { az: E.v.az, fov: E.v.fov, range: E.v.range };
@@ -998,6 +1025,143 @@
             E.saving = false;
             E.saveBtn.disabled = false;
         });
+    }
+    // Cameras existantes placees sur la carte (hors projets), avec leur distance au point
+    function existingNear(lat, lng, radius) {
+        return Object.keys(M.pos).filter(function (id) { return id.indexOf("p:") !== 0 && M.pos[id].lat != null; }).map(function (id) {
+            var p = M.pos[id];
+            return { _id: id, name: p.name || id, ip: p.ip || "", d: bearingDist(lat, lng, { lat: p.lat, lng: p.lng }).d };
+        }).filter(function (x) { return x.d <= radius; }).sort(function (a, b) { return a.d - b.d; });
+    }
+    function camName(id, rec) {
+        var p = M.pos[id];
+        if (p && p.name) return p.name;
+        var r = (rec.replaces || []).filter(function (x) { return x._id === id; })[0];
+        return r ? r.name : id;
+    }
+    // Liens d'un projet avec l'existant : camera deplacee (lien pose a la
+    // creation depuis la camera) et cameras remplacees (a deposer)
+    function plannedLinks(c) {
+        var E = M.coneEdit, rec = c.rec, box = el("div", "cm-plan-links");
+        if (rec.moves) {
+            var mv = el("div", "cm-plan-move");
+            mv.appendChild(icon("move_location"));
+            var old = M.pos[rec.moves._id];
+            var dist = old ? Math.round(bearingDist(old.lat, old.lng, { lat: rec.lat, lng: rec.lng }).d) : null;
+            mv.appendChild(el("span", "", "Deplacement de " + rec.moves.name + (rec.moves.exists === false ? " (camera supprimee)" : "") +
+                (dist != null ? " : " + dist + " m depuis sa position actuelle" : "")));
+            mv.appendChild(cfgBtn("link_off", "", "", function () {
+                confirmToast("Ce projet ne sera plus le deplacement de " + rec.moves.name + " ?", "Retirer le lien").then(function (ok) {
+                    if (!ok) return;
+                    send("PUT", API.planned + "/" + c.pid, { moves_camera_id: "" }).then(function (r) {
+                        patchRec(c, r);
+                        box.replaceWith(plannedLinks(c));
+                        render();
+                    }).catch(function (e) { toast("error", e.message); });
+                });
+            }, "Retirer le lien avec la camera deplacee"));
+            box.appendChild(mv);
+        }
+        var head = el("div", "cm-plan-rep-head");
+        head.appendChild(el("b", "", "Remplace"));
+        var chips = el("div", "cm-plan-chips");
+        var list = el("div", "cm-plan-cands");
+        list.hidden = true;
+        function drawChips() {
+            chips.textContent = "";
+            if (!E.form.replaces.length) chips.appendChild(el("span", "cm-plan-none", "aucune camera existante"));
+            E.form.replaces.forEach(function (id) {
+                var chip = el("span", "cm-plan-chip");
+                chip.appendChild(el("span", "", camName(id, rec)));
+                var x = el("button", "cm-plan-chip-x"); x.type = "button"; x.title = "Ne remplace plus cette camera";
+                x.appendChild(icon("close"));
+                x.addEventListener("click", function () {
+                    E.form.replaces = E.form.replaces.filter(function (k) { return k !== id; });
+                    E.dirty = true;
+                    drawChips(); drawList();
+                });
+                chip.appendChild(x);
+                chips.appendChild(chip);
+            });
+        }
+        function drawList() {
+            list.textContent = "";
+            var cands = existingNear(rec.lat, rec.lng, REPLACE_RADIUS_M).filter(function (x) { return !rec.moves || x._id !== rec.moves._id; });
+            if (!cands.length) { list.appendChild(el("span", "cm-plan-none", "Aucune camera existante a moins de " + REPLACE_RADIUS_M + " m")); return; }
+            cands.slice(0, 25).forEach(function (x) {
+                var l = el("label", "cm-plan-cand"), cb = document.createElement("input");
+                cb.type = "checkbox"; cb.checked = E.form.replaces.indexOf(x._id) >= 0;
+                cb.addEventListener("change", function () {
+                    E.form.replaces = cb.checked ? E.form.replaces.concat([x._id]) : E.form.replaces.filter(function (k) { return k !== x._id; });
+                    E.dirty = true;
+                    drawChips();
+                });
+                l.appendChild(cb);
+                l.appendChild(el("span", "", x.name));
+                l.appendChild(el("small", "", Math.round(x.d) + " m"));
+                list.appendChild(l);
+            });
+        }
+        head.appendChild(cfgBtn("checklist", "Choisir", "", function () {
+            list.hidden = !list.hidden;
+            if (!list.hidden) drawList();
+        }, "Cameras existantes remplacees par ce projet (a deposer), les plus proches d'abord"));
+        box.appendChild(head);
+        box.appendChild(chips);
+        box.appendChild(list);
+        drawChips();
+        return box;
+    }
+    // Camera existante : projet de deplacement cree a sa position, avec ses
+    // canaux et angles de vue ; il reste a glisser le pin a la nouvelle place
+    function planMove(c) {
+        var already = (M.planned || []).filter(function (p) { return p.moves && p.moves._id === c._id; })[0];
+        if (already) { closeCone(true); openPlanned(plannedById("p:" + already._id)); return; }
+        send("POST", API.planned, { from_camera_id: c._id }).then(function (r) {
+            closeCone(true);
+            openPlanned(storePlanned(r));
+            toast("success", "Deplacement planifie : glissez le pin violet a la nouvelle position, puis enregistrez");
+        }).catch(function (e) { toast("error", e.message); });
+    }
+    // Dossier de planification des travaux (GET /api/cameras/planned/dossier.pdf).
+    // Options memorisees par poste (titre, indice, auteur, fonction...).
+    var DOSSIER_FIELDS = ["title", "subtitle", "indice", "phase", "author", "role"];
+    function dossierStatuses() {
+        return Array.prototype.filter.call(document.querySelectorAll("#cm-dos-status input"), function (cb) { return cb.checked; })
+            .map(function (cb) { return cb.value; });
+    }
+    function dossierCount() {
+        var st = dossierStatuses();
+        var n = (M.planned || []).filter(function (p) { return st.indexOf(p.status) >= 0; }).length;
+        var noView = (M.planned || []).filter(function (p) {
+            return st.indexOf(p.status) >= 0 && (p.channels || []).some(function (k) { return !k.view; });
+        }).length;
+        var noPrio = (M.planned || []).filter(function (p) { return st.indexOf(p.status) >= 0 && p.priority == null; }).length;
+        $("cm-dos-count").textContent = n + " camera(s) en projet dans le dossier" +
+            (noPrio ? " ; " + noPrio + " sans priorite (placees a la fin)" : "") +
+            (noView ? " ; " + noView + " avec un canal sans angle de vue" : "") + ".";
+        $("cm-dos-go").disabled = !n;
+    }
+    function openDossier() {
+        var saved = {};
+        try { saved = JSON.parse(localStorage.getItem("cockpit-cameras-dossier") || "{}"); } catch (e) {}
+        DOSSIER_FIELDS.forEach(function (k) { if (saved[k] != null) $("cm-dos-" + k).value = saved[k]; });
+        var go = function () { dossierCount(); $("cm-dossier-dialog").showModal(); };
+        if (M.loaded) go(); else loadMapData().then(go);
+    }
+    function makeDossier() {
+        var q = { status: dossierStatuses().join(",") }, keep = {};
+        DOSSIER_FIELDS.forEach(function (k) {
+            var v = $("cm-dos-" + k).value.trim();
+            keep[k] = v;
+            if (v) q[k] = v;
+        });
+        try { localStorage.setItem("cockpit-cameras-dossier", JSON.stringify(keep)); } catch (e) {}
+        var url = API.dossier + "?" + Object.keys(q).map(function (k) { return k + "=" + encodeURIComponent(q[k]); }).join("&");
+        // Nouvel onglet : le PDF s'y affiche (tuiles IGN telechargees au premier passage : quelques secondes)
+        window.open(url, "_blank");
+        toast("info", "Dossier en preparation dans un nouvel onglet");
+        $("cm-dossier-dialog").close();
     }
     function deletePlanned(c) {
         confirmToast("Supprimer la camera en projet " + c.name + " ?", "Supprimer").then(function (ok) {
@@ -1122,11 +1286,20 @@
             };
             E.form.note.value = c.rec.note || "";
             E.form.note.maxLength = 1000;
-            E.form.note.placeholder = "Pourquoi ici, ce qu'elle doit voir, contraintes (mat, reseau, alimentation)...";
+            E.form.note.placeholder = "Pourquoi ici, ce qu'elle doit voir, contraintes (reseau, alimentation)...";
+            E.form.priority = inp(c.rec.priority == null ? "" : c.rec.priority, { placeholder: "1 = urgent" });
+            E.form.priority.type = "number"; E.form.priority.min = "1"; E.form.priority.max = "999";
+            E.form.mount = sel(PLANNED_MOUNTS, c.rec.mount || "");
+            E.form.height = inp(c.rec.mount_height == null ? "" : String(c.rec.mount_height).replace(".", ","), { placeholder: "ex. 6", inputmode: "decimal" });
+            E.form.replaces = (c.rec.replaces || []).map(function (r) { return r._id; });
             pf.appendChild(field("Nom", E.form.name));
             pf.appendChild(field("Statut", E.form.status));
+            pf.appendChild(field("Priorite", E.form.priority));
+            pf.appendChild(field("Support de pose", E.form.mount));
+            pf.appendChild(field("Hauteur de pose (m)", E.form.height));
             pf.appendChild(field("Note", E.form.note, "cm-span2"));
             box.appendChild(pf);
+            box.appendChild(plannedLinks(c));
             box.appendChild(el("div", "cm-cfg-chname", "Ajoutee" + (c.rec.by ? " par " + c.rec.by : "") +
                 (c.rec.at ? " le " + new Date(c.rec.at).toLocaleDateString("fr-FR") : "")));
         } else {
@@ -1208,6 +1381,8 @@
         if (T) acts.appendChild(cfgBtn("skip_next", "Passer", "", function () { tourStep(1); }, "Passer sans enregistrer l'angle (fleche droite)"));
         if (c.planned) acts.appendChild(cfgBtn("delete", "", "cm-btn-danger", function () { deletePlanned(c); }, "Supprimer la camera en projet"));
         else if (ch.view) acts.appendChild(cfgBtn("delete", "", "cm-btn-danger", clearCone, "Effacer l'angle de vue"));
+        if (!c.planned) acts.appendChild(cfgBtn("move_location", "", "", function () { planMove(c); },
+            "Planifier le deplacement de cette camera (camera en projet a sa position actuelle, a glisser a la nouvelle place)"));
         E.saveBtn = cfgBtn("check", T ? "Enregistrer et suivant" : "Enregistrer", "cm-btn-primary cm-cfg-save", saveCone, "Entree");
         acts.appendChild(E.saveBtn);
         box.appendChild(acts);
@@ -2187,6 +2362,12 @@
         $("cm-map-cones").addEventListener("click", function () { setConeMode(!M.cones); });
         $("cm-map-tour").addEventListener("click", startTour);
         $("cm-map-plan").addEventListener("click", function () { setAddPlanned(!M.addPlanned); });
+        $("cm-map-dossier").addEventListener("click", openDossier);
+        $("cm-dos-go").addEventListener("click", makeDossier);
+        Array.prototype.forEach.call(document.querySelectorAll("#cm-dos-status input"), function (cb) { cb.addEventListener("change", dossierCount); });
+        Array.prototype.forEach.call(document.querySelectorAll("#cm-dossier-dialog [data-close]"), function (b) {
+            b.addEventListener("click", function () { $("cm-dossier-dialog").close(); });
+        });
         $("cm-privacy-all-btn").addEventListener("click", openPrivacyAll);
         $("cm-pall-on").addEventListener("click", function () { startPrivacyAll(true); });
         $("cm-pall-off").addEventListener("click", function () { startPrivacyAll(false); });

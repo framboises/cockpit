@@ -43,3 +43,4 @@ logs/
 *.log
 
 graphify-out/
+uploads/tiles_cache/

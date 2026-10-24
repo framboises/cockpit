@@ -380,6 +380,54 @@ place de la photo, pastilles de canaux + "Mobile" / "Fixe" / modeles
 d'optique) ; un nouveau capteur fixe part 90 degres apres le dernier fixe
 dessine.
 
+Champs de planification d'une camera en projet (volet, sous le nom) :
+`priority` (1 = la plus urgente, 1 a 999, vide = a la fin du dossier),
+`mount` (`PLANNED_MOUNTS` : mat / angle_mur / mur_plat, vide = a definir),
+`mount_height` (m, 0,5 a 60), `replaces` (ids de cameras EXISTANTES
+remplacees = a deposer ; choix parmi celles a moins de 500 m, les plus proches
+d'abord), `moves_camera_id` (projet = DEPLACEMENT d'une camera existante :
+bouton "Planifier le deplacement" du volet d'une camera reelle,
+`POST /api/cameras/planned {from_camera_id}` cree le projet a sa position
+avec ses canaux, optique et angles de vue ; on glisse ensuite le pin).
+Coherence (`_planned_conflict`, 409) : une camera n'est reprise (deplacee ou
+remplacee) que par UN projet, et jamais deplacee et remplacee a la fois.
+Sur la carte : trait orange pointille ancienne position -> projet, croix
+rouge et trait rouge sur les cameras remplacees. Une camera supprimee depuis
+reste citee, marquee "Camera supprimee".
+
+## Dossier de planification des travaux (PDF)
+
+Bouton "Dossier travaux" de la carte : options (titre, sous-titre, indice,
+phase, etabli par, fonction, statuts retenus ; memorisees par poste) puis
+`GET /api/cameras/planned/dossier.pdf?status=...&indice=...` (nouvel onglet,
+journal `cameras_audit` action `dossier_travaux`). `cameras_dossier.py`
+(reportlab, dependance de requirements.txt), A4 paysage, charte du dossier
+"Porte du Houx indice A" : Barlow + Exo2 BoldItalic (`static/fonts/dossier/`,
+OFL), bleu marine #131E41, accent #0971CE, logo ACO blanc sur carre marine
+(`static/img/ACO-logo-monochrome-universel-blanc.png`, marge rognee),
+cartouche bas droite "n/N PLANCHE" (rendu en DEUX passes pour connaitre N).
+- Couverture (chiffres cles, plan reduit, sommaire), plan d'ensemble (carte +
+  legende + tableau), UNE planche par projet triee par priorite (repere
+  C1..Cn ; sans priorite : a la fin, par nom), recapitulatif paginé (16
+  lignes) + points de vigilance + quantitatif.
+- Planche emplacement : vue MICRO (cadree sur les cones et les cameras
+  reprises a moins de `MICRO_MAX_REF_M` = 120 m ; existantes en gris, autres
+  projets en violet pale) et vue MACRO (~600 m), echelle approchee, nord,
+  barre d'echelle ; identification (priorite, statut, support + hauteur, GPS
+  WGS84 decimal et DMS, Lambert 93 par les formules IGN, verifie sur le point
+  de reference du dossier modele) ; canaux (objectif, azimut + cardinal,
+  ouverture, portee) ; operation (deplacement : ancienne position et
+  distance ; remplacements : distance) ; materiel.
+- Objectifs et appareils : table `LENSES` (memes valeurs que cameras.js) ;
+  multi-capteurs (2DP7D836, 2SF8C442) = UN appareil par emplacement ; un
+  deplacement ne commande rien ; camera deplacee : objectif deduit de SON
+  modele, jamais d'objectif par defaut.
+- Fonds de carte : orthophoto IGN WMTS (data.geopf.fr, sans cle) telechargee
+  par le SERVEUR (8 en parallele, 8 s), cache `uploads/tiles_cache/ign_ortho`
+  (180 j, hors git), JPEG dans le PDF (~1,5 Mo pour 5 emplacements). Tuile
+  indisponible : fond gris et mention sur la carte, le dossier sort quand meme.
+- Tests : `tests/test_cameras_dossier.py` (tuiles remplacees par une image unie).
+
 Objectifs (`LENSES` de cameras.js, cles = `cameras.PLANNED_MODELS`) : ouverture
 horizontale et portee DORI "Observer" (63 px/m) des fiches techniques
 fournies le 21/10/2026 ; PTZ au grand angle, portee "Observer" ramenee a la

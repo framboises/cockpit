@@ -214,11 +214,22 @@ class FakeCollection:
     def _matching(self, query):
         if not query:
             return list(self.docs)
-        out = []
-        for doc in self.docs:
-            if all(self._match(doc, cle, val) for cle, val in query.items()):
-                out.append(doc)
-        return out
+        return [doc for doc in self.docs if self._match_query(doc, query)]
+
+    @classmethod
+    def _match_query(cls, doc, query):
+        """Filtre complet ; `$or` au premier niveau comme MongoDB. Un autre
+        operateur de premier niveau ($and, $nor...) leve : ignore, il
+        laisserait passer tous les documents."""
+        for cle, val in query.items():
+            if cle == "$or":
+                if not any(cls._match_query(doc, q) for q in val):
+                    return False
+            elif cle.startswith("$"):
+                raise NotImplementedError("FakeCollection ne sait pas filtrer %s" % cle)
+            elif not cls._match(doc, cle, val):
+                return False
+        return True
 
     @staticmethod
     def _as_comparable_utc(value):
@@ -275,6 +286,10 @@ class FakeCollection:
         # relire les echeances du dernier run PIAF -- ne trouvait donc jamais
         # le document dont la valeur venait pourtant d'etre lue, l'un des
         # cotes etant rendu conscient et l'autre non.
+        # Champ tableau compare a une valeur simple : MongoDB cherche la
+        # valeur parmi les elements ({"replaces": id} sur replaces: [ids])
+        if isinstance(actuel, list) and not isinstance(val, list):
+            return any(cls._as_comparable_utc(x) == cls._as_comparable_utc(val) for x in actuel)
         return actuel == cls._as_comparable_utc(val)
 
 

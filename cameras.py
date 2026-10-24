@@ -1171,6 +1171,9 @@ PLANNED_MAX_CHANNELS = 8
 # (ouverture et portee tirees des fiches techniques Hikvision)
 PLANNED_MODELS = ("2dp-ptz", "2dp-pano", "2sf-ptz", "2sf-pano", "bullet-wide", "bullet-tele",
                   "fisheye-360", "fisheye-180", "ptz")
+# Support de pose (dossier de planification des travaux)
+PLANNED_MOUNTS = {"mat": "Mat", "angle_mur": "Angle de mur", "mur_plat": "Mur plat"}
+PLANNED_MAX_REPLACES = 20
 
 
 def _planned_channels(d):
@@ -1187,9 +1190,23 @@ def _planned_channels(d):
     return [ch]
 
 
-def _pub_planned(d):
+def _planned_refs(docs):
+    """{ObjectId: {_id, name, ip, exists}} des cameras existantes citees par des
+    projets (remplacees ou deplacees) : une camera supprimee depuis reste
+    affichee, marquee absente."""
+    ids = {o for d in docs for o in (d.get("replaces") or []) + ([d["moves_camera_id"]] if d.get("moves_camera_id") else [])}
+    found = {c["_id"]: c for c in _col_cameras.find({"_id": {"$in": list(ids)}}, {"name": 1, "ip": 1})} if ids else {}
+    return {o: {"_id": str(o), "name": (found.get(o) or {}).get("name", "Camera supprimee"),
+                "ip": (found.get(o) or {}).get("ip", ""), "exists": o in found} for o in ids}
+
+
+def _pub_planned(d, refs=None):
+    refs = _planned_refs([d]) if refs is None else refs
     return {"_id": str(d["_id"]), "name": d.get("name", ""), "note": d.get("note", ""),
             "status": d.get("status", "souhaitee"), "lat": d.get("lat"), "lng": d.get("lng"),
+            "priority": d.get("priority"), "mount": d.get("mount") or "", "mount_height": d.get("mount_height"),
+            "replaces": [refs[o] for o in d.get("replaces") or [] if o in refs],
+            "moves": refs.get(d.get("moves_camera_id")) if d.get("moves_camera_id") else None,
             "channels": [{"no": c.get("no"), "optics": c.get("optics") or "", "model": c.get("model") or "",
                           "view": _pub_view(c.get("view"))}
                          for c in _planned_channels(d)],
@@ -1213,6 +1230,55 @@ def _planned_fields(data, chans):
         if data["status"] not in PLANNED_STATUS:
             return None, None, "Statut inconnu"
         f["status"] = data["status"]
+    if "priority" in data:
+        if data["priority"] in (None, ""):
+            unset["priority"] = ""
+        else:
+            try:
+                prio = int(data["priority"])
+            except (TypeError, ValueError):
+                return None, None, "Priorite invalide (nombre entier, 1 = la plus urgente)"
+            if not 1 <= prio <= 999:
+                return None, None, "Priorite invalide (1 a 999)"
+            f["priority"] = prio
+    if "mount" in data:
+        if not data["mount"]:
+            unset["mount"] = ""
+        elif data["mount"] in PLANNED_MOUNTS:
+            f["mount"] = data["mount"]
+        else:
+            return None, None, "Support de pose inconnu"
+    if "mount_height" in data:
+        if data["mount_height"] in (None, ""):
+            unset["mount_height"] = ""
+        else:
+            try:
+                h = round(float(str(data["mount_height"]).replace(",", ".")), 1)
+            except (TypeError, ValueError):
+                return None, None, "Hauteur de pose invalide"
+            if not 0.5 <= h <= 60:
+                return None, None, "Hauteur de pose invalide (0,5 a 60 m)"
+            f["mount_height"] = h
+    if "replaces" in data:
+        ids = []
+        for i in data.get("replaces") or []:
+            o = _oid(i)
+            if not o or o in ids:
+                continue
+            ids.append(o)
+        if len(ids) > PLANNED_MAX_REPLACES:
+            return None, None, "%d cameras remplacees au plus" % PLANNED_MAX_REPLACES
+        if ids and _col_cameras.count_documents({"_id": {"$in": ids}}) != len(ids):
+            return None, None, "Camera a remplacer introuvable"
+        f["replaces"] = ids
+    if "moves_camera_id" in data:
+        if not data["moves_camera_id"]:
+            unset["moves_camera_id"] = ""
+        else:
+            o = _oid(data["moves_camera_id"])
+            if not o or not _col_cameras.find_one({"_id": o}, {"_id": 1}):
+                return None, None, "Camera a deplacer introuvable"
+            f["moves_camera_id"] = o
     if "lat" in data or "lng" in data:
         try:
             lat, lng = float(data["lat"]), float(data["lng"])
@@ -1267,7 +1333,33 @@ def _planned_doc(pid):
     return _db["cameras_planned"].find_one({"_id": oid}) if oid else None
 
 
+def _planned_conflict(doc_id, merged):
+    """Message d'erreur si le projet est incoherent avec lui-meme ou les autres :
+    une camera deplacee ne peut pas etre aussi remplacee, ni deplacee par deux
+    projets ; une camera remplacee ne l'est que par un seul projet."""
+    moves, repl = merged.get("moves_camera_id"), merged.get("replaces") or []
+    if moves and moves in repl:
+        return "Une camera ne peut pas etre a la fois deplacee et remplacee par ce projet"
+    q = {"_id": {"$ne": doc_id}} if doc_id else {}
+    if moves:
+        other = _db["cameras_planned"].find_one(dict(q, **{"$or": [{"moves_camera_id": moves}, {"replaces": moves}]}), {"name": 1})
+        if other:
+            return "Cette camera est deja reprise par le projet %s" % other.get("name", "")
+    for o in repl:
+        other = _db["cameras_planned"].find_one(dict(q, **{"$or": [{"moves_camera_id": o}, {"replaces": o}]}), {"name": 1})
+        if other:
+            c = _col_cameras.find_one({"_id": o}, {"name": 1}) or {}
+            return "%s est deja reprise par le projet %s" % (c.get("name", "Une camera"), other.get("name", ""))
+    return None
+
+
 def _planned_save(doc, f, unset=None):
+    merged = dict(doc, **f)
+    for k in unset or {}:
+        merged.pop(k, None)
+    conflict = _planned_conflict(doc["_id"], merged)
+    if conflict:
+        return jsonify({"error": conflict}), 409
     f.update({"updated_by": _who(), "updatedAt": datetime.now(timezone.utc)})
     upd = {"$set": f}
     if unset:
@@ -1279,26 +1371,74 @@ def _planned_save(doc, f, unset=None):
 @cameras_bp.route("/api/cameras/planned", methods=["GET"])
 def list_planned():
     _ensure_db()
-    return jsonify([_pub_planned(d) for d in _db["cameras_planned"].find().sort("name", 1)])
+    docs = list(_db["cameras_planned"].find().sort("name", 1))
+    refs = _planned_refs(docs)
+    return jsonify([_pub_planned(d, refs) for d in docs])
 
 
 @cameras_bp.route("/api/cameras/planned", methods=["POST"])
 def create_planned():
+    """{lat, lng, ...} : nouvel emplacement. {from_camera_id} : deplacement
+    d'une camera existante, cree a sa position actuelle avec ses canaux
+    (optique, angle de vue) ; il reste a glisser le pin a la nouvelle place."""
     _ensure_db()
     data = request.get_json(silent=True) or {}
+    chans = [{"no": 1}]
+    if data.get("from_camera_id"):
+        src = _col_cameras.find_one({"_id": _oid(data["from_camera_id"])}) if _oid(data["from_camera_id"]) else None
+        if not src:
+            return jsonify({"error": "Camera introuvable"}), 404
+        import detection
+        pos, _source, _geo = detection._device_position(_db, src)
+        if not pos:
+            return jsonify({"error": "Camera sans position : placez-la d'abord sur la carte"}), 400
+        data = {"lat": pos["lat"], "lng": pos["lng"], "name": ("Deplacement - %s" % src.get("name", ""))[:120],
+                "status": data.get("status") or "souhaitee", "moves_camera_id": str(src["_id"])}
+        chans = [dict({"no": i + 1}, **{k: c[k] for k in ("optics", "view") if c.get(k)})
+                 for i, c in enumerate(c for c in src.get("channels") or [] if c.get("enabled", True) is not False)
+                 ][:PLANNED_MAX_CHANNELS] or [{"no": 1}]
     if "lat" not in data or "lng" not in data:
         return jsonify({"error": "Position requise"}), 400
     data.setdefault("name", "Projet %d" % (_db["cameras_planned"].count_documents({}) + 1))
     data.setdefault("status", "souhaitee")
-    chans = [{"no": 1}]
     f, _unset, err = _planned_fields(data, chans)
     if err:
         return jsonify({"error": err}), 400
+    conflict = _planned_conflict(None, f)
+    if conflict:
+        return jsonify({"error": conflict}), 409
     now = datetime.now(timezone.utc)
     f.update({"channels": chans, "by": _who(), "at": now, "updatedAt": now})
     res = _db["cameras_planned"].insert_one(f)
     logger.info("Camera en projet %s creee par %s", f.get("name"), f["by"])
     return jsonify(_pub_planned(_db["cameras_planned"].find_one({"_id": res.inserted_id}))), 201
+
+
+@cameras_bp.route("/api/cameras/planned/dossier.pdf", methods=["GET"])
+def planned_dossier():
+    """Dossier de planification des travaux (PDF A4 paysage, cameras_dossier.py).
+    ?status=souhaitee,validee (defaut : tous), ids=<id>,<id> (facultatif),
+    title, subtitle, indice, phase, author (defaut : l'utilisateur), role."""
+    _ensure_db()
+    import io
+    import cameras_dossier
+    a = request.args
+    statuses = [x for x in (a.get("status") or "").split(",") if x in PLANNED_STATUS] or list(PLANNED_STATUS)
+    ids = [o for o in (_oid(x) for x in (a.get("ids") or "").split(",") if x) if o]
+    opts = {"statuses": statuses, "ids": ids or None, "title": a.get("title"), "subtitle": a.get("subtitle"),
+            "indice": a.get("indice"), "phase": a.get("phase"), "author": a.get("author") or _who(), "role": a.get("role")}
+    try:
+        pdf, n = cameras_dossier.build_pdf(_db, opts)
+    except Exception:
+        logger.exception("Dossier de planification des cameras impossible")
+        return jsonify({"error": "Generation du dossier impossible (voir le journal du serveur)"}), 500
+    if not pdf:
+        return jsonify({"error": "Aucune camera en projet pour ces statuts"}), 404
+    indice = "".join(ch for ch in (opts["indice"] or "A").upper() if ch.isalnum())[:3] or "A"
+    name = "Dossier_travaux_cameras_ind%s_%s.pdf" % (indice, datetime.now().strftime("%Y%m%d"))
+    logger.info("Dossier de planification des cameras : %d emplacement(s), par %s", n, _who())
+    _audit("dossier_travaux", detail={"emplacements": n, "statuts": statuses, "indice": indice})
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=False, download_name=name)
 
 
 @cameras_bp.route("/api/cameras/planned/<pid>", methods=["PUT"])

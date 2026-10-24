@@ -145,6 +145,9 @@
             <button class="cm-btn" id="cm-map-plan" type="button" aria-pressed="false" title="Ajouter une camera en projet (travaux a venir) : cliquez ensuite sur la carte">
               <span class="material-symbols-outlined">add_location_alt</span><span>Projet</span>
             </button>
+            <button class="cm-btn" id="cm-map-dossier" type="button" title="Dossier de planification des travaux des cameras en projet (PDF)">
+              <span class="material-symbols-outlined">picture_as_pdf</span><span>Dossier travaux</span>
+            </button>
             <select class="cm-select" id="cm-map-place" hidden aria-label="Placer une camera sans position"></select>
             <span class="cm-map-hint" id="cm-map-hint" hidden>Faites glisser un pin : la position est enregistree dans la couche GPS des cameras.</span>
             <div class="cm-map-progress" id="cm-map-progress" hidden>
@@ -212,6 +215,36 @@
     <button type="button" class="cm-btn" id="cm-profile-add"><span class="material-symbols-outlined">add</span>Nouveau profil</button>
     <span style="flex:1"></span>
     <button type="button" class="cm-btn" data-close>Fermer</button>
+  </div>
+</dialog>
+
+<dialog class="cm-dialog" id="cm-dossier-dialog" aria-labelledby="cm-dossier-title">
+  <div class="cm-dialog-head">
+    <h3 id="cm-dossier-title"><span class="material-symbols-outlined">picture_as_pdf</span> Dossier de planification des travaux</h3>
+    <button type="button" class="cm-icon-btn" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+  </div>
+  <div class="cm-dialog-body">
+    <p class="cm-help">PDF A4 paysage : couverture, plan d'ensemble, une planche par camera en projet (classees par priorite : vue micro et vue macro sur orthophoto IGN, angles de vue, GPS et Lambert 93, support de pose, cameras remplacees ou deplacees), recapitulatif et quantitatif.</p>
+    <div class="cm-dossier-grid">
+      <label class="cm-field cm-span2">Titre<input type="text" id="cm-dos-title" maxlength="90" placeholder="Cameras - nouvelles implantations"></label>
+      <label class="cm-field cm-span2">Sous-titre<input type="text" id="cm-dos-subtitle" maxlength="120" placeholder="Planification des travaux d'installation"></label>
+      <label class="cm-field">Indice<input type="text" id="cm-dos-indice" maxlength="3" placeholder="A"></label>
+      <label class="cm-field">Phase<select id="cm-dos-phase"><option>Esquisse</option><option>Avant-projet</option><option>Projet</option><option>Consultation</option><option>Execution</option></select></label>
+      <label class="cm-field">Etabli par<input type="text" id="cm-dos-author" maxlength="80" placeholder="Vous (par defaut)"></label>
+      <label class="cm-field">Fonction<input type="text" id="cm-dos-role" maxlength="80" placeholder="Direction des Operations"></label>
+    </div>
+    <div class="cm-dossier-status" id="cm-dos-status">
+      <b>Statuts retenus</b>
+      <label><input type="checkbox" value="souhaitee" checked> Souhaitee</label>
+      <label><input type="checkbox" value="validee" checked> Validee</label>
+      <label><input type="checkbox" value="commandee" checked> Commandee</label>
+    </div>
+    <p class="cm-help" id="cm-dos-count"></p>
+  </div>
+  <div class="cm-dialog-foot">
+    <span style="flex:1"></span>
+    <button type="button" class="cm-btn" data-close>Fermer</button>
+    <button type="button" class="cm-btn cm-btn-primary" id="cm-dos-go"><span class="material-symbols-outlined">picture_as_pdf</span>Generer le PDF</button>
   </div>
 </dialog>
 
