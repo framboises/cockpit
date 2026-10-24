@@ -438,3 +438,7 @@
 .cm-journal-head span { color: var(--muted); font-size: .72rem; }
 .cm-journal-detail { margin-top: 3px; color: var(--muted); overflow-wrap: anywhere; }
 .cm-journal-empty { margin: 0; font-size: .78rem; color: var(--muted); }
+/* Etat confirme par la releve planifiee (cameras_health.py) */
+.cm-health { font-size: .78rem; color: var(--muted); margin-bottom: 8px; padding-left: 10px; border-left: 3px solid var(--line); }
+.cm-health.is-ok { border-left-color: #16a34a; }
+.cm-health.is-ko { border-left-color: #dc2626; color: var(--text); }

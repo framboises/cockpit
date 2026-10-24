@@ -4897,6 +4897,8 @@ DETECTION_TYPES = {
     # Groupes de balises GPS, Anoloc et Teltonika (beacon_alerts.py, moteur)
     "beacon_speed", "beacon_zone", "beacon_stopped",
     "beacon_silent", "beacon_battery", "beacon_movement",
+    # Cameras hors ligne (camera_alerts.py, moteur ; releve cameras_health.py)
+    "camera_offline",
 }
 
 # Catalogue des Smart Events Hikvision exposes a la modale de creation d'alerte

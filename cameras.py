@@ -21,7 +21,7 @@ import ipaddress
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request, render_template, Response, send_file
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -893,12 +893,38 @@ def reachability():
             at = datetime.now(timezone.utc)
             for key, ok in zip(stale, results):
                 _probe_cache[key] = (time.monotonic(), ok, at)
+    # Etat confirme par la releve planifiee (cameras_health.py) : depuis quand
+    health = {h["_id"]: h for h in _db["cameras_health"].find({}, {"ok": 1, "since": 1})}
     out = {}
     for d in docs:
         hit = _probe_cache.get((d["ip"], d.get("port", 80)))
         if hit:
             out[str(d["_id"])] = {"ok": hit[1], "at": _iso(hit[2])}
+            h = health.get(d["_id"])
+            if h and "ok" in h:
+                out[str(d["_id"])].update({"health_ok": bool(h["ok"]), "since": _iso(h.get("since"))})
     return jsonify(out)
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/health", methods=["GET"])
+def camera_health(cam_id):
+    """Etat confirme et disponibilite 24 h / 7 j (releve cameras_health.py)."""
+    doc, err = _get_cam_doc(cam_id)
+    if err:
+        return err
+    import cameras_health
+    h = _db["cameras_health"].find_one({"_id": doc["_id"]})
+    if not h or "ok" not in h:
+        return jsonify({"monitored": False, "piste": is_piste_device(doc), "enabled": doc.get("enabled", True)})
+    return jsonify({
+        "monitored": True, "ok": bool(h["ok"]), "since": _iso(h.get("since")),
+        "last_check_at": _iso(h.get("last_check_at")), "lapi_last_at": _iso(h.get("lapi_last_at")),
+        "availability_24h": cameras_health.availability(_db, doc["_id"], 24),
+        "availability_7d": cameras_health.availability(_db, doc["_id"], 24 * 7),
+        "outages_7d": _db["cameras_health_log"].count_documents({
+            "camera_id": doc["_id"], "ok": False,
+            "at": {"$gte": datetime.now(timezone.utc) - timedelta(days=7)}}),
+    })
 
 
 # ---------------------------------------------------------------------------

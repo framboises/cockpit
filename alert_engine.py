@@ -1739,6 +1739,15 @@ try:
 except Exception as _e:  # pragma: no cover
     log.error("beacon_alerts indisponible : %s", _e)
 
+# Cameras hors ligne (camera_alerts.py) : lit cameras_health, ecrit par la
+# releve planifiee cameras_health.py. Meme protection que les balises.
+try:
+    import camera_alerts as _camera_alerts
+    for _dt in _camera_alerts.DETECTION_TYPES:
+        HANDLERS[_dt] = _camera_alerts.make_handler(_dt, get_db)
+except Exception as _e:  # pragma: no cover
+    log.error("camera_alerts indisponible : %s", _e)
+
 # ---------------------------------------------------------------------------
 # Upsert alerte active
 # ---------------------------------------------------------------------------

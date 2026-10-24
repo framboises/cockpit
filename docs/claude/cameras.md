@@ -384,6 +384,44 @@ principe que les voies de la page LAPI (`anpr._reachability`). Une seule
 vague de tests a la fois (`_probe_lock`) : une rafale de pages ouvertes
 attend la vague en cours et relit son cache au lieu d'en relancer une.
 
+## Etat des cameras (releve historisee, alerte hors ligne)
+
+`cameras_health.py`, lance toutes les 2 min par la tache planifiee "Cockpit -
+Etat cameras" (`scripts/cameras_health.bat`, installee par
+`scripts/install_cameras_health_task.ps1`), JAMAIS dans le process Flask.
+Connexion TCP au port web de chaque appareil ACTIF, sans identifiant ni
+requete ; cameras de PISTE exclues (pas meme une connexion ; l'etat reseau
+live de la page, lui, les teste encore en TCP). Aucun mot de passe lu : la
+tache n'a pas besoin de COCKPIT_CAMERA_KEY. Verrou `logs/cameras_health.lock`,
+journal `logs/cameras_health-AAAAMMJJ.log`, `--dry-run`.
+
+- Hysteresis (`next_state`) : hors ligne apres `KO_CONFIRM` = 2 releves en
+  echec (`KO_CONFIRM_CELL` = 3 pour une 4G, sondee 2 fois avec 8 s de delai),
+  `since` = derniere reussite ; en ligne au premier succes. Premiere releve
+  d'un appareil = etat pris tel quel, sans changement (pas d'alerte en masse
+  a l'installation).
+- `cameras_health` (`_id` = camera_id) : `ok`, `since`, `fails`, `raw_ok`,
+  `first_seen`, `last_ok_at`, `last_check_at`, `cellular`, `lapi_last_at`
+  (derniere plaque de `hik_anpr`, index `camera_path` + `event_dt`). Appareil
+  supprime / desactive / reclasse piste : document retire.
+- `cameras_health_log` : changements d'etat confirmes (TTL 400 j) ;
+  `availability(db, id, heures)` en tire la disponibilite.
+- Page Cameras : bulle du point d'etat "hors ligne depuis HH:MM (duree)"
+  (`/api/cameras/reachability` ajoute `health_ok` / `since`), et en tete de
+  la section Historique de la fiche : etat, disponibilite 24 h / 7 j, nombre de
+  coupures sur 7 j, derniere plaque lue (`GET /api/cameras/<id>/health`).
+- Centrale d'alerte : type `camera_offline` ("Cameras - camera hors ligne",
+  `camera_alerts.py`, branche dans `alert_engine.HANDLERS` comme les balises).
+  Ne sonde rien, lit `cameras_health`. Params (JSON, defauts proposes par
+  l'admin) : `after_min` 10, `sites`, `camera_ids` ([] = toutes),
+  `include_cellular` true, `notify_back` false, `lapi_silence_min` 0 (LAPI
+  qui repond sans lire de plaque depuis N min), `stale_min` 10 (releve plus
+  vieille = tache arretee : AUCUNE alerte sur un etat perime). Une alerte par
+  coupure (etat `cockpit_alert_engine_state._id = "camera:<slug>"`), dedup
+  `camera-offline-<id>-<since>`, position depuis la couche `titan.cameras`.
+  Mode `banner` conseille.
+- Tests : `tests/test_cameras_health.py`.
+
 ## Import SeeTec
 
 `scripts/import_cameras_seetec.py <InstallationConfiguration.xlsx> [--apply]`

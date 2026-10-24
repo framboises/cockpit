@@ -76,6 +76,14 @@
         var r = S.reach[c._id];
         return r ? (r.ok ? "ok" : "ko") : "";
     }
+    function sinceText(iso) {
+        var d = new Date(iso), m = (Date.now() - d.getTime()) / 60000;
+        var hm = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+        if (m < 60) return hm + " (" + Math.max(1, Math.round(m)) + " min)";
+        if (m < 1440) return hm + " (" + Math.floor(m / 60) + " h " + String(Math.round(m % 60)).padStart(2, "0") + ")";
+        return d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " (" + Math.floor(m / 1440) + " j)";
+    }
+    function pct(v) { return v == null ? "-" : (Math.floor(v * 1000) / 10).toString().replace(".", ",") + " %"; }
     function ago(iso) {
         if (!iso) return "";
         var s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -1296,6 +1304,8 @@
         var r = S.reach[c._id];
         if (st === "ko" && c.cellular) dot.className = "cm-dot is-sleep";
         dot.title = st === "off" ? "Desactivee" : r ? (r.ok ? "En ligne" : c.cellular ? "Camera 4G : en veille ou hors couverture" : "Ne repond pas") + " (test " + ago(r.at) + ")" : "Test reseau en cours...";
+        // Releve planifiee (cameras_health.py) : coupure confirmee et sa duree
+        if (r && r.health_ok === false && r.since) dot.title += " - hors ligne depuis " + sinceText(r.since);
         tds.appendChild(dot);
         tr.appendChild(tds);
 
@@ -1671,6 +1681,20 @@
         // Historique (GET /api/cameras/<id>/journal), charge a la demande
         if (c) {
             var s6 = section("Historique", "history");
+            var hrow = el("div", "cm-health", "");
+            s6.appendChild(hrow);
+            getJSON(API.list + "/" + c._id + "/health").then(function (h) {
+                if (!h.monitored) {
+                    hrow.textContent = h.piste ? "Camera de piste : jamais sondee." : h.enabled === false
+                        ? "Camera desactivee : pas de releve." : "Pas encore relevee (tache Cockpit - Etat cameras).";
+                    return;
+                }
+                hrow.classList.add(h.ok ? "is-ok" : "is-ko");
+                hrow.textContent = (h.ok ? "En ligne" : "Hors ligne") + " depuis " + sinceText(h.since) +
+                    " - disponibilite 24 h : " + pct(h.availability_24h) + ", 7 j : " + pct(h.availability_7d) +
+                    " - " + h.outages_7d + " coupure" + (h.outages_7d > 1 ? "s" : "") + " en 7 j" +
+                    (h.lapi_last_at ? " - derniere plaque lue " + sinceText(h.lapi_last_at) : "");
+            }).catch(function () { hrow.hidden = true; });
             var hb = el("button", "cm-btn"); hb.type = "button";
             hb.appendChild(icon("history")); hb.appendChild(document.createTextNode("Afficher l'historique"));
             var hl = el("div", "cm-journal");

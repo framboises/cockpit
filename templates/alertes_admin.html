@@ -382,6 +382,7 @@
               <option value="beacon_silent">Balises GPS - balise muette</option>
               <option value="beacon_battery">Balises GPS - batterie faible</option>
               <option value="beacon_movement">Balises GPS - mise en mouvement</option>
+              <option value="camera_offline">Cameras - camera hors ligne</option>
               <option value="anpr_watchlist" hidden>LAPI - plaque surveillee (deprecie, utiliser Camera Hikvision)</option>
             </select>
           </label>
@@ -408,6 +409,15 @@
             <b>capacities</b> ({"PORTE NORD PIETONS": 9000}) : surcharge par porte, en passages/h ;
             <b>doors</b> ([] = toutes) ; <b>exclude</b> (guichets et services : HELPDESK, UAM, LITIGE...) ;
             <b>dedup_min</b> (30) ; <b>stale_min</b> (20, collecteur muet = aucune alerte).
+          </div>
+          <div id="params-camoff-help" class="form-hint" style="display:none; font-size:0.78rem; line-height:1.45; opacity:0.85; margin-top:6px;">
+            Etat lu dans la releve planifiee <b>Cockpit - Etat cameras</b> (connexion au port web toutes les 2 min, sans identifiant ;
+            cameras de piste jamais sondees). Une camera est hors ligne apres 2 releves en echec (3 pour une camera 4G).
+            Alerte quand elle l'est depuis plus de <b>after_min</b> minutes, UNE fois par coupure.<br>
+            <b>sites</b> / <b>camera_ids</b> : restreindre (vide = toutes) ; <b>include_cellular</b> : cameras 4G comprises ;
+            <b>notify_back</b> : alerte aussi au retour en ligne ; <b>lapi_silence_min</b> : LAPI qui repond mais n'a lu aucune
+            plaque depuis N minutes (0 = jamais ; a reserver aux voies passantes, la nuit est calme).
+            Releve arretee depuis plus de 10 min : aucune alerte (etat perime). Mode <b>banner</b> conseille.
           </div>
         </div>
         <div class="form-row" id="params-traffic-row" style="display:none;">

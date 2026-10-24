@@ -59,7 +59,8 @@
     "beacon_stopped": "Balises GPS - arret prolonge",
     "beacon_silent": "Balises GPS - muette",
     "beacon_battery": "Balises GPS - batterie",
-    "beacon_movement": "Balises GPS - mouvement"
+    "beacon_movement": "Balises GPS - mouvement",
+    "camera_offline": "Cameras - hors ligne"
   };
 
   // Parametres par defaut proposes a la selection du type (editeur JSON brut,
@@ -74,6 +75,13 @@
     trend_fallback: false, max_growth: 3,
     sens: "entrees", doors: [], exclude: ["HELPDESK", "UAM", "LITIGE", "SERI", "PUNISHER"],
     dedup_min: 30
+  };
+
+  // Cameras hors ligne : miroir de camera_alerts.DEFAULTS (le moteur complete
+  // de toute facon les cles absentes), documente par #params-camoff-help
+  var CAMERA_OFFLINE_PARAMS_DEFAULT = {
+    after_min: 10, sites: [], camera_ids: [], include_cellular: true,
+    notify_back: false, lapi_silence_min: 0
   };
 
   var allGroups = [];
@@ -384,6 +392,15 @@
         ta.value = JSON.stringify(DOOR_SAT_PARAMS_DEFAULT, null, 2);
       }
       if (ta) ta.rows = 12;
+    }
+    var camoffHelp = $("#params-camoff-help");
+    if (camoffHelp) camoffHelp.style.display = detectionType === "camera_offline" ? "" : "none";
+    if (detectionType === "camera_offline") {
+      var tc = $('[name="params"]', $("#alert-def-form"));
+      if (tc && (!params || !Object.keys(params).length)) {
+        tc.value = JSON.stringify(CAMERA_OFFLINE_PARAMS_DEFAULT, null, 2);
+      }
+      if (tc) tc.rows = 8;
     }
   }
 
