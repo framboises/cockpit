@@ -1644,6 +1644,10 @@
                     }
                     if (p.kind === "select") input = sel(p.options, r[p.key]);
                     else if (p.kind === "lieu") input = sel([["", "--"]].concat((S.meta.lieux || []).map(function (x) { return [x, x]; })), r[p.key]);
+                    else if (p.kind === "preset") {
+                        // Preset de VUE (1-300) : les presets de fonction Hik (94 = redemarrage...) sont refuses par le serveur
+                        input = inp(r[p.key]); input.type = "number"; input.min = "1"; input.max = "300"; input.placeholder = "aucun";
+                    }
                     else input = inp(r[p.key]);
                     input.addEventListener("change", function () { r[p.key] = input.value; });
                     pg.appendChild(field(p.label, input));
@@ -1663,6 +1667,24 @@
         });
         s4.appendChild(add);
         body.appendChild(s4);
+
+        // Historique (GET /api/cameras/<id>/journal), charge a la demande
+        if (c) {
+            var s6 = section("Historique", "history");
+            var hb = el("button", "cm-btn"); hb.type = "button";
+            hb.appendChild(icon("history")); hb.appendChild(document.createTextNode("Afficher l'historique"));
+            var hl = el("div", "cm-journal");
+            hb.addEventListener("click", function () {
+                hb.disabled = true;
+                getJSON(API.list + "/" + c._id + "/journal").then(function (rows) {
+                    hb.hidden = true;
+                    renderJournal(hl, rows);
+                }).catch(function (e) { hb.disabled = false; toast("error", "Historique illisible : " + e.message); });
+            });
+            s6.appendChild(hb);
+            s6.appendChild(hl);
+            body.appendChild(s6);
+        }
 
         // Apercu
         if (c && c.controllable) {
@@ -1813,6 +1835,45 @@
         render();
         // Pas de defilement vers le champ : l'apercu reste visible en haut
         if (!c) iName.focus({ preventScroll: true });
+    }
+
+    var JOURNAL_LABELS = {
+        creation: "Creation", modification: "Modification", suppression: "Suppression",
+        modification_masse: "Modification de masse", preset: "Rappel de preset",
+        essuie_glace: "Essuie-glace", position: "Position sur la carte", masques: "Masques de vie privee",
+    };
+    var FIELD_LABELS = {
+        name: "nom", ip: "IP", port: "port", protocol: "protocole", brand: "marque", model: "modele",
+        firmware: "firmware", site: "site", location: "emplacement", notes: "notes", camera_path: "chemin d'envoi",
+        enabled: "active", tags: "etiquettes", credential_profile_id: "profil", channels: "canaux / usages",
+    };
+    function journalText(r) {
+        var d = r.detail || {};
+        if (r.action === "modification") {
+            return Object.keys(d).map(function (k) {
+                if (k === "channels" || k === "notes" || k === "credential_profile_id") return FIELD_LABELS[k] || k;
+                return (FIELD_LABELS[k] || k) + " : " + (d[k][0] == null || d[k][0] === "" ? "-" : d[k][0]) + " -> " + (d[k][1] == null || d[k][1] === "" ? "-" : d[k][1]);
+            }).join(", ");
+        }
+        if (r.action === "modification_masse") return Object.keys(d).map(function (k) { return FIELD_LABELS[k] || k; }).join(", ");
+        if (r.action === "preset") return "canal " + d.channel + ", preset " + d.preset + (d.ok ? "" : " (refuse)");
+        if (r.action === "essuie_glace") return "canal " + d.channel + (d.ok ? "" : " (refuse)");
+        if (r.action === "masques") return (d.enabled ? "actives" : "desactives") + (d.bulk ? " (toutes les cameras)" : "") + (d.ok ? "" : " - echec");
+        return "";
+    }
+    function renderJournal(box, rows) {
+        box.textContent = "";
+        if (!rows.length) { box.appendChild(el("p", "cm-journal-empty", "Aucune action enregistree.")); return; }
+        rows.forEach(function (r) {
+            var row = el("div", "cm-journal-row");
+            var head = el("div", "cm-journal-head");
+            head.appendChild(el("strong", "", JOURNAL_LABELS[r.action] || r.action));
+            head.appendChild(el("span", "", (r.at ? new Date(r.at).toLocaleString("fr-FR") : "") + (r.by ? " - " + r.by : "")));
+            row.appendChild(head);
+            var t = journalText(r);
+            if (t) row.appendChild(el("div", "cm-journal-detail", t));
+            box.appendChild(row);
+        });
     }
 
     // Masques de vie privee (POST/GET /api/cameras/<id>/privacy) : seuls les

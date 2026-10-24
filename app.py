@@ -7290,23 +7290,23 @@ def pcorg_camera_snapshot(cam_id):
 @app.route('/api/pcorg/camera-capture', methods=['POST'])
 @role_required("user")
 def pcorg_camera_capture():
-    """Capture une image depuis une camera HIK et l'attache a une fiche."""
-    import shutil
+    """Capture une image depuis une camera et l'attache a une fiche."""
     data = request.get_json(force=True)
     cam_id = (data.get("cam_id") or "").strip()
     fiche_id = (data.get("fiche_id") or "").strip()
     if not cam_id:
         return jsonify({"error": "cam_id requis"}), 400
 
-    # Charger la camera depuis MongoDB
-    from cameras import make_hik_camera
-    try:
-        oid = ObjectId(cam_id)
-    except Exception:
-        return jsonify({"error": "cam_id invalide"}), 400
-    cam_doc = db["cockpit_cameras"].find_one({"_id": oid})
+    # Seules les cameras du selecteur (actives, pilotables, avec profil, hors
+    # piste) : meme filtre que /api/pcorg/cameras
+    import cameras as cams
+    cam_doc = cams.capturable_doc(cam_id)
     if not cam_doc:
-        return jsonify({"error": "Camera introuvable"}), 404
+        return jsonify({"error": "Camera introuvable ou non capturable"}), 404
+    try:
+        channel = int(data.get("channel") or 0) or None
+    except (TypeError, ValueError):
+        return jsonify({"error": "Canal invalide"}), 400
 
     fiche_doc = None
     if fiche_id:
@@ -7314,14 +7314,6 @@ def pcorg_camera_capture():
             fiche_id, projection={"event": 1, "year": 1, "status_code": 1, "category": 1})
         if err:
             return err
-
-    # Instancier et capturer (identifiants : profil chiffre, cf. cameras.py)
-    try:
-        cam = make_hik_camera(cam_doc, data.get("channel"))
-    except PermissionError as e:  # camera de piste : jamais pilotee (cameras.is_piste_device)
-        return jsonify({"error": str(e)}), 403
-    except Exception as e:
-        return jsonify({"error": "Identifiants camera indisponibles : %s" % e}), 503
 
     photo_id = str(uuid.uuid4())[:8]
     ts = datetime.now(ZoneInfo("Europe/Paris"))
@@ -7341,20 +7333,20 @@ def pcorg_camera_capture():
     filename = f"{photo_id}_cam_{safe_cam_name}_{ts_file}.jpg"
     save_path = os.path.join(photos_dir, filename)
 
-    from cameras import call_camera, camera_error
+    # Reservation de l'appareil, delai entre captures et vignette du bon canal
+    # (identifiants : profil chiffre) : cameras.capture_to, comme la page Cameras
     try:
-        call_camera(cam_doc, lambda: cam.capture_image(save_path))
+        cams.capture_to(cam_doc, channel, save_path)
+    except cams.PisteCameraLocked as e:  # jamais pilotee (cameras.is_piste_device)
+        return jsonify({"error": str(e)}), 403
+    except cams.CaptureBusy as e:
+        return jsonify({"error": str(e)}), 429
+    except cams.camera_secrets.CameraKeyMissing as e:
+        return jsonify({"error": "Identifiants camera indisponibles : %s" % e}), 503
     except Exception as e:
-        return jsonify({"error": "Capture echouee : %s" % camera_error(cam_doc, e, "Capture main courante")}), 502
+        return jsonify({"error": "Capture echouee : %s" % cams.camera_error(cam_doc, e, "Capture main courante")}), 502
 
     photo_url = f"/field/photos/{sub_dir}/{filename}"
-
-    # Mettre a jour aussi le latest de la camera (pour les vignettes)
-    cam_snap_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "uploads", "camera_snapshots")
-    os.makedirs(cam_snap_dir, exist_ok=True)
-    latest_path = os.path.join(cam_snap_dir, f"{cam_id}_latest.jpg")
-    shutil.copy2(save_path, latest_path)
 
     # Si fiche_id fourni, ajouter en commentaire
     result = {"ok": True, "photo": photo_url, "cam_name": cam_doc["name"]}

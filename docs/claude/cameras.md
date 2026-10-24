@@ -42,7 +42,15 @@ la page LAPI renvoie ici (`/cameras?usage=anpr`).
       `docs/claude/detection.md`).
     - `capture` : Capture IA (trafic) : paires de photos prises par la tache
       planifiee `capture_ia.py`, reglees dans la page IA, mode Trafic
-      (`docs/claude/detection.md`). Pas de chemin d'envoi.
+      (`docs/claude/detection.md`). Pas de chemin d'envoi. Parametre `preset`
+      (kind `preset`) : `view_preset_id` n'accepte qu'un preset de VUE 1-300,
+      jamais un preset de fonction Hikvision (`HIK_RESERVED_PRESETS`) ; une
+      valeur refusee est videe a l'enregistrement, et `capture_ia._preset_of`
+      refuse encore au rappel (anciennes saisies) : mesure sans rappel. Avant
+      le 24/10/2026, saisir 94 aurait redemarre le dome a chaque mesure.
+  - UN SEUL canal LAPI par appareil (`_device_fields` refuse le second) :
+    `anpr_camera_config` et le recepteur sont indexes par chemin d'envoi,
+    commun a tout l'appareil.
 - `cam_credential_profiles` : `{name, user, secret, note}`. `secret` =
   AES-256-GCM (`camera_secrets.py`, format `v1:<nonce>:<chiffre>`, AAD fixe).
 
@@ -67,7 +75,12 @@ axis ; les thermiques HM-TD sont classees hikvision). Actions exposees :
 capture par canal (`/capture?channel=n`, derniere capture servie par
 `/snapshot?channel=n` ; une seule capture a la fois par IP et
 `CAPTURE_MIN_INTERVAL_S` = 3 s entre deux captures d'un meme canal, sinon
-429 ; la fiche capture tous les canaux actifs a la suite), test de connexion (met a jour modele et firmware),
+429 ; la fiche capture tous les canaux actifs a la suite). Logique unique
+`capture_to(doc, canal, save_path)` partagee avec la capture de la main
+courante (reservation, delai, vignette DU canal capture, `CaptureBusy` = 429).
+Seules les vignettes `<id>_latest.jpg` / `<id>_ch<N>_latest.jpg` sont ecrites
+(fichier `.tmp` puis renommage) : plus de fichiers horodates depuis le
+24/10/2026 (`scripts/cameras_purge_snapshots.py [--apply]` purge les anciens), test de connexion (met a jour modele et firmware),
 presets (`GET /presets`, `POST /preset {preset, channel}`), essuie-glace
 (`WIPER_BRANDS` = hikvision seulement). Vivotek, Uniview et interphones
 generiques sont geres (inventaire, identifiants, usages) mais pas pilotes.
@@ -179,6 +192,21 @@ generiques sont geres (inventaire, identifiants, usages) mais pas pilotes.
   pas utilise par Cockpit pour cela.
 - Rappeler un preset change la vue pour TOUS (operateurs SeeTec compris) :
   confirmation dans la page, puis capture automatique 4 s apres.
+
+## Journal des actions
+
+`cameras_audit` (TTL `AUDIT_RETENTION_DAYS` = 730 j) : `{action, camera_id,
+name, ip, by, at, detail}` ; actions `creation`, `modification` (detail =
+`{champ: [avant, apres]}`, canaux resumes sans angle de vue), `suppression`
+(copie de la fiche), `suppression_masse` / `modification_masse`
+(`camera_ids`), `preset`, `essuie_glace`, `profil_creation` /
+`profil_modification` / `profil_suppression` (JAMAIS le mot de passe : seul
+`mot_de_passe_change`). `_audit` ne fait jamais echouer l'action.
+`GET /api/cameras/<id>/journal` fusionne ce journal, `cameras_geo_edits` et
+`cameras_privacy_log` (section "Historique" de la fiche, chargee a la demande).
+
+Tests : `tests/test_cameras.py` (regle piste, presets de fonction, un canal
+LAPI, capture par canal). A completer a chaque nouvelle regle.
 
 ## LAPI par consultation (Axis License Plate Verifier)
 
@@ -371,7 +399,9 @@ laisser trainer.
 ## Pieges
 
 - `GET /api/cameras` (TABLEAU d'appareils) est reserve aux admins (blueprint
-  `cameras_bp`). Le selecteur de camera de la main courante (pcorg.js) lit
+  `cameras_bp`). Capture de la main courante (`/api/pcorg/camera-capture`) :
+  `cameras.capturable_doc` (meme filtre que le selecteur, sinon 404) puis
+  `cameras.capture_to`. Le selecteur de camera de la main courante (pcorg.js) lit
   `GET /api/pcorg/cameras` (app.py, droits "user" comme la capture) :
   `cameras.capture_camera_list()` = actives, marque pilotable, profil
   d'identifiants, hors piste, avec `lat`/`lon` pris dans la couche carto

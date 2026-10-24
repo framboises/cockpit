@@ -429,3 +429,12 @@
   .cm-cfg-keys { display: none; }
   .cm-cfg-seg .cm-btn { height: 38px; padding: 0 12px; }
 }
+
+/* Historique de la fiche (GET /api/cameras/<id>/journal) */
+.cm-journal { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.cm-journal:empty { display: none; }
+.cm-journal-row { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: .78rem; }
+.cm-journal-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cm-journal-head span { color: var(--muted); font-size: .72rem; }
+.cm-journal-detail { margin-top: 3px; color: var(--muted); overflow-wrap: anywhere; }
+.cm-journal-empty { margin: 0; font-size: .78rem; color: var(--muted); }

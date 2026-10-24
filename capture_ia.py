@@ -158,6 +158,19 @@ def _int(v, default):
         return default
 
 
+def _preset_of(d, role, label):
+    """Preset de vue a rappeler avant la mesure, ou None. Un preset de fonction
+    (94 = redemarrage Hikvision...) saisi avant la validation n'est JAMAIS
+    rappele : la mesure se fait sur la vue du moment."""
+    raw = str(role.get("preset") or "").strip()
+    if not raw:
+        return None
+    n = cameras.view_preset_id(raw, d.get("brand"))
+    if n is None:
+        log.warning("%s : preset %r refuse (preset de fonction ou invalide), mesure sans rappel", label, raw)
+    return n
+
+
 # ---------------------------------------------------------------------------
 # Analyse
 # ---------------------------------------------------------------------------
@@ -794,7 +807,7 @@ def capture_crowd(db, d, ch, role, dry_run=False):
     cam_id, no = str(d["_id"]), ch.get("no", 1)
     label = "%s canal %s" % (d.get("name"), no)
     cam = cameras.make_hik_camera(d, no)
-    preset = str(role.get("preset") or "").strip()
+    preset = _preset_of(d, role, label)
     if preset:
         cameras.call_camera(d, lambda: cam.goto_preset(preset, raise_errors=True))
         time.sleep(PRESET_WAIT_S)
@@ -979,7 +992,7 @@ def capture_secours(db, d, ch, role, dry_run=False):
     cam_id, no = str(d["_id"]), ch.get("no", 1)
     label = "%s canal %s" % (d.get("name"), no)
     cam = cameras.make_hik_camera(d, no)
-    preset = str(role.get("preset") or "").strip()
+    preset = _preset_of(d, role, label)
     if preset:
         cameras.call_camera(d, lambda: cam.goto_preset(preset, raise_errors=True))
         time.sleep(PRESET_WAIT_S)
@@ -1194,7 +1207,7 @@ def capture_one(db, d, ch, role, dry_run=False):
     cam_id, no = str(d["_id"]), ch.get("no", 1)
     label = "%s canal %s" % (d.get("name"), no)
     cam = cameras.make_hik_camera(d, no)
-    preset = str(role.get("preset") or "").strip()
+    preset = _preset_of(d, role, label)
     if preset:
         cameras.call_camera(d, lambda: cam.goto_preset(preset, raise_errors=True))
         time.sleep(PRESET_WAIT_S)

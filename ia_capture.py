@@ -178,7 +178,7 @@ def _write_role(db, d, idx, role):
     roles = [r for r in chans[idx].get("roles") or [] if r.get("type") != "capture"]
     if role is not None:
         roles.append(dict(role, type="capture"))
-    roles = cameras._clean_roles(roles)
+    roles = cameras._clean_roles(roles, d.get("brand"))
     db["cockpit_cameras"].update_one({"_id": d["_id"]}, {"$set": {"channels.%d.roles" % idx: roles,
                                                                   "updatedAt": datetime.now(timezone.utc)}})
     return next((r for r in roles if r["type"] == "capture"), None)

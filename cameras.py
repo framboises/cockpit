@@ -175,7 +175,7 @@ ROLE_TYPES = [
              "options": [["1", "1 min"], ["2", "2 min"], ["3", "3 min"], ["5", "5 min"], ["10", "10 min"], ["15", "15 min"]]},
             {"key": "gap_s", "label": "Intervalle entre les 2 paires", "kind": "select", "default": "8",
              "options": [["5", "5 s"], ["8", "8 s"], ["10", "10 s"], ["15", "15 s"], ["20", "20 s"]]},
-            {"key": "preset", "label": "Preset a rappeler avant (vide = aucun)", "kind": "text", "default": ""},
+            {"key": "preset", "label": "Preset a rappeler avant (vide = aucun)", "kind": "preset", "default": ""},
         ],
     },
 ]
@@ -259,7 +259,60 @@ def _ensure_db():
     _col_cameras.create_index("enabled")
     _col_cameras.create_index("camera_path")
     _col_profiles.create_index("name", unique=True)
+    db["cameras_audit"].create_index([("camera_id", 1), ("at", -1)])
+    db["cameras_audit"].create_index("at", expireAfterSeconds=AUDIT_RETENTION_DAYS * 86400)
     _db = db
+
+
+# ---------------------------------------------------------------------------
+# Journal des actions (cameras_audit) : creation, modification (avant / apres),
+# suppression, edition de masse, profils (JAMAIS le mot de passe), rappels de
+# preset, essuie-glace. Positions et masques ont leur propre journal
+# (cameras_geo_edits, cameras_privacy_log).
+# ---------------------------------------------------------------------------
+AUDIT_RETENTION_DAYS = 730
+
+
+def _ch_summary(channels):
+    return [{"no": c.get("no"), "name": c.get("name", ""), "enabled": c.get("enabled", True),
+             "roles": [{k: v for k, v in r.items()} for r in c.get("roles") or []],
+             "optics": c.get("optics") or ""}
+            for c in channels or []]
+
+
+def _audit_val(key, v):
+    if key == "channels":
+        return _ch_summary(v)
+    if isinstance(v, ObjectId):
+        return str(v)
+    return v
+
+
+def _audit(action, doc=None, detail=None, ids=None):
+    """Une ligne du journal ; ne fait jamais echouer l'action journalisee."""
+    try:
+        entry = {"action": action, "by": _who(), "at": datetime.now(timezone.utc)}
+        if doc is not None:
+            entry.update({"camera_id": doc.get("_id"), "name": doc.get("name", ""), "ip": doc.get("ip", "")})
+        if ids:
+            entry["camera_ids"] = list(ids)
+        if detail:
+            entry["detail"] = detail
+        _db["cameras_audit"].insert_one(entry)
+    except Exception as e:
+        logger.warning("Journal cameras non ecrit (%s) : %s", action, e)
+
+
+def _diff(before, after, keys):
+    """{champ: [avant, apres]} des champs reellement modifies."""
+    out = {}
+    for k in keys:
+        if k == "updatedAt":
+            continue
+        a, b = _audit_val(k, before.get(k)), _audit_val(k, after.get(k))
+        if a != b:
+            out[k] = [a, b]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +472,23 @@ def _require_control(doc):
     return None
 
 
-def _clean_roles(roles):
+def view_preset_id(value, brand=None):
+    """Numero de preset de VUE (1-300) ou None. Les presets de fonction
+    Hikvision (94 = redemarrage, 95 = menu OSD...) ne sont jamais acceptes :
+    un usage qui les rappellerait a chaque mesure redemarrerait le dome en
+    boucle."""
+    v = str(value or "").strip()
+    if not v.isdigit():
+        return None
+    n = int(v)
+    if not 1 <= n <= 300:
+        return None
+    if (brand or "hikvision") == "hikvision" and n in HIK_RESERVED_PRESETS:
+        return None
+    return n
+
+
+def _clean_roles(roles, brand=None):
     out = []
     seen = set()
     for r in roles or []:
@@ -435,6 +504,9 @@ def _clean_roles(roles):
                 v = bool(v)
             elif p["kind"] == "select":
                 v = v if v in [o[0] for o in p["options"]] else p["default"]
+            elif p["kind"] == "preset":
+                n = view_preset_id(v, brand)
+                v = str(n) if n else ""
             else:
                 v = str(v or "")[:60]
             clean[p["key"]] = v
@@ -448,7 +520,7 @@ def _clean_roles(roles):
 OPTICS = ("mobile", "fixe")
 
 
-def _clean_channels(channels, old=None):
+def _clean_channels(channels, old=None, brand=None):
     """old : canaux enregistres. L'angle de vue (dessine sur la carte, route
     /view) et l'origine de l'optique ne viennent jamais du formulaire : repris
     du canal de meme numero."""
@@ -464,7 +536,7 @@ def _clean_channels(channels, old=None):
             continue
         used.add(no)
         ch = {"no": no, "name": str(c.get("name") or "Canal %d" % no).strip()[:80],
-              "enabled": bool(c.get("enabled", True)), "roles": _clean_roles(c.get("roles"))}
+              "enabled": bool(c.get("enabled", True)), "roles": _clean_roles(c.get("roles"), brand)}
         o = prev.get(no) or {}
         if o.get("view"):
             ch["view"] = o["view"]
@@ -476,7 +548,7 @@ def _clean_channels(channels, old=None):
     return sorted(out, key=lambda c: c["no"]) or [{"no": 1, "name": "Canal 1", "enabled": True, "roles": []}]
 
 
-def _device_fields(data, partial, old_channels=None):
+def _device_fields(data, partial, old_channels=None, old_brand=None):
     """Valide les champs modifiables d'un appareil. -> (champs, erreur)."""
     f = {}
     if not partial or "name" in data:
@@ -528,7 +600,12 @@ def _device_fields(data, partial, old_channels=None):
         else:
             f["credential_profile_id"] = None
     if "channels" in data:
-        f["channels"] = _clean_channels(data.get("channels"), old_channels)
+        f["channels"] = _clean_channels(data.get("channels"), old_channels, f.get("brand") or old_brand)
+        # anpr_camera_config (et le recepteur) sont indexes par chemin : un seul
+        # canal LAPI par appareil, sinon le second serait ignore sans le dire
+        lapi = [c["no"] for c in f["channels"] if any(r["type"] == "anpr" for r in c["roles"])]
+        if len(lapi) > 1:
+            return None, "Un seul canal LAPI par appareil (canaux %s) : le chemin d'envoi est commun" % ", ".join(map(str, lapi))
     return f, None
 
 
@@ -636,15 +713,20 @@ def capture_camera_list():
     return out
 
 
-def latest_snapshot_path(cam_id, channel=None):
-    """Derniere capture (vignette) d'une camera proposee a la main courante,
-    ou None. Meme filtre que capture_camera_list : un operateur ne peut pas
-    lire la capture d'une camera hors liste (piste, desactivee...)."""
+def capturable_doc(cam_id):
+    """Appareil d'une camera proposee a la main courante, ou None. Meme filtre
+    que capture_camera_list : un operateur ne peut ni capturer ni lire la
+    capture d'une camera hors liste (piste, desactivee, sans profil...)."""
     if not re.match(r"^[0-9a-f]{24}$", cam_id or ""):
         return None
     _ensure_db()
-    d = _col_cameras.find_one(dict(_CAPTURE_QUERY, _id=ObjectId(cam_id)), {"ip": 1, "group_path": 1, "model": 1})
-    if not d or is_piste_device(d):
+    d = _col_cameras.find_one(dict(_CAPTURE_QUERY, _id=ObjectId(cam_id)))
+    return None if not d or is_piste_device(d) else d
+
+
+def latest_snapshot_path(cam_id, channel=None):
+    """Derniere capture (vignette) d'une camera proposee a la main courante, ou None."""
+    if not capturable_doc(cam_id):
         return None
     path = os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, channel))
     return path if os.path.isfile(path) else None
@@ -690,7 +772,8 @@ def create_camera():
     fields, err = _device_fields(data, partial=False)
     if err:
         return jsonify({"error": err}), 400
-    fields.setdefault("channels", _clean_channels(data.get("channels") or [{"no": 1, "name": fields["name"]}]))
+    fields.setdefault("channels", _clean_channels(data.get("channels") or [{"no": 1, "name": fields["name"]}],
+                                                  brand=fields.get("brand")))
     conflict = _check_path_conflict(fields.get("camera_path"))
     if conflict:
         return jsonify({"error": conflict}), 409
@@ -704,7 +787,9 @@ def create_camera():
             return jsonify({"error": "Une camera avec cette IP et ce port existe deja"}), 409
         return jsonify({"error": str(e)}), 500
     _sync_anpr_config()
-    return jsonify(_pub_device(_col_cameras.find_one({"_id": res.inserted_id}), _profiles_by_id())), 201
+    created = _col_cameras.find_one({"_id": res.inserted_id})
+    _audit("creation", created)
+    return jsonify(_pub_device(created, _profiles_by_id())), 201
 
 
 @cameras_bp.route("/api/cameras/<cam_id>", methods=["PUT"])
@@ -713,7 +798,7 @@ def update_camera(cam_id):
     if err:
         return err
     data = request.get_json(silent=True) or {}
-    fields, msg = _device_fields(data, partial=True, old_channels=doc.get("channels"))
+    fields, msg = _device_fields(data, partial=True, old_channels=doc.get("channels"), old_brand=doc.get("brand"))
     if msg:
         return jsonify({"error": msg}), 400
     conflict = _check_path_conflict(fields.get("camera_path"), doc["_id"])
@@ -728,6 +813,9 @@ def update_camera(cam_id):
         return jsonify({"error": str(e)}), 500
     _sync_anpr_config()
     after = _col_cameras.find_one({"_id": doc["_id"]})
+    changes = _diff(doc, after, fields.keys())
+    if changes:
+        _audit("modification", after, changes)
     out = _pub_device(after, _profiles_by_id())
     # Nom, IP, canaux : repercutes sur les points de la couche GPS
     if any(k in fields for k in ("name", "ip", "channels")):
@@ -745,6 +833,7 @@ def delete_camera(cam_id):
         return err
     _col_cameras.delete_one({"_id": doc["_id"]})
     _sync_anpr_config()
+    _audit("suppression", doc, {k: _audit_val(k, v) for k, v in doc.items() if k not in ("_id", "password")})
     return jsonify({"ok": True})
 
 
@@ -758,8 +847,11 @@ def bulk_update():
     if not ids:
         return jsonify({"error": "Aucune camera selectionnee"}), 400
     if data.get("delete"):
+        gone = list(_col_cameras.find({"_id": {"$in": ids}}, {"name": 1, "ip": 1, "camera_path": 1}))
         res = _col_cameras.delete_many({"_id": {"$in": ids}})
         _sync_anpr_config()
+        _audit("suppression_masse", ids=ids, detail={"cameras": [{"name": g.get("name"), "ip": g.get("ip"),
+                                                                  "camera_path": g.get("camera_path", "")} for g in gone]})
         return jsonify({"ok": True, "deleted": res.deleted_count})
     allowed = {"credential_profile_id", "site", "enabled", "protocol", "port", "brand", "location"}
     patch_in = {k: v for k, v in (data.get("set") or {}).items() if k in allowed}
@@ -771,6 +863,7 @@ def bulk_update():
     fields["updatedAt"] = datetime.now(timezone.utc)
     res = _col_cameras.update_many({"_id": {"$in": ids}}, {"$set": fields})
     _sync_anpr_config()
+    _audit("modification_masse", ids=ids, detail={k: _audit_val(k, v) for k, v in fields.items() if k != "updatedAt"})
     return jsonify({"ok": True, "modified": res.modified_count})
 
 
@@ -1289,12 +1382,17 @@ _capture_lock = threading.Lock()
 
 
 def _capture_one(doc, no=None):
+    """Capture d'un canal dans sa vignette (l'appelant a reserve l'appareil).
+    Pas de fichier horodate : seules les vignettes sont gardees."""
     cam = make_hik_camera(doc, no)
-    cam_id = str(doc["_id"])
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    save_path = os.path.join(UPLOAD_DIR, "%s_ch%d_%s.jpg" % (cam_id, cam.channel, time.strftime("%Y%m%d_%H%M%S")))
-    call_camera(doc, lambda: cam.capture_image(save_path))
-    shutil.copy2(save_path, os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, cam.channel)))
+    latest = os.path.join(UPLOAD_DIR, _snapshot_name(str(doc["_id"]), cam.channel))
+    try:
+        call_camera(doc, lambda: cam.capture_image(latest + ".tmp"))
+    except Exception:
+        _drop(latest + ".tmp")
+        raise
+    os.replace(latest + ".tmp", latest)
 
 
 def _capture_channels(doc):
@@ -1397,6 +1495,8 @@ def create_profile():
         if "duplicate key" in str(e).lower():
             return jsonify({"error": "Un profil porte deja ce nom"}), 409
         return jsonify({"error": str(e)}), 500
+    _audit("profil_creation", detail={"profil": name, "user": (data.get("user") or "").strip()[:60],
+                                      "mot_de_passe": bool(password)})
     return jsonify(_pub_profile(_col_profiles.find_one({"_id": res.inserted_id}), {})), 201
 
 
@@ -1431,6 +1531,8 @@ def update_profile(pid):
         return jsonify({"error": str(e)}), 500
     if not res:
         return jsonify({"error": "Profil introuvable"}), 404
+    _audit("profil_modification", detail=dict({k: v for k, v in patch.items() if k in ("name", "user", "note")},
+                                              profil=res.get("name"), mot_de_passe_change="secret" in patch))
     return jsonify(_pub_profile(res, {oid: _col_cameras.count_documents({"credential_profile_id": oid})}))
 
 
@@ -1443,7 +1545,9 @@ def delete_profile(pid):
     n = _col_cameras.count_documents({"credential_profile_id": oid})
     if n:
         return jsonify({"error": "Profil utilise par %d camera(s) : reaffectez-les d'abord" % n}), 409
-    _col_profiles.delete_one({"_id": oid})
+    prof = _col_profiles.find_one_and_delete({"_id": oid})
+    if prof:
+        _audit("profil_suppression", detail={"profil": prof.get("name"), "user": prof.get("user", "")})
     return jsonify({"ok": True})
 
 
@@ -1461,6 +1565,52 @@ def _snapshot_name(cam_id, channel):
     return "%s_ch%d_latest.jpg" % (cam_id, channel) if channel and channel != 1 else "%s_latest.jpg" % cam_id
 
 
+def _drop(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+class CaptureBusy(RuntimeError):
+    """Capture refusee : appareil occupe ou derniere capture du canal trop recente (HTTP 429)."""
+
+
+def capture_to(doc, channel, save_path=None):
+    """Capture manuelle d'un canal (page Cameras, main courante) : une a la
+    fois par appareil (IP), CAPTURE_MIN_INTERVAL_S entre deux captures d'un
+    meme canal (les canaux d'un enregistreur se capturent a la suite sans
+    attendre), vignette du BON canal mise a jour. save_path None : la vignette
+    seule. -> (chemin de l'image, numero du canal). Leve PisteCameraLocked,
+    CaptureBusy, CameraKeyMissing ou l'erreur de la camera."""
+    cam = make_hik_camera(doc, channel)
+    ip, key = doc.get("ip"), (doc.get("ip"), cam.channel)
+    with _capture_guard:
+        if ip in _capture_busy:
+            raise CaptureBusy("Capture deja en cours sur cette camera")
+        wait = CAPTURE_MIN_INTERVAL_S - (time.monotonic() - _capture_last.get(key, -1e9))
+        if wait > 0:
+            raise CaptureBusy("Patienter %d s avant une nouvelle capture" % max(1, round(wait)))
+        _capture_busy.add(ip)
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        latest = os.path.join(UPLOAD_DIR, _snapshot_name(str(doc["_id"]), cam.channel))
+        target = save_path or latest + ".tmp"
+        try:
+            call_camera(doc, lambda: cam.capture_image(target))
+        except Exception:
+            _drop(latest + ".tmp")
+            raise
+        if save_path:
+            shutil.copy2(save_path, latest)
+        else:
+            os.replace(target, latest)
+            target = latest
+        return target, cam.channel
+    finally:
+        _device_release(ip, cam.channel)
+
+
 @cameras_bp.route("/api/cameras/<cam_id>/capture", methods=["POST"])
 def capture_snapshot(cam_id):
     doc, err = _get_cam_doc(cam_id)
@@ -1469,29 +1619,14 @@ def capture_snapshot(cam_id):
     err = _require_control(doc)
     if err:
         return err
-    channel = _channel_arg()
-    cam = make_hik_camera(doc, channel)
-    # Une capture a la fois par appareil (IP), delai par canal : les canaux
-    # d'un enregistreur se capturent a la suite sans attendre
-    ip, key = doc.get("ip"), (doc.get("ip"), cam.channel)
-    with _capture_guard:
-        if ip in _capture_busy:
-            return jsonify({"error": "Capture deja en cours sur cette camera"}), 429
-        wait = CAPTURE_MIN_INTERVAL_S - (time.monotonic() - _capture_last.get(key, -1e9))
-        if wait > 0:
-            return jsonify({"error": "Patienter %d s avant une nouvelle capture" % max(1, round(wait))}), 429
-        _capture_busy.add(ip)
     try:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-        save_path = os.path.join(UPLOAD_DIR, "%s_ch%d_%s.jpg" % (cam_id, cam.channel, time.strftime("%Y%m%d_%H%M%S")))
-        call_camera(doc, lambda: cam.capture_image(save_path))
-        shutil.copy2(save_path, os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, cam.channel)))
-        with open(save_path, "rb") as f:
+        path, _no = capture_to(doc, _channel_arg())
+        with open(path, "rb") as f:
             return Response(f.read(), mimetype="image/jpeg")
+    except CaptureBusy as e:
+        return jsonify({"error": str(e)}), 429
     except Exception as e:
         return jsonify({"error": camera_error(doc, e, "Capture")}), 502
-    finally:
-        _device_release(ip, cam.channel)
 
 
 @cameras_bp.route("/api/cameras/<cam_id>/snapshot", methods=["GET"])
@@ -1522,6 +1657,7 @@ def camera_action(cam_id):
     cam = make_hik_camera(doc, data.get("channel"))
     try:
         result = call_camera(doc, cam.wiper) if action == "wiper" else False
+        _audit("essuie_glace", doc, {"channel": cam.channel, "ok": bool(result)})
         return jsonify({"ok": bool(result)})
     except Exception as e:
         return jsonify({"error": camera_error(doc, e, "Essuie-glace")}), 502
@@ -1598,6 +1734,7 @@ def goto_preset(cam_id):
     except Exception as e:
         return jsonify({"error": camera_error(doc, e, "Rappel de preset")}), 502
     logger.info("Camera %s (%s) : preset %d rappele", doc.get("name"), doc.get("ip"), preset)
+    _audit("preset", doc, {"channel": cam.channel, "preset": preset, "ok": bool(ok)})
     return jsonify({"ok": bool(ok)})
 
 
@@ -1884,6 +2021,29 @@ def camera_privacy(cam_id):
     if last:
         state["last"] = {"enabled": last["enabled"], "by": last.get("by", ""), "at": _iso(last.get("at"))}
     return jsonify(state)
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/journal", methods=["GET"])
+def camera_journal(cam_id):
+    """Historique de l'appareil, le plus recent d'abord : actions de
+    cameras_audit, deplacements (cameras_geo_edits) et masques
+    (cameras_privacy_log)."""
+    doc, err = _get_cam_doc(cam_id)
+    if err:
+        return err
+    n = 50
+    rows = []
+    for a in _db["cameras_audit"].find({"camera_id": doc["_id"]}).sort("at", -1).limit(n):
+        rows.append({"action": a["action"], "by": a.get("by", ""), "at": a.get("at"), "detail": a.get("detail")})
+    for g in _db["cameras_geo_edits"].find({"camera_id": doc["_id"]}).sort("at", -1).limit(n):
+        rows.append({"action": "position", "by": g.get("by", ""), "at": g.get("at"), "detail": {"new": g.get("new")}})
+    for p in _db["cameras_privacy_log"].find({"camera_id": doc["_id"]}).sort("at", -1).limit(n):
+        rows.append({"action": "masques", "by": p.get("by", ""), "at": p.get("at"),
+                     "detail": {"enabled": p.get("enabled"), "ok": p.get("ok"), "bulk": bool(p.get("bulk"))}})
+    rows.sort(key=lambda r: r["at"] or datetime.min, reverse=True)
+    for r in rows:
+        r["at"] = _iso(r["at"])
+    return jsonify(rows[:n])
 
 
 @cameras_bp.route("/api/cameras/<cam_id>/test", methods=["POST"])
