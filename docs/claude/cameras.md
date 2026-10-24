@@ -375,10 +375,14 @@ soient les filtres, hors configurateur. Filtre d'etat "En projet
 (seulement)" : masque toutes les cameras reelles (liste vide avec renvoi a la
 carte), cadrage sur les projets. Le clic ouvre le volet du configurateur
 (cote JS : objet `p:<id>`, canaux = `channels`) avec nom / statut / note a la
-place de la photo, pastilles de canaux + "Mobile" / "Fixe" / modeles
-"1 PTZ + 4 fixes" et "1 PTZ + 1 fixe" (canal 1 passe en mobile s'il n'a pas
-d'optique) ; un nouveau capteur fixe part 90 degres apres le dernier fixe
-dessine.
+place de la photo, pastilles de canaux + "Mobile" / "Fixe" (objectif du
+modele de l'emplacement pour cette optique, sinon profil par defaut) ; un
+nouveau capteur fixe part 90 degres apres le dernier fixe dessine. Champ
+"Modele" (`model_id`, catalogue ci-dessous) : applique tout de suite avec les
+champs de la fiche, le volet est reconstruit ; multi-capteurs = EXACTEMENT sa
+disposition (canal 1 = PTZ..., angles des premiers canaux gardes, canaux en
+trop retires), sinon chaque canal d'un autre modele prend l'objectif du
+modele de meme optique (`cameras._apply_model`).
 
 Champs de planification d'une camera en projet (volet, sous le nom) :
 `priority` (1 = la plus urgente, 1 a 999, vide = a la fin du dossier),
@@ -389,8 +393,17 @@ d'abord), `moves_camera_id` (projet = DEPLACEMENT d'une camera existante :
 bouton "Planifier le deplacement" du volet d'une camera reelle,
 `POST /api/cameras/planned {from_camera_id}` cree le projet a sa position
 avec ses canaux, optique et angles de vue ; on glisse ensuite le pin).
-Coherence (`_planned_conflict`, 409) : une camera n'est reprise (deplacee ou
-remplacee) que par UN projet, et jamais deplacee et remplacee a la fois.
+Coherence (`_planned_conflict`, 409) : une camera n'est remplacee (deposee)
+que par UN projet, reinstallee (deplacee) que par UN projet, et un projet ne
+la remplace pas et la deplace a la fois. REEMPLOI admis : remplacee par un
+projet ET reinstallee par un autre (`_planned_refs` rend `removed_by` /
+`reused_by` sur chaque camera citee). Volet d'un projet sans camera deplacee :
+bloc "Reemploi / deplacement" qui propose en tete les cameras deposees par
+les autres projets pas encore reinstallees (les plus proches d'abord, bouton
+"Reinstaller ici" = `moves_camera_id`), et une recherche parmi toutes les
+cameras existantes libres ; apres l'ajout d'un remplacement, un message
+rappelle qu'elles seront proposees. Puce d'une camera remplacee :
+"reemploi : <projet>".
 Sur la carte : trait orange pointille ancienne position -> projet, croix
 rouge et trait rouge sur les cameras remplacees. Une camera supprimee depuis
 reste citee, marquee "Camera supprimee".
@@ -418,17 +431,41 @@ cartouche bas droite "n/N PLANCHE" (rendu en DEUX passes pour connaitre N).
   de reference du dossier modele) ; canaux (objectif, azimut + cardinal,
   ouverture, portee) ; operation (deplacement : ancienne position et
   distance ; remplacements : distance) ; materiel.
-- Objectifs et appareils : table `LENSES` (memes valeurs que cameras.js) ;
-  multi-capteurs (2DP7D836, 2SF8C442) = UN appareil par emplacement ; un
-  deplacement ne commande rien ; camera deplacee : objectif deduit de SON
-  modele, jamais d'objectif par defaut.
+- Objectifs et appareils : catalogue `cameras_models` (ligne "Modele" de
+  l'identification, objectif "<reference> - <objectif>" par canal) ;
+  multi-capteurs = UN appareil par disposition complete (1 + 4 : 5 canaux =
+  1 appareil, 10 = 2) ; un deplacement ne commande rien ; camera deplacee :
+  objectif deduit de SON modele, jamais d'objectif par defaut.
+- Reemploi : planche du projet qui remplace "a deposer, reemployee en Cn"
+  (sinon "retour au stock") ; planche du projet qui reinstalle "Reemploi
+  d'une camera existante deposee par Cn" ; projet hors du dossier cite par
+  son nom. Quantitatif : deplacements "dont n reemploi(s)", deposes = retour
+  au stock seulement (une camera reemployee n'est pas comptee deux fois).
+- `datasheets=1` (case "Joindre en annexe les fiches techniques") : planche
+  intercalaire "Annexes" (A1, A2... par ordre d'apparition, pages) puis les
+  PDF du constructeur joints tels quels (pypdf, requirements.txt) ; renvoi
+  "fiche technique en annexe An" dans le materiel et le quantitatif. PDF
+  illisible : ecarte. Les pages jointes ne portent pas de cartouche (N =
+  planches du dossier).
 - Fonds de carte : orthophoto IGN WMTS (data.geopf.fr, sans cle) telechargee
   par le SERVEUR (8 en parallele, 8 s), cache `uploads/tiles_cache/ign_ortho`
   (180 j, hors git), JPEG dans le PDF (~1,5 Mo pour 5 emplacements). Tuile
   indisponible : fond gris et mention sur la carte, le dossier sort quand meme.
 - Tests : `tests/test_cameras_dossier.py` (tuiles remplacees par une image unie).
 
-Objectifs (`LENSES` de cameras.js, cles = `cameras.PLANNED_MODELS`) : ouverture
+Catalogue des modeles (`cameras_models.py`, collection `cameras_models`,
+bouton "Modeles" de l'en-tete) : `{brand, ref, match (motif reconnu dans le
+modele des cameras reelles, le plus long l'emporte), multi, note,
+lenses[{k, label, optics, fov, range, count}], datasheet{name, size, at, by}}`.
+Routes `GET/POST /api/cameras/models`, `PUT/DELETE /api/cameras/models/<id>`
+(409 : modele utilise par un projet, ou objectif retire encore utilise),
+`POST/GET/DELETE /api/cameras/models/<id>/datasheet` (multipart `file`,
+signature %PDF verifiee, 25 Mo, fichier `uploads/camera_models/<id>.pdf`
+hors git, ecrit via .tmp). Cle d'objectif `k` unique dans le catalogue,
+gardee a la modification (un nouvel objectif recoit `m<hex>`) : c'est elle
+que portent les canaux en projet (champ `model`). Catalogue initial pose UNE
+fois (marqueur `cameras_meta {_id: "models_seeded"}` : vide par choix, il ne
+se remplit pas), cles de l'ancienne table LENSES. Valeurs : ouverture
 horizontale et portee DORI "Observer" (63 px/m) des fiches techniques
 fournies le 21/10/2026 ; PTZ au grand angle, portee "Observer" ramenee a la
 focale mini (tele x focale mini / focale maxi).
@@ -441,10 +478,11 @@ focale mini (tele x focale mini / focale maxi).
   12 mm 44 deg / 81 m.
 - DS-2CD63C5G1 (360) : plafond 360 deg / 11 m ; mur 180 deg / 11 m.
 - PTZ generique : 59 deg / 50 m.
-Objectif d'un canal (`lensKeyFor`) : choisi (canal en projet : champ `model`),
-sinon deduit du modele de l'appareil (2DP7D836 / 2SF8C442 : canal 1 = PTZ,
-autres = objectifs), sinon par l'optique (fixe = iDS-2CD7A87G0, mobile = PTZ
-generique). Il donne le cone par defaut. Selecteur "Modele / objectif" du
+Objectif d'un canal (`lensKeyFor` de cameras.js = `cameras_models.lens_key`) :
+choisi (canal en projet : champ `model`), sinon deduit du modele de
+l'appareil par le motif du catalogue (rang du canal dans la disposition :
+canal 1 = PTZ, autres = objectifs), sinon par l'optique (`FALLBACK` : fixe =
+bullet-wide, mobile = ptz, s'ils existent encore). Il donne le cone par defaut. Selecteur "Modele / objectif" du
 volet : applique ouverture et portee (direction gardee) ; enregistre pour un
 canal en projet, session seulement pour une camera reelle. Verrou (cadenas,
 memorise par poste, actif par defaut) : ouverture et portee figees, plus de

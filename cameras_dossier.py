@@ -4,9 +4,11 @@
 # Operations (Barlow + Exo2, bleu marine, cartouche en bas a droite, planches
 # numerotees) : couverture, plan d'ensemble, une planche par emplacement (vue
 # micro et vue macro sur orthophoto IGN, angles de vue, GPS WGS84 et Lambert
-# 93, support de pose, cameras remplacees ou deplacees), recapitulatif et
-# quantitatif. Donnees : cameras_planned (page Cameras, mode Projet) et
-# positions des cameras existantes (detection._device_position).
+# 93, support de pose, modele, cameras remplacees ou deplacees, reemploi),
+# recapitulatif et quantitatif, fiches techniques des modeles en annexe
+# (facultatif). Donnees : cameras_planned (page Cameras, mode Projet),
+# catalogue cameras_models et positions des cameras existantes
+# (detection._device_position).
 # Regles : docs/claude/cameras.md, section "Dossier de planification".
 import io
 import math
@@ -18,6 +20,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 from PIL import Image, ImageDraw
+
+import cameras_models
 from reportlab.lib.utils import ImageReader, simpleSplit
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -57,31 +61,6 @@ MARGIN = 28
 STATUS_LABELS = {"souhaitee": "Souhaitée", "validee": "Validée", "commandee": "Commandée"}
 MOUNT_LABELS = {"mat": "Mât", "angle_mur": "Angle de mur", "mur_plat": "Mur plat"}
 OPTICS_LABELS = {"mobile": "Mobile (PTZ)", "fixe": "Fixe"}
-# Objectifs (memes cles et valeurs que LENSES de static/js/cameras.js)
-LENSES = {
-    "2dp-ptz": ("DS-2DP7D836 – PTZ", 59, 48),
-    "2dp-pano": ("DS-2DP7D836 – objectif fixe", 106, 30),
-    "2sf-ptz": ("DS-2SF8C442 – PTZ", 59, 28),
-    "2sf-pano": ("DS-2SF8C442 – panoramique", 190, 31),
-    "bullet-wide": ("iDS-2CD7A87G0 – fixe 2,8 mm", 100, 37),
-    "bullet-tele": ("iDS-2CD7A87G0 – fixe 12 mm", 44, 81),
-    "fisheye-360": ("DS-2CD63C5G1 – 360° plafond", 360, 11),
-    "fisheye-180": ("DS-2CD63C5G1 – 180° mur", 180, 11),
-    "ptz": ("PTZ générique", 59, 50),
-}
-# Appareil a commander pour le quantitatif : multi-capteurs = UN appareil par emplacement
-DEVICE_OF_LENS = {
-    "2dp-ptz": "Hikvision DS-2DP7D836 (1 PTZ + 4 objectifs fixes)",
-    "2dp-pano": "Hikvision DS-2DP7D836 (1 PTZ + 4 objectifs fixes)",
-    "2sf-ptz": "Hikvision DS-2SF8C442 (1 PTZ + 1 panoramique)",
-    "2sf-pano": "Hikvision DS-2SF8C442 (1 PTZ + 1 panoramique)",
-    "bullet-wide": "Hikvision iDS-2CD7A87G0 – 2,8 mm",
-    "bullet-tele": "Hikvision iDS-2CD7A87G0 – 12 mm",
-    "fisheye-360": "Hikvision DS-2CD63C5G1 (360°)",
-    "fisheye-180": "Hikvision DS-2CD63C5G1 (360°)",
-    "ptz": "Caméra PTZ (modèle à définir)",
-}
-MULTI_SENSOR = ("2dp-", "2sf-")
 
 _fonts_lock = threading.Lock()
 _fonts_ok = False
@@ -257,30 +236,15 @@ def fetch_tiles(views):
 # ---------------------------------------------------------------------------
 # Donnees
 # ---------------------------------------------------------------------------
-def _lens_key(ch, device_model="", first=False, fallback=True):
-    """Objectif d'un canal : choisi, sinon deduit du modele de l'appareil (camera
-    deplacee), sinon profil par defaut de l'optique (meme regle que lensKeyFor
-    de cameras.js)."""
-    if ch.get("model") in LENSES:
-        return ch["model"]
-    m = (device_model or "").upper()
-    if "2DP7D836" in m:
-        return "2dp-ptz" if first else "2dp-pano"
-    if "2SF8C442" in m:
-        return "2sf-ptz" if first else "2sf-pano"
-    if "2CD7A87G0" in m:
-        return "bullet-wide"
-    if "2CD63C5G1" in m:
-        return "fisheye-360"
-    if not fallback:  # camera deplacee de modele inconnu : on ne lui prete pas un objectif
-        return ""
-    return "ptz" if ch.get("optics") == "mobile" else "bullet-wide" if ch.get("optics") == "fixe" else ""
-
-
 def collect(db, statuses=None, ids=None):
     """Projets retenus, tries par priorite (sans priorite : a la fin, par nom),
-    numerotes C1..Cn, avec les cameras existantes citees et leur position."""
+    numerotes C1..Cn, avec les cameras existantes citees et leur position, le
+    modele et l'objectif de chaque canal (catalogue cameras_models) et le
+    reemploi : camera remplacee par un projet et reinstallee par un autre."""
     import detection
+    models = cameras_models.catalogue(db)
+    lidx = cameras_models.lens_index(models)
+    mby = {m["_id"]: m for m in models}
     q = {}
     if statuses:
         q["status"] = {"$in": list(statuses)}
@@ -298,49 +262,98 @@ def collect(db, statuses=None, ids=None):
             "views": [c["view"] for c in d.get("channels") or []
                       if c.get("enabled", True) is not False and isinstance(c.get("view"), dict) and c["view"].get("az") is not None],
         }
+    # Reemploi : tous les projets (y compris hors du dossier) ; repere Cn si retenu
+    reps = {d["_id"]: "C%d" % i for i, d in enumerate(planned, 1)}
+    removed_by, reused_by = {}, {}
+    for p in db["cameras_planned"].find({}, {"name": 1, "replaces": 1, "moves_camera_id": 1}):
+        ref = {"_id": p["_id"], "name": p.get("name", ""), "rep": reps.get(p["_id"])}
+        for o in p.get("replaces") or []:
+            removed_by[o] = ref
+        if p.get("moves_camera_id"):
+            reused_by[p["moves_camera_id"]] = ref
+    gone = {"name": "Caméra supprimée", "ip": "", "model": "", "lat": None, "lng": None, "views": []}
+
+    def ref_of(o):
+        return dict(existing.get(o) or dict(gone, _id=o), removed_by=removed_by.get(o), reused_by=reused_by.get(o))
+
     items = []
     for i, d in enumerate(planned, 1):
         chans = d.get("channels") or [dict({"no": 1}, **{k: d[k] for k in ("optics", "view") if d.get(k)})]
-        moves = existing.get(d.get("moves_camera_id")) if d.get("moves_camera_id") else None
-        if d.get("moves_camera_id") and not moves:
-            moves = {"_id": d["moves_camera_id"], "name": "Caméra supprimée", "ip": "", "lat": None, "lng": None, "views": []}
-        replaces = [existing.get(o) or {"_id": o, "name": "Caméra supprimée", "ip": "", "lat": None, "lng": None, "views": []}
-                    for o in d.get("replaces") or []]
+        moves = ref_of(d["moves_camera_id"]) if d.get("moves_camera_id") else None
+        replaces = [ref_of(o) for o in d.get("replaces") or []]
         kind = "deplacement" if moves else "remplacement" if replaces else "nouvelle"
+        out = []
+        for j, c in enumerate(chans):
+            k = cameras_models.lens_key(models, c, (moves or {}).get("model", ""), j, fallback=not moves, idx=lidx)
+            m, lens = lidx.get(k, (None, None))
+            out.append(dict(c, lens=k, lens_model=m, lens_obj=lens))
         items.append({
             "rep": "C%d" % i, "doc": d, "name": d.get("name", ""), "lat": d.get("lat"), "lng": d.get("lng"),
             "status": d.get("status", "souhaitee"), "priority": d.get("priority"), "note": d.get("note", ""),
             "mount": d.get("mount") or "", "mount_height": d.get("mount_height"),
-            "channels": [dict(c, lens=_lens_key(c, (moves or {}).get("model", ""), j == 0, fallback=not moves)) for j, c in enumerate(chans)],
-            "moves": moves, "replaces": replaces, "kind": kind,
+            "model": mby.get(d.get("model_id")) if d.get("model_id") else None,
+            "channels": out, "moves": moves, "replaces": replaces, "kind": kind,
         })
     return items, existing
 
 
+def _proj_ref(ref):
+    """'C3' (projet du dossier) ou 'le projet <nom>' (hors dossier)"""
+    return ref["rep"] or "le projet « %s » (hors dossier)" % ref["name"]
+
+
 def kind_label(it):
     if it["kind"] == "deplacement":
+        rb = (it["moves"] or {}).get("removed_by")
+        if rb:
+            return "Réemploi d'une caméra existante déposée par %s" % _proj_ref(rb)
         return "Déplacement d'une caméra existante"
     if it["kind"] == "remplacement":
         return "Nouvelle caméra – remplace %d existante%s" % (len(it["replaces"]), "s" if len(it["replaces"]) > 1 else "")
     return "Nouvelle caméra"
 
 
-def devices_of(it):
-    """Appareils a commander pour un emplacement (un deplacement : aucun)."""
+def _device_rows(it):
+    """[(libelle, modele ou None)] des appareils a commander pour un
+    emplacement (un deplacement : aucun). Multi-capteurs : un appareil par
+    disposition complete (1 PTZ + 4 fixes = 1 appareil ; 10 canaux = 2)."""
     if it["kind"] == "deplacement":
         return []
-    out, multi = [], set()
+    out, multi = [], {}
     for ch in it["channels"]:
-        k = ch["lens"]
-        if k.startswith(MULTI_SENSOR):
-            if k[:4] not in multi:
-                multi.add(k[:4])
-                out.append(DEVICE_OF_LENS[k])
-        elif k:
-            out.append(DEVICE_OF_LENS[k])
+        m, lens = ch.get("lens_model"), ch.get("lens_obj")
+        if not m:
+            pm = it.get("model")
+            out.append((cameras_models.device_label(pm), pm) if pm else ("Caméra (modèle et optique à définir)", None))
+        elif m.get("multi"):
+            if m["_id"] not in multi:
+                multi[m["_id"]] = {"m": m, "n": {}, "at": len(out)}
+                out.append(None)  # place reservee : ordre d'apparition
+            multi[m["_id"]]["n"][lens["k"]] = multi[m["_id"]]["n"].get(lens["k"], 0) + 1
         else:
-            out.append("Caméra (modèle et optique à définir)")
+            out.append((cameras_models.device_label(m, lens), m))
+    for g in sorted(multi.values(), key=lambda g: -g["at"]):
+        per = {x["k"]: max(1, int(x.get("count") or 1)) for x in g["m"].get("lenses") or []}
+        n = max(-(-cnt // per.get(k, 1)) for k, cnt in g["n"].items())
+        out[g["at"]:g["at"] + 1] = [(cameras_models.device_label(g["m"]), g["m"])] * n
     return out
+
+
+def devices_of(it):
+    """Libelles des appareils a commander pour un emplacement."""
+    return [lab for lab, _m in _device_rows(it)]
+
+
+def models_of(it):
+    """Modeles du catalogue de l'emplacement : appareils a commander, sinon
+    modele choisi pour l'emplacement."""
+    out = {}
+    for _lab, m in _device_rows(it):
+        if m is not None:
+            out.setdefault(m["_id"], m)
+    if it.get("model") and it["kind"] != "deplacement":
+        out.setdefault(it["model"]["_id"], it["model"])
+    return list(out.values())
 
 
 # ---------------------------------------------------------------------------
@@ -767,14 +780,16 @@ def page_cover(d, items, views):
     y -= 10
     n_new = sum(1 for it in items if it["kind"] != "deplacement")
     n_move = sum(1 for it in items if it["kind"] == "deplacement")
-    n_rep = sum(len(it["replaces"]) for it in items)
+    n_reuse = sum(1 for it in items if it["kind"] == "deplacement" and it["moves"].get("removed_by"))
+    n_rep = sum(1 for it in items for r in it["replaces"] if not r.get("reused_by"))
     n_dev = sum(len(devices_of(it)) for it in items)
     lines = ["%d emplacement%s, classés par ordre de priorité (C1 à C%d)" % (len(items), "s" if len(items) > 1 else "", len(items)),
              "%d nouvelle%s caméra%s à poser (%d appareil%s)" % (n_new, "s" if n_new > 1 else "", "s" if n_new > 1 else "", n_dev, "s" if n_dev > 1 else "")]
     if n_move:
-        lines.append("%d caméra%s existante%s à déplacer" % (n_move, "s" if n_move > 1 else "", "s" if n_move > 1 else ""))
+        lines.append("%d caméra%s existante%s à déplacer%s" % (n_move, "s" if n_move > 1 else "", "s" if n_move > 1 else "",
+                                                             " (dont %d réemploi%s)" % (n_reuse, "s" if n_reuse > 1 else "") if n_reuse else ""))
     if n_rep:
-        lines.append("%d caméra%s existante%s à déposer (remplacée%s)" % (n_rep, "s" if n_rep > 1 else "", "s" if n_rep > 1 else "", "s" if n_rep > 1 else ""))
+        lines.append("%d caméra%s existante%s à déposer, retour au stock" % (n_rep, "s" if n_rep > 1 else "", "s" if n_rep > 1 else ""))
     lines.append("Statuts retenus : %s" % ", ".join(STATUS_LABELS.get(s, s) for s in d.o["statuses"]))
     for ln in lines:
         d.text(64, y, ln, "Barlow-Regular", 9.5)
@@ -798,6 +813,8 @@ def page_cover(d, items, views):
     if items:
         toc.append(("Fiches emplacements C1 à C%d" % len(items), 3))
     toc.append(("Récapitulatif & quantitatif", 3 + len(items)))
+    if d.o.get("annex_page"):
+        toc.append(("Annexes – fiches techniques", d.o["annex_page"]))
     for i, (t, pg) in enumerate(toc, 1):
         c.setFillColorRGB(*NAVY)
         c.circle(mx + 6, y + 3, 6, stroke=0, fill=1)
@@ -953,7 +970,9 @@ def page_item(d, it, items, existing, views):
     n = 1
     if it["moves"]:
         m = it["moves"]
-        txt = "Caméra déplacée : %s%s." % (m["name"], " (%s)" % m["ip"] if m.get("ip") else "")
+        txt = "Caméra %s : %s%s." % ("réemployée" if m.get("removed_by") else "déplacée", m["name"], " (%s)" % m["ip"] if m.get("ip") else "")
+        if m.get("removed_by"):
+            txt += " Déposée par %s (remplacée sur place), puis reposée ici." % _proj_ref(m["removed_by"])
         if m.get("lat") is not None:
             txt += " Ancienne position %.6f, %.6f – déplacement de %d m." % (m["lat"], m["lng"], round(distance_m(m["lat"], m["lng"], lat, lng)))
         oy = d.bullet(ox, oy, n, txt, ow, size=7.4)
@@ -962,6 +981,7 @@ def page_item(d, it, items, existing, views):
         txt = "Remplace %s%s : à déposer" % (r["name"], " (%s)" % r["ip"] if r.get("ip") else "")
         if r.get("lat") is not None:
             txt += ", à %d m" % round(distance_m(r["lat"], r["lng"], lat, lng))
+        txt += ", réemployée en %s" % _proj_ref(r["reused_by"]) if r.get("reused_by") else ", retour au stock"
         oy = d.bullet(ox, oy, n, txt + ".", ow, size=7.4)
         n += 1
         if oy < 60:
@@ -977,8 +997,13 @@ def page_item(d, it, items, existing, views):
     mount = MOUNT_LABELS.get(it["mount"], "À définir")
     if it["mount_height"]:
         mount += " – hauteur de pose %s m" % ("%g" % it["mount_height"]).replace(".", ",")
+    if it["kind"] == "deplacement":
+        model = "%s (caméra existante)" % (it["moves"].get("model") or "modèle non renseigné")
+    else:
+        model = ", ".join(cameras_models.name(m) or "à définir" for m in models_of(it)) or "À définir"
     rows = [("Repère", "%s – priorité %s" % (it["rep"], it["priority"] or "non définie")),
             ("Statut", STATUS_LABELS.get(it["status"], it["status"])),
+            ("Modèle", model),
             ("Support de pose", mount),
             ("GPS (WGS84)", "%.6f N  %.6f E" % (lat, lng)),
             ("", "%s  %s" % (dms(lat, "N", "S"), dms(lng, "E", "O"))),
@@ -990,9 +1015,9 @@ def page_item(d, it, items, existing, views):
             ("Ouv.", 40, "right"), ("Portée", 38, "right")]
     crow = []
     for ch in it["channels"]:
-        lens = LENSES.get(ch["lens"])
+        m, lens = ch.get("lens_model"), ch.get("lens_obj")
         if lens:
-            lab = lens[0]
+            lab = "%s – %s" % (m.get("ref") or cameras_models.name(m), lens.get("label") or "")
         elif it["kind"] == "deplacement" and (it["moves"] or {}).get("model"):
             lab = "%s (existante)" % it["moves"]["model"]
         elif ch.get("optics"):
@@ -1009,11 +1034,15 @@ def page_item(d, it, items, existing, views):
            "Barlow-Regular", 5.2, MUTED)
     if any(ch.get("optics") == "mobile" for ch in it["channels"]):
         d.text(rx, ry - 16, "PTZ : angle dessiné = position de repos (preset) à régler à la mise en service.", "Barlow-Regular", 5.2, MUTED)
-    devs = devices_of(it)
+    rows_dev = _device_rows(it)
+    devs = [lab for lab, _m in rows_dev]
     if devs and ry > 190:
         ry = d.section(rx, ry - 32, "Matériel")
+        annex = d.o.get("annex") or {}
         for i, dev in enumerate(sorted(set(devs)), 1):
-            ry = d.bullet(rx, ry, i, "%s%s" % ("%d × " % devs.count(dev) if devs.count(dev) > 1 else "", dev), rw, size=7.4)
+            m = next((mm for lab, mm in rows_dev if lab == dev), None)
+            ref = " – fiche technique en annexe %s" % annex[m["_id"]] if m is not None and m["_id"] in annex else ""
+            ry = d.bullet(rx, ry, i, "%s%s%s" % ("%d × " % devs.count(dev) if devs.count(dev) > 1 else "", dev, ref), rw, size=7.4)
             if ry < 140:
                 break
     d.cartouche("Fiche emplacement %s" % it["rep"], "%s – %s" % (scale_label(vm, MICRO[0]), scale_label(vM, MACRO[0])))
@@ -1041,9 +1070,12 @@ def pages_recap(d, items):
         mob = sum(1 for ch in it["channels"] if ch.get("optics") == "mobile")
         fix = sum(1 for ch in it["channels"] if ch.get("optics") == "fixe")
         chans = " + ".join(x for x in ["%d PTZ" % mob if mob else "", "%d fixe%s" % (fix, "s" if fix > 1 else "") if fix else ""] if x) or "%d" % len(it["channels"])
-        rel = ", ".join(r["name"] for r in it["replaces"])
+        rel = ", ".join(r["name"] + (" (réemploi %s)" % (r["reused_by"]["rep"] or "hors dossier") if r.get("reused_by") else "")
+                        for r in it["replaces"])
         if it["moves"]:
-            rel = "déplace %s" % it["moves"]["name"]
+            rb = it["moves"].get("removed_by")
+            rel = ("réemploi de %s, déposée en %s" % (it["moves"]["name"], rb["rep"] or "projet hors dossier") if rb
+                   else "déplace %s" % it["moves"]["name"])
         rows.append((it["rep"], it["name"], it["priority"] or "–",
                      {"nouvelle": "Nouvelle", "remplacement": "Remplacement", "deplacement": "Déplacement"}[it["kind"]],
                      STATUS_LABELS.get(it["status"], it["status"]), mount, chans, rel or "–"))
@@ -1073,23 +1105,66 @@ def _quantitatif(d, items, y):
         ly = d.bullet(x, ly, i, t, 400, size=7.4)
     qx = x + 430
     qy = d.section(qx, y, "Quantitatif estimatif")
-    devs = [dev for it in items for dev in devices_of(it)]
+    rows_dev = [r for it in items for r in _device_rows(it)]
+    devs = [lab for lab, _m in rows_dev]
+    annex = d.o.get("annex") or {}
     mounts = [it["mount"] for it in items if it["kind"] != "deplacement" or it["mount"]]
-    rows = [(dev, "%d u" % devs.count(dev)) for dev in sorted(set(devs))]
+    rows = []
+    for dev in sorted(set(devs)):
+        m = next((mm for lab, mm in rows_dev if lab == dev), None)
+        rows.append((dev + (" (annexe %s)" % annex[m["_id"]] if m is not None and m["_id"] in annex else ""), "%d u" % devs.count(dev)))
     for key, lab in MOUNT_LABELS.items():
         if mounts.count(key):
             rows.append(("Support : %s" % lab.lower(), "%d u" % mounts.count(key)))
     if mounts.count(""):
         rows.append(("Support à définir", "%d" % mounts.count("")))
     n_move = sum(1 for it in items if it["kind"] == "deplacement")
-    n_rep = sum(len(it["replaces"]) for it in items)
+    n_reuse = sum(1 for it in items if it["kind"] == "deplacement" and it["moves"].get("removed_by"))
+    n_rep = sum(1 for it in items for r in it["replaces"] if not r.get("reused_by"))
     if n_move:
-        rows.append(("Caméras existantes à déplacer (dépose + repose)", "%d u" % n_move))
+        rows.append(("Caméras existantes à déplacer (dépose + repose)%s" % (", dont %d réemploi%s" % (n_reuse, "s" if n_reuse > 1 else "") if n_reuse else ""),
+                     "%d u" % n_move))
     if n_rep:
-        rows.append(("Caméras existantes à déposer (remplacées)", "%d u" % n_rep))
+        rows.append(("Caméras existantes à déposer (remplacées, retour au stock)", "%d u" % n_rep))
     rows.append(("Relevé sur site, alimentation et réseau par emplacement", "%d ens." % len(items)))
     qy = d.table(qx, qy, [("", 270, "left"), ("", 72, "right")], rows, size=7.2, row_h=12.5, head=False, bold_last=True)
     d.text(qx, qy - 9, "Quantités indicatives pour chiffrage, à recaler après relevé.", "Barlow-Regular", 5.6, MUTED)
+
+
+def annex_models(items):
+    """Modeles des emplacements dont la fiche technique est enregistree, dans
+    l'ordre d'apparition -> [(modele, chemin du PDF)]."""
+    out, seen = [], set()
+    for it in items:
+        for m in models_of(it):
+            path = cameras_models.datasheet_path(m["_id"])
+            if m["_id"] not in seen and m.get("datasheet") and os.path.isfile(path):
+                seen.add(m["_id"])
+                out.append((m, path))
+    return out
+
+
+def page_annex(d, annexes, pages):
+    """Intercalaire des annexes : liste des fiches techniques jointes."""
+    d.new_page()
+    d.frame("Annexes – fiches techniques")
+    x = MARGIN + 6
+    y = d.section(x, PAGE_H - 84, "Fiches techniques des modèles")
+    rows = [("A%d" % i, cameras_models.name(m), (m.get("datasheet") or {}).get("name", ""), "%d" % n)
+            for i, ((m, _p), n) in enumerate(zip(annexes, pages), 1)]
+    y = d.table(x, y, [("Annexe", 50, "left"), ("Modèle", 260, "left"), ("Document", 340, "left"), ("Pages", 50, "right")],
+                rows, size=7.4, row_h=13)
+    d.text(x, y - 12, "Documents du constructeur joints tels quels à la suite de cette planche, dans l'ordre ci-dessus.",
+           "Barlow-Regular", 6.5, MUTED)
+    d.cartouche("Annexes", "sans échelle")
+
+
+def _pdf_pages(path):
+    try:
+        from pypdf import PdfReader
+        return len(PdfReader(path).pages)
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1100,7 +1175,8 @@ MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "ao�
 
 def build_pdf(db, opts):
     """opts : statuses, ids (facultatif), title, subtitle, indice, phase,
-    author, role. -> (octets du PDF, nombre d'emplacements)."""
+    author, role, datasheets (fiches techniques en annexe). -> (octets du
+    PDF, nombre d'emplacements)."""
     _register_fonts()
     items, existing = collect(db, opts.get("statuses"), opts.get("ids"))
     if not items:
@@ -1120,6 +1196,14 @@ def build_pdf(db, opts):
     role = (opts.get("role") or "").strip()[:80]
     o["author_line"] = " – ".join(x for x in (author, role) if x) or "Direction des Opérations ACO"
     o["short"] = o["title"][:40]
+    annexes, annex_pages = [], []
+    if opts.get("datasheets"):
+        for m, path in annex_models(items):
+            n = _pdf_pages(path)
+            if n:  # PDF illisible ou pypdf absent : fiche ecartee
+                annexes.append((m, path))
+                annex_pages.append(n)
+    o["annex"] = {m["_id"]: "A%d" % i for i, (m, _p) in enumerate(annexes, 1)}
     views = _views_for(items, existing)
     # Deux passes : la premiere compte les planches (le recapitulatif peut
     # deborder), la seconde numerote les cartouches "n/total"
@@ -1132,7 +1216,27 @@ def build_pdf(db, opts):
         for it in items:
             page_item(d, it, items, existing, views)
         pages_recap(d, items)
+        if annexes:
+            o["annex_page"] = d.page_no + 1
+            page_annex(d, annexes, annex_pages)
         total = d.page_no
     d.c.showPage()
     d.c.save()
-    return d.buf.getvalue(), len(items)
+    pdf = d.buf.getvalue()
+    if annexes:
+        pdf = _append_pdfs(pdf, [p for _m, p in annexes])
+    return pdf, len(items)
+
+
+def _append_pdfs(pdf, paths):
+    from pypdf import PdfReader, PdfWriter
+    w = PdfWriter()
+    w.append(PdfReader(io.BytesIO(pdf)))
+    for p in paths:
+        try:
+            w.append(PdfReader(p), import_outline=False)
+        except Exception:
+            continue
+    out = io.BytesIO()
+    w.write(out)
+    return out.getvalue()

@@ -27,6 +27,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 
 import camera_secrets
+import cameras_models
 
 cameras_bp = Blueprint("cameras", __name__)
 logger = logging.getLogger(__name__)
@@ -1167,10 +1168,8 @@ def _who():
 
 
 PLANNED_MAX_CHANNELS = 8
-# Objectif (modele) d'un canal simule : cles de LENSES dans cameras.js
-# (ouverture et portee tirees des fiches techniques Hikvision)
-PLANNED_MODELS = ("2dp-ptz", "2dp-pano", "2sf-ptz", "2sf-pano", "bullet-wide", "bullet-tele",
-                  "fisheye-360", "fisheye-180", "ptz")
+# Objectif (champ `model`) d'un canal simule : cle d'objectif du catalogue
+# des modeles (cameras_models.py, collection cameras_models)
 # Support de pose (dossier de planification des travaux)
 PLANNED_MOUNTS = {"mat": "Mat", "angle_mur": "Angle de mur", "mur_plat": "Mur plat"}
 PLANNED_MAX_REPLACES = 20
@@ -1191,13 +1190,24 @@ def _planned_channels(d):
 
 
 def _planned_refs(docs):
-    """{ObjectId: {_id, name, ip, exists}} des cameras existantes citees par des
-    projets (remplacees ou deplacees) : une camera supprimee depuis reste
-    affichee, marquee absente."""
+    """{ObjectId: {_id, name, ip, exists, removed_by, reused_by}} des cameras
+    existantes citees par des projets (remplacees ou deplacees) : une camera
+    supprimee depuis reste affichee, marquee absente. removed_by / reused_by :
+    projet qui la remplace (depose) / qui la reinstalle ailleurs (reemploi)."""
     ids = {o for d in docs for o in (d.get("replaces") or []) + ([d["moves_camera_id"]] if d.get("moves_camera_id") else [])}
-    found = {c["_id"]: c for c in _col_cameras.find({"_id": {"$in": list(ids)}}, {"name": 1, "ip": 1})} if ids else {}
+    if not ids:
+        return {}
+    found = {c["_id"]: c for c in _col_cameras.find({"_id": {"$in": list(ids)}}, {"name": 1, "ip": 1})}
+    removed, reused = {}, {}
+    for p in _db["cameras_planned"].find({}, {"name": 1, "replaces": 1, "moves_camera_id": 1}):
+        ref = {"_id": str(p["_id"]), "name": p.get("name", "")}
+        for o in p.get("replaces") or []:
+            removed[o] = ref
+        if p.get("moves_camera_id"):
+            reused[p["moves_camera_id"]] = ref
     return {o: {"_id": str(o), "name": (found.get(o) or {}).get("name", "Camera supprimee"),
-                "ip": (found.get(o) or {}).get("ip", ""), "exists": o in found} for o in ids}
+                "ip": (found.get(o) or {}).get("ip", ""), "exists": o in found,
+                "removed_by": removed.get(o), "reused_by": reused.get(o)} for o in ids}
 
 
 def _pub_planned(d, refs=None):
@@ -1205,6 +1215,7 @@ def _pub_planned(d, refs=None):
     return {"_id": str(d["_id"]), "name": d.get("name", ""), "note": d.get("note", ""),
             "status": d.get("status", "souhaitee"), "lat": d.get("lat"), "lng": d.get("lng"),
             "priority": d.get("priority"), "mount": d.get("mount") or "", "mount_height": d.get("mount_height"),
+            "model_id": str(d["model_id"]) if d.get("model_id") else "",
             "replaces": [refs[o] for o in d.get("replaces") or [] if o in refs],
             "moves": refs.get(d.get("moves_camera_id")) if d.get("moves_camera_id") else None,
             "channels": [{"no": c.get("no"), "optics": c.get("optics") or "", "model": c.get("model") or "",
@@ -1279,6 +1290,21 @@ def _planned_fields(data, chans):
             if not o or not _col_cameras.find_one({"_id": o}, {"_id": 1}):
                 return None, None, "Camera a deplacer introuvable"
             f["moves_camera_id"] = o
+    if "model_id" in data:
+        if not data["model_id"]:
+            unset["model_id"] = ""
+        else:
+            o = _oid(data["model_id"])
+            m = _db["cameras_models"].find_one({"_id": o}) if o else None
+            if not m:
+                return None, None, "Modele inconnu"
+            f["model_id"] = o
+            if data.get("apply_layout", True):
+                err = _apply_model(m, chans)
+                if err:
+                    return None, None, err
+                f["channels"] = chans
+                unset.update({"optics": "", "view": ""})
     if "lat" in data or "lng" in data:
         try:
             lat, lng = float(data["lat"]), float(data["lng"])
@@ -1303,7 +1329,7 @@ def _planned_fields(data, chans):
             else:
                 return None, None, "Optique invalide (mobile ou fixe)"
         if "model" in data:
-            if data["model"] in PLANNED_MODELS:
+            if data["model"] in _lens_keys():
                 ch["model"] = data["model"]
             elif not data["model"]:
                 ch.pop("model", None)
@@ -1327,6 +1353,41 @@ def _planned_fields(data, chans):
     return f, unset, None
 
 
+def _lens_keys():
+    return cameras_models.lens_index(cameras_models.catalogue(_db))
+
+
+def _apply_model(m, chans):
+    """Canaux d'un emplacement poses d'apres le modele choisi (modifies sur
+    place, angles de vue gardes). Multi-capteurs : exactement sa disposition
+    (canal 1 = PTZ...). Sinon : chaque canal d'un autre modele prend
+    l'objectif du modele de meme optique (a defaut le premier)."""
+    lenses = {x["k"]: x for x in m.get("lenses") or []}
+    if not lenses:
+        return "Modele sans objectif"
+    if m.get("multi"):
+        lay = cameras_models.layout(m)
+        if len(lay) > PLANNED_MAX_CHANNELS:
+            return "%d canaux au plus par emplacement" % PLANNED_MAX_CHANNELS
+        nxt = max([c.get("no", 0) for c in chans] or [0]) + 1
+        out = []
+        for j, k in enumerate(lay):
+            if j < len(chans):
+                c = chans[j]
+            else:
+                c, nxt = {"no": nxt}, nxt + 1
+            c.update({"model": k, "optics": lenses[k]["optics"]})
+            out.append(c)
+        chans[:] = out
+        return None
+    for c in chans:
+        if c.get("model") in lenses:
+            continue
+        k = next((x["k"] for x in m["lenses"] if x["optics"] == c.get("optics")), m["lenses"][0]["k"])
+        c.update({"model": k, "optics": lenses[k]["optics"]})
+    return None
+
+
 def _planned_doc(pid):
     _ensure_db()
     oid = _oid(pid)
@@ -1334,22 +1395,24 @@ def _planned_doc(pid):
 
 
 def _planned_conflict(doc_id, merged):
-    """Message d'erreur si le projet est incoherent avec lui-meme ou les autres :
-    une camera deplacee ne peut pas etre aussi remplacee, ni deplacee par deux
-    projets ; une camera remplacee ne l'est que par un seul projet."""
+    """Message d'erreur si le projet est incoherent avec lui-meme ou les autres.
+    Une camera n'est deplacee (reinstallee) que par un projet et remplacee
+    (deposee) que par un projet ; un projet ne la remplace pas et la deplace a
+    la fois. Remplacee par un projet ET reinstallee par un autre : reemploi,
+    admis (la camera deposee repart sur un nouvel emplacement)."""
     moves, repl = merged.get("moves_camera_id"), merged.get("replaces") or []
     if moves and moves in repl:
         return "Une camera ne peut pas etre a la fois deplacee et remplacee par ce projet"
     q = {"_id": {"$ne": doc_id}} if doc_id else {}
     if moves:
-        other = _db["cameras_planned"].find_one(dict(q, **{"$or": [{"moves_camera_id": moves}, {"replaces": moves}]}), {"name": 1})
+        other = _db["cameras_planned"].find_one(dict(q, moves_camera_id=moves), {"name": 1})
         if other:
-            return "Cette camera est deja reprise par le projet %s" % other.get("name", "")
+            return "Cette camera est deja reinstallee par le projet %s" % other.get("name", "")
     for o in repl:
-        other = _db["cameras_planned"].find_one(dict(q, **{"$or": [{"moves_camera_id": o}, {"replaces": o}]}), {"name": 1})
+        other = _db["cameras_planned"].find_one(dict(q, replaces=o), {"name": 1})
         if other:
             c = _col_cameras.find_one({"_id": o}, {"name": 1}) or {}
-            return "%s est deja reprise par le projet %s" % (c.get("name", "Une camera"), other.get("name", ""))
+            return "%s est deja remplacee par le projet %s" % (c.get("name", "Une camera"), other.get("name", ""))
     return None
 
 
@@ -1418,7 +1481,8 @@ def create_planned():
 def planned_dossier():
     """Dossier de planification des travaux (PDF A4 paysage, cameras_dossier.py).
     ?status=souhaitee,validee (defaut : tous), ids=<id>,<id> (facultatif),
-    title, subtitle, indice, phase, author (defaut : l'utilisateur), role."""
+    title, subtitle, indice, phase, author (defaut : l'utilisateur), role,
+    datasheets=1 (fiches techniques des modeles en annexe)."""
     _ensure_db()
     import io
     import cameras_dossier
@@ -1426,7 +1490,8 @@ def planned_dossier():
     statuses = [x for x in (a.get("status") or "").split(",") if x in PLANNED_STATUS] or list(PLANNED_STATUS)
     ids = [o for o in (_oid(x) for x in (a.get("ids") or "").split(",") if x) if o]
     opts = {"statuses": statuses, "ids": ids or None, "title": a.get("title"), "subtitle": a.get("subtitle"),
-            "indice": a.get("indice"), "phase": a.get("phase"), "author": a.get("author") or _who(), "role": a.get("role")}
+            "indice": a.get("indice"), "phase": a.get("phase"), "author": a.get("author") or _who(), "role": a.get("role"),
+            "datasheets": a.get("datasheets") in ("1", "true")}
     try:
         pdf, n = cameras_dossier.build_pdf(_db, opts)
     except Exception:
@@ -1462,7 +1527,7 @@ def add_planned_channels(pid):
     optics, model = data.get("optics"), data.get("model") or ""
     if optics not in OPTICS:
         return jsonify({"error": "Optique invalide (mobile ou fixe)"}), 400
-    if model and model not in PLANNED_MODELS:
+    if model and model not in _lens_keys():
         return jsonify({"error": "Modele inconnu"}), 400
     try:
         count = int(data.get("count") or 1)
@@ -1498,6 +1563,126 @@ def delete_planned(pid):
     _db["cameras_planned"].delete_one({"_id": doc["_id"]})
     logger.info("Camera en projet %s supprimee par %s", doc.get("name"), _who())
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Catalogue des modeles (cameras_models.py) : objectifs des canaux, modele des
+# cameras en projet, fiches techniques PDF jointes au dossier travaux
+# ---------------------------------------------------------------------------
+def _model_doc(mid):
+    _ensure_db()
+    oid = _oid(mid)
+    return _db["cameras_models"].find_one({"_id": oid}) if oid else None
+
+
+@cameras_bp.route("/api/cameras/models", methods=["GET"])
+def list_models():
+    _ensure_db()
+    models = cameras_models.catalogue(_db)
+    use = cameras_models.usage(_db, models)
+    return jsonify([cameras_models.pub(m, use) for m in models])
+
+
+@cameras_bp.route("/api/cameras/models", methods=["POST"])
+def create_model():
+    _ensure_db()
+    models = cameras_models.catalogue(_db)
+    f, err = cameras_models.clean(request.get_json(silent=True) or {}, None, cameras_models.lens_index(models))
+    if err:
+        return jsonify({"error": err}), 400
+    now = datetime.now(timezone.utc)
+    f.update({"by": _who(), "at": now, "updatedAt": now})
+    res = _db["cameras_models"].insert_one(f)
+    _audit("modele_cree", detail={"modele": cameras_models.name(f)})
+    return jsonify(cameras_models.pub(_db["cameras_models"].find_one({"_id": res.inserted_id}))), 201
+
+
+@cameras_bp.route("/api/cameras/models/<mid>", methods=["PUT"])
+def update_model(mid):
+    m = _model_doc(mid)
+    if not m:
+        return jsonify({"error": "Modele introuvable"}), 404
+    models = cameras_models.catalogue(_db)
+    f, err = cameras_models.clean(request.get_json(silent=True) or {}, m, cameras_models.lens_index(models))
+    if err:
+        return jsonify({"error": err}), 400
+    gone = {x["k"] for x in m.get("lenses") or []} - {x["k"] for x in f["lenses"]}
+    for k in gone:
+        n = cameras_models.lens_in_use(_db, k)
+        if n:
+            lab = next((x.get("label") for x in m["lenses"] if x["k"] == k), k)
+            return jsonify({"error": "Objectif %s utilise par %d camera(s) en projet : changez-les d'abord" % (lab, n)}), 409
+    f.update({"updated_by": _who(), "updatedAt": datetime.now(timezone.utc)})
+    _db["cameras_models"].update_one({"_id": m["_id"]}, {"$set": f})
+    _audit("modele_modifie", detail={"modele": cameras_models.name(f)})
+    return jsonify(cameras_models.pub(_db["cameras_models"].find_one({"_id": m["_id"]}), cameras_models.usage(_db, cameras_models.catalogue(_db))))
+
+
+@cameras_bp.route("/api/cameras/models/<mid>", methods=["DELETE"])
+def delete_model(mid):
+    m = _model_doc(mid)
+    if not m:
+        return jsonify({"error": "Modele introuvable"}), 404
+    n = cameras_models.usage(_db, cameras_models.catalogue(_db)).get(m["_id"], 0)
+    if n:
+        return jsonify({"error": "Modele utilise par %d camera(s) en projet" % n}), 409
+    _db["cameras_models"].delete_one({"_id": m["_id"]})
+    try:
+        os.remove(cameras_models.datasheet_path(m["_id"]))
+    except OSError:
+        pass
+    _audit("modele_supprime", detail={"modele": cameras_models.name(m)})
+    return jsonify({"ok": True})
+
+
+@cameras_bp.route("/api/cameras/models/<mid>/datasheet", methods=["POST"])
+def upload_datasheet(mid):
+    """Fiche technique PDF du modele (multipart, champ `file`), remplace la
+    precedente. Verifiee par sa signature %PDF, pas par son extension."""
+    m = _model_doc(mid)
+    if not m:
+        return jsonify({"error": "Modele introuvable"}), 404
+    up = request.files.get("file")
+    if not up:
+        return jsonify({"error": "Fichier requis"}), 400
+    data = up.read(cameras_models.DATASHEET_MAX_BYTES + 1)
+    if len(data) > cameras_models.DATASHEET_MAX_BYTES:
+        return jsonify({"error": "Fiche technique trop lourde (%d Mo au plus)" % (cameras_models.DATASHEET_MAX_BYTES // (1024 * 1024))}), 413
+    if not data.startswith(b"%PDF-"):
+        return jsonify({"error": "La fiche technique doit etre un PDF"}), 400
+    os.makedirs(cameras_models.DATASHEET_DIR, exist_ok=True)
+    path = cameras_models.datasheet_path(m["_id"])
+    with open(path + ".tmp", "wb") as fh:
+        fh.write(data)
+    os.replace(path + ".tmp", path)
+    fname = os.path.basename(up.filename or "fiche.pdf")[:120] or "fiche.pdf"
+    ds = {"name": fname, "size": len(data), "at": datetime.now(timezone.utc), "by": _who()}
+    _db["cameras_models"].update_one({"_id": m["_id"]}, {"$set": {"datasheet": ds}})
+    _audit("modele_fiche", detail={"modele": cameras_models.name(m), "fichier": fname})
+    return jsonify(cameras_models.pub(_db["cameras_models"].find_one({"_id": m["_id"]})))
+
+
+@cameras_bp.route("/api/cameras/models/<mid>/datasheet", methods=["GET"])
+def get_datasheet(mid):
+    m = _model_doc(mid)
+    path = cameras_models.datasheet_path(m["_id"]) if m else ""
+    if not m or not m.get("datasheet") or not os.path.isfile(path):
+        return jsonify({"error": "Pas de fiche technique"}), 404
+    return send_file(path, mimetype="application/pdf", as_attachment=False,
+                     download_name=m["datasheet"].get("name") or "fiche.pdf")
+
+
+@cameras_bp.route("/api/cameras/models/<mid>/datasheet", methods=["DELETE"])
+def delete_datasheet(mid):
+    m = _model_doc(mid)
+    if not m:
+        return jsonify({"error": "Modele introuvable"}), 404
+    try:
+        os.remove(cameras_models.datasheet_path(m["_id"]))
+    except OSError:
+        pass
+    _db["cameras_models"].update_one({"_id": m["_id"]}, {"$unset": {"datasheet": ""}})
+    return jsonify(cameras_models.pub(_db["cameras_models"].find_one({"_id": m["_id"]})))
 
 
 def place_device(doc, lat, lng):

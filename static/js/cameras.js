@@ -23,6 +23,7 @@
         profiles: "/api/camera-profiles",
         planned: "/api/cameras/planned",
         dossier: "/api/cameras/planned/dossier.pdf",
+        models: "/api/cameras/models",
     };
     var REACH_MS = 60000;
 
@@ -249,8 +250,10 @@
         if (window.ResizeObserver) new ResizeObserver(function () { M.map.invalidateSize(); }).observe($("cm-map"));
     }
     function loadMapData() {
-        return Promise.all([getJSON("/api/cameras/map"), getJSON(API.planned).catch(function () { return []; })]).then(function (res) {
+        return Promise.all([getJSON("/api/cameras/map"), getJSON(API.planned).catch(function () { return []; }),
+            getJSON(API.models).catch(function () { return []; })]).then(function (res) {
             var r = res[0];
+            M.models = res[2];
             M.pos = {};
             r.cameras.forEach(function (c) { M.pos[c._id] = c; });
             M.unplaced = r.unplaced;
@@ -285,7 +288,23 @@
         return [m ? m + " mobile" + (m > 1 ? "s" : "") : "", f ? f + " fixe" + (f > 1 ? "s" : "") : "",
             u ? u + " a definir" : ""].filter(Boolean).join(" + ");
     }
+    // Reemploi : projet qui depose (remplace) / reinstalle (deplace) chaque
+    // camera existante citee, recalcule apres chaque modification locale
+    function syncReuse() {
+        var removed = {}, reused = {};
+        (M.planned || []).forEach(function (p) {
+            (p.replaces || []).forEach(function (r) { removed[r._id] = { _id: p._id, name: p.name }; });
+            if (p.moves) reused[p.moves._id] = { _id: p._id, name: p.name };
+        });
+        (M.planned || []).forEach(function (p) {
+            (p.replaces || []).concat(p.moves ? [p.moves] : []).forEach(function (r) {
+                r.removed_by = removed[r._id] || null;
+                r.reused_by = reused[r._id] || null;
+            });
+        });
+    }
     function rebuildPlanned() {
+        syncReuse();
         M.plannedCams = (M.planned || []).map(plannedCam);
         M.plannedCams.forEach(function (pc) { M.pos[pc._id] = { lat: pc.rec.lat, lng: pc.rec.lng }; });
     }
@@ -301,8 +320,12 @@
         var r = pc.rec, box = el("div", "cm-tip cm-tip-planned");
         box.appendChild(el("div", "cm-tip-badge", "Camera en projet - " + statusLabel(r.status)));
         box.appendChild(el("b", "", (r.priority ? "P" + r.priority + " - " : "") + r.name));
-        if (r.moves) box.appendChild(el("div", "cm-tip-line", "Deplacement de " + r.moves.name));
-        if ((r.replaces || []).length) box.appendChild(el("div", "cm-tip-line", "Remplace " + r.replaces.map(function (x) { return x.name; }).join(", ")));
+        var pm = plannedModel(r);
+        if (pm) box.appendChild(el("div", "cm-tip-line", "Modele : " + pm.name));
+        if (r.moves) box.appendChild(el("div", "cm-tip-line", (r.moves.removed_by ? "Reemploi de " + r.moves.name + " (deposee par " + r.moves.removed_by.name + ")" : "Deplacement de " + r.moves.name)));
+        if ((r.replaces || []).length) box.appendChild(el("div", "cm-tip-line", "Remplace " + r.replaces.map(function (x) {
+            return x.name + (x.reused_by ? " (reinstallee : " + x.reused_by.name + ")" : "");
+        }).join(", ")));
         var mnt = (PLANNED_MOUNTS.filter(function (m) { return m[0] === r.mount; })[0] || [])[1];
         if (r.mount) box.appendChild(el("div", "cm-tip-line", "Pose : " + mnt + (r.mount_height ? ", " + String(r.mount_height).replace(".", ",") + " m" : "")));
         if (r.note) box.appendChild(el("div", "cm-tip-line", r.note));
@@ -712,35 +735,60 @@
             : { az: az, fov: ch.optics === "fixe" ? 80 : 50, range: ch.optics === "fixe" ? 40 : 100 };
     }
 
-    // Objectifs connus (fiches techniques Hikvision) : ouverture horizontale et
-    // portee = distance DORI "Observer" (63 px/m). PTZ : grand angle, portee
-    // "Observer" ramenee a la focale mini. Cles stockees sur les canaux en
-    // projet (cameras.PLANNED_MODELS).
-    var LENSES = [
-        { k: "2dp-ptz", label: "DS-2DP7D836 (1 + 4) - PTZ", optics: "mobile", fov: 59, range: 48 },
-        // Portee harmonisee a 30 m sur tous les objectifs fixes des 1 + 4 (demande du 21/10/2026, fiche : 22 m)
-        { k: "2dp-pano", label: "DS-2DP7D836 (1 + 4) - objectif fixe", optics: "fixe", fov: 106, range: 30 },
-        { k: "2sf-ptz", label: "DS-2SF8C442 (1 + 1) - PTZ", optics: "mobile", fov: 59, range: 28 },
-        { k: "2sf-pano", label: "DS-2SF8C442 (1 + 1) - panoramique", optics: "fixe", fov: 190, range: 31 },
-        { k: "bullet-wide", label: "iDS-2CD7A87G0 - fixe 2,8 mm", optics: "fixe", fov: 100, range: 37 },
-        { k: "bullet-tele", label: "iDS-2CD7A87G0 - fixe 12 mm", optics: "fixe", fov: 44, range: 81 },
-        { k: "fisheye-360", label: "DS-2CD63C5G1 - 360 au plafond", optics: "fixe", fov: 360, range: 11 },
-        { k: "fisheye-180", label: "DS-2CD63C5G1 - 180 au mur", optics: "fixe", fov: 180, range: 11 },
-        { k: "ptz", label: "PTZ generique", optics: "mobile", fov: 59, range: 50 },
-    ];
-    function lensByKey(k) { return LENSES.filter(function (x) { return x.k === k; })[0]; }
-    function lensLabel(l) { return l.label + " (" + l.fov + " deg, " + l.range + " m)"; }
+    // Objectifs : catalogue des modeles (GET /api/cameras/models, collection
+    // cameras_models, bouton "Modeles"). Ouverture horizontale et portee DORI
+    // "Observer" de la fiche technique ; cle `k` stockee sur les canaux en
+    // projet (champ model). Meme regle que cameras_models.lens_key.
+    var LENS_FALLBACK = { mobile: "ptz", fixe: "bullet-wide" };
+    function modelsList() { return M.models || []; }
+    function lensByKey(k) {
+        var out = null;
+        modelsList().forEach(function (m) {
+            (m.lenses || []).forEach(function (x) { if (x.k === k) out = { k: x.k, label: (m.ref || m.name) + " - " + x.label, optics: x.optics, fov: x.fov, range: x.range, m: m }; });
+        });
+        return out;
+    }
+    // Disposition des canaux d'un modele : multi-capteurs = PTZ puis fixes
+    function modelLayout(m) {
+        var out = [];
+        if (!m.multi) return m.lenses.length ? [m.lenses[0].k] : [];
+        m.lenses.forEach(function (x) { for (var i = 0; i < (x.count || 1); i++) out.push(x.k); });
+        return out;
+    }
+    function modelForDevice(model) {
+        var u = (model || "").toUpperCase(), best = null;
+        if (!u) return null;
+        modelsList().forEach(function (m) {
+            var t = (m.match || "").trim().toUpperCase();
+            if (t && u.indexOf(t) >= 0 && (!best || t.length > best.match.trim().length)) best = m;
+        });
+        return best;
+    }
     // Objectif d'un canal : choisi (canal en projet ou selecteur du volet),
-    // sinon deduit du modele de l'appareil, sinon profil par defaut de l'optique
-    // (fixe = iDS-2CD7A87G0, le modele de base des fixes)
+    // sinon deduit du modele de l'appareil (rang du canal), sinon profil par
+    // defaut de l'optique (fixe = iDS-2CD7A87G0, le modele de base des fixes)
     function lensKeyFor(c, ch) {
         if (ch.model && lensByKey(ch.model)) return ch.model;
-        var m = (c.model || "").toUpperCase(), first = +ch.no === +(liveChannels(c)[0] || {}).no;
-        if (m.indexOf("2DP7D836") >= 0) return first ? "2dp-ptz" : "2dp-pano";
-        if (m.indexOf("2SF8C442") >= 0) return first ? "2sf-ptz" : "2sf-pano";
-        if (m.indexOf("2CD7A87G0") >= 0) return "bullet-wide";
-        if (m.indexOf("2CD63C5G1") >= 0) return "fisheye-360";
-        return ch.optics === "mobile" ? "ptz" : ch.optics === "fixe" ? "bullet-wide" : "";
+        var m = modelForDevice(c.model);
+        if (m) {
+            var lay = modelLayout(m), j = liveChannels(c).map(function (x) { return +x.no; }).indexOf(+ch.no);
+            if (lay.length) return lay[Math.min(Math.max(j, 0), lay.length - 1)];
+        }
+        var k = LENS_FALLBACK[ch.optics];
+        return k && lensByKey(k) ? k : "";
+    }
+    // Selecteur d'objectif groupe par modele
+    function lensSelect(value) {
+        var s = document.createElement("select");
+        s.appendChild(new Option("Modele / objectif : valeurs libres", ""));
+        modelsList().forEach(function (m) {
+            var g = document.createElement("optgroup");
+            g.label = m.name || m.ref;
+            m.lenses.forEach(function (x) { g.appendChild(new Option(x.label + " (" + x.fov + " deg, " + x.range + " m)", x.k)); });
+            s.appendChild(g);
+        });
+        s.value = value || "";
+        return s;
     }
     function lensFor(c, ch) { return lensByKey(lensKeyFor(c, ch)); }
     function closeCone(force) {
@@ -962,6 +1010,7 @@
     // enregistrement que M.planned, l'objet du volet reste valable)
     function patchRec(c, r) {
         Object.keys(r).forEach(function (k) { c.rec[k] = r[k]; });
+        syncReuse();
         c.name = r.name;
         c.channels = plannedChannels(r);
         // Le volet pointe sur le canal reconstruit
@@ -977,18 +1026,28 @@
             openCone(c, added ? added.no : undefined);
         }).catch(function (e) { toast("error", e.message); });
     }
-    // Modeles multi-capteurs : canal 1 = PTZ du modele, puis ses objectifs fixes
-    // (DS-2DP7D836 : 1 + 4 ; DS-2SF8C442 : 1 + 1 panoramique)
-    var PLANNED_KITS = {
-        "2dp": { ptz: "2dp-ptz", fixe: "2dp-pano", count: 4 },
-        "2sf": { ptz: "2sf-ptz", fixe: "2sf-pano", count: 1 },
-    };
-    function plannedPreset(c, kit) {
-        var K = PLANNED_KITS[kit], first = c.channels[0];
-        send("PUT", API.planned + "/" + c.pid, { ch: first.no, optics: "mobile", model: K.ptz }).then(function (r) {
+    // Modele de l'emplacement : le serveur pose ses canaux (multi-capteurs :
+    // canal 1 = PTZ, puis ses objectifs fixes ; sinon objectif de chaque canal).
+    // Les champs de la fiche partent avec, le volet est reconstruit.
+    function setPlannedModel(c, mid) {
+        var E = M.coneEdit, body = plannedBody(E);
+        if (!body) { E.form.model.value = c.rec.model_id || ""; return; }
+        body.model_id = mid;
+        send("PUT", API.planned + "/" + c.pid, body).then(function (r) {
             patchRec(c, r);
-            return addPlannedChannels(c, "fixe", K.count, K.fixe);
-        }).catch(function (e) { toast("error", e.message); });
+            if (M.coneEdit) M.coneEdit.dirty = false;
+            openCone(c, c.channels[0].no);
+            var m = plannedModel(r);
+            if (m) toast("success", "Modele " + m.name + " : " + c.channels.length + " canal(aux) " + (m.multi ? "poses d'apres le modele" : "mis a jour"));
+        }).catch(function (e) { toast("error", e.message); E.form.model.value = c.rec.model_id || ""; });
+    }
+    function plannedModel(rec) { return modelsList().filter(function (m) { return m._id === rec.model_id; })[0] || null; }
+    // Objectif d'un canal ajoute : celui du modele de l'emplacement pour cette
+    // optique, sinon le profil par defaut
+    function addLens(c, optics) {
+        var m = plannedModel(c.rec), x = m && m.lenses.filter(function (l) { return l.optics === optics; })[0];
+        if (x) return x.k;
+        return lensByKey(LENS_FALLBACK[optics]) ? LENS_FALLBACK[optics] : "";
     }
     function removePlannedChannel(c, no) {
         confirmToast("Retirer le canal " + no + " de " + c.name + " ?", "Retirer").then(function (ok) {
@@ -1000,12 +1059,18 @@
             }).catch(function (e) { toast("error", e.message); });
         });
     }
-    function savePlanned(E) {
-        var c = E.c, ch = E.ch, f = E.form;
-        var name = f.name.value.trim();
-        if (!name) { toast("warning", "Donnez un nom a la camera en projet"); f.name.focus(); return; }
-        var body = { name: name, note: f.note.value, status: f.status.value, priority: f.priority.value,
+    // Champs de la fiche d'une camera en projet (null : nom manquant)
+    function plannedBody(E) {
+        var f = E.form, name = f.name.value.trim();
+        if (!name) { toast("warning", "Donnez un nom a la camera en projet"); f.name.focus(); return null; }
+        return { name: name, note: f.note.value, status: f.status.value, priority: f.priority.value,
             mount: f.mount.value, mount_height: f.height.value, replaces: f.replaces };
+    }
+    function savePlanned(E) {
+        var c = E.c, ch = E.ch, body = plannedBody(E);
+        if (!body) return;
+        var before = (c.rec.replaces || []).map(function (r) { return r._id; });
+        var newly = body.replaces.filter(function (id) { return before.indexOf(id) < 0; });
         // Le cone affiche est toujours enregistre, meme laisse aux valeurs par defaut
         body.ch = ch.no;
         body.view = { az: E.v.az, fov: E.v.fov, range: E.v.range };
@@ -1015,6 +1080,7 @@
             patchRec(c, r);
             E.dirty = false;
             toast("success", "Camera en projet enregistree : " + r.name + (c.channels.length > 1 ? ", canal " + ch.no : ""));
+            if (newly.length) toast("info", newly.length + " camera(s) deposee(s) : elles seront proposees en reemploi sur les autres cameras en projet");
             // Canal suivant sans angle de vue, sinon on ferme
             var rest = c.channels.filter(function (k) { return !k.view && +k.no !== +ch.no; });
             var next = rest.filter(function (k) { return +k.no > +ch.no; })[0] || rest[0];
@@ -1048,10 +1114,12 @@
             mv.appendChild(icon("move_location"));
             var old = M.pos[rec.moves._id];
             var dist = old ? Math.round(bearingDist(old.lat, old.lng, { lat: rec.lat, lng: rec.lng }).d) : null;
-            mv.appendChild(el("span", "", "Deplacement de " + rec.moves.name + (rec.moves.exists === false ? " (camera supprimee)" : "") +
+            mv.appendChild(el("span", "", (rec.moves.removed_by ? "Reemploi de " : "Deplacement de ") + rec.moves.name +
+                (rec.moves.exists === false ? " (camera supprimee)" : "") +
+                (rec.moves.removed_by ? ", deposee par " + rec.moves.removed_by.name : "") +
                 (dist != null ? " : " + dist + " m depuis sa position actuelle" : "")));
             mv.appendChild(cfgBtn("link_off", "", "", function () {
-                confirmToast("Ce projet ne sera plus le deplacement de " + rec.moves.name + " ?", "Retirer le lien").then(function (ok) {
+                confirmToast("Ce projet ne sera plus le nouvel emplacement de " + rec.moves.name + " ?", "Retirer le lien").then(function (ok) {
                     if (!ok) return;
                     send("PUT", API.planned + "/" + c.pid, { moves_camera_id: "" }).then(function (r) {
                         patchRec(c, r);
@@ -1061,6 +1129,8 @@
                 });
             }, "Retirer le lien avec la camera deplacee"));
             box.appendChild(mv);
+        } else {
+            box.appendChild(reuseBox(c, function () { box.replaceWith(plannedLinks(c)); }));
         }
         var head = el("div", "cm-plan-rep-head");
         head.appendChild(el("b", "", "Remplace"));
@@ -1073,6 +1143,12 @@
             E.form.replaces.forEach(function (id) {
                 var chip = el("span", "cm-plan-chip");
                 chip.appendChild(el("span", "", camName(id, rec)));
+                var ref = (rec.replaces || []).filter(function (x) { return x._id === id; })[0];
+                if (ref && ref.reused_by && ref.reused_by._id !== rec._id) {
+                    var tag = el("small", "cm-plan-chip-tag", "reemploi : " + ref.reused_by.name);
+                    tag.title = "Deposee ici puis reinstallee par la camera en projet " + ref.reused_by.name;
+                    chip.appendChild(tag);
+                }
                 var x = el("button", "cm-plan-chip-x"); x.type = "button"; x.title = "Ne remplace plus cette camera";
                 x.appendChild(icon("close"));
                 x.addEventListener("click", function () {
@@ -1112,6 +1188,68 @@
         drawChips();
         return box;
     }
+    // Nouvel emplacement d'une camera existante : en tete, les cameras deposees
+    // (remplacees par un autre projet) pas encore reinstallees ; recherche
+    // parmi toutes les cameras existantes sinon
+    function reuseBox(c, redraw) {
+        var E = M.coneEdit, rec = c.rec, box = el("div", "cm-plan-reuse");
+        var head = el("div", "cm-plan-rep-head");
+        head.appendChild(el("b", "", "Reemploi / deplacement"));
+        box.appendChild(head);
+        var seen = {}, dep = [];
+        (M.planned || []).forEach(function (p) {
+            if (p._id === rec._id) return;
+            (p.replaces || []).forEach(function (r) {
+                if (seen[r._id] || r.reused_by || r.exists === false || E.form.replaces.indexOf(r._id) >= 0) return;
+                seen[r._id] = 1;
+                var q = M.pos[r._id];
+                dep.push({ _id: r._id, name: r.name, by: p.name, d: q ? bearingDist(rec.lat, rec.lng, { lat: q.lat, lng: q.lng }).d : null });
+            });
+        });
+        dep.sort(function (a, b) { return (a.d == null ? 1e12 : a.d) - (b.d == null ? 1e12 : b.d); });
+        function link(x) {
+            confirmToast(x.name + " sera reinstallee ici" + (x.by ? " (deposee par " + x.by + ")" : "") + " ?", "Reinstaller ici").then(function (ok) {
+                if (!ok) return;
+                send("PUT", API.planned + "/" + c.pid, { moves_camera_id: x._id }).then(function (r) {
+                    patchRec(c, r);
+                    redraw();
+                    render();
+                    toast("success", "Nouvel emplacement de " + x.name + " enregistre");
+                }).catch(function (e) { toast("error", e.message); });
+            });
+        }
+        function row(list, x, sub) {
+            var l = el("div", "cm-plan-cand");
+            l.appendChild(el("span", "", x.name));
+            l.appendChild(el("small", "", [x.d != null ? Math.round(x.d) + " m" : "", sub].filter(Boolean).join(" - ")));
+            l.appendChild(cfgBtn("move_location", "Reinstaller ici", "", function () { link(x); }, "Ce projet devient le nouvel emplacement de " + x.name));
+            list.appendChild(l);
+        }
+        if (dep.length) {
+            box.appendChild(el("div", "cm-plan-hint", dep.length + " camera(s) deposee(s) a reemployer : ce projet peut etre leur nouvel emplacement"));
+            var dl = el("div", "cm-plan-cands");
+            dep.slice(0, 10).forEach(function (x) { row(dl, x, "deposee par " + x.by); });
+            box.appendChild(dl);
+        }
+        var q = inp("", { placeholder: "Autre camera existante a reinstaller ici (nom, IP)...", "aria-label": "Camera existante a reinstaller ici" });
+        q.type = "search";
+        q.className = "cm-input";
+        var res = el("div", "cm-plan-cands");
+        q.addEventListener("input", function () {
+            res.textContent = "";
+            var t = q.value.trim().toLowerCase();
+            if (t.length < 2) return;
+            var taken = {};
+            (M.planned || []).forEach(function (p) { if (p.moves) taken[p.moves._id] = 1; });
+            existingNear(rec.lat, rec.lng, Infinity).filter(function (x) {
+                return !taken[x._id] && E.form.replaces.indexOf(x._id) < 0 && (x.name.toLowerCase().indexOf(t) >= 0 || x.ip.indexOf(t) >= 0);
+            }).slice(0, 8).forEach(function (x) { row(res, x, x.ip); });
+            if (!res.childNodes.length) res.appendChild(el("span", "cm-plan-none", "Aucune camera existante libre"));
+        });
+        box.appendChild(q);
+        box.appendChild(res);
+        return box;
+    }
     // Camera existante : projet de deplacement cree a sa position, avec ses
     // canaux et angles de vue ; il reste a glisser le pin a la nouvelle place
     function planMove(c) {
@@ -1146,6 +1284,7 @@
         var saved = {};
         try { saved = JSON.parse(localStorage.getItem("cockpit-cameras-dossier") || "{}"); } catch (e) {}
         DOSSIER_FIELDS.forEach(function (k) { if (saved[k] != null) $("cm-dos-" + k).value = saved[k]; });
+        $("cm-dos-datasheets").checked = !!saved.datasheets;
         var go = function () { dossierCount(); $("cm-dossier-dialog").showModal(); };
         if (M.loaded) go(); else loadMapData().then(go);
     }
@@ -1156,6 +1295,8 @@
             keep[k] = v;
             if (v) q[k] = v;
         });
+        keep.datasheets = $("cm-dos-datasheets").checked;
+        if (keep.datasheets) q.datasheets = "1";
         try { localStorage.setItem("cockpit-cameras-dossier", JSON.stringify(keep)); } catch (e) {}
         var url = API.dossier + "?" + Object.keys(q).map(function (k) { return k + "=" + encodeURIComponent(q[k]); }).join("&");
         // Nouvel onglet : le PDF s'y affiche (tuiles IGN telechargees au premier passage : quelques secondes)
@@ -1228,13 +1369,9 @@
             box.appendChild(b);
         });
         if (!c.planned) return;
-        box.appendChild(cfgBtn("add", "Mobile", "cm-cfg-chip-add", function () { addPlannedChannels(c, "mobile", 1, "ptz"); }, "Ajouter un canal mobile (PTZ generique)"));
-        box.appendChild(cfgBtn("add", "Fixe", "cm-cfg-chip-add", function () { addPlannedChannels(c, "fixe", 1, "bullet-wide"); }, "Ajouter un canal fixe (iDS-2CD7A87G0)"));
-        box.appendChild(cfgBtn("add", "360", "cm-cfg-chip-add", function () { addPlannedChannels(c, "fixe", 1, "fisheye-360"); }, "Ajouter une camera 360 (DS-2CD63C5G1 au plafond)"));
-        if (chs.length === 1) {
-            box.appendChild(cfgBtn("view_module", "1 PTZ + 4 fixes", "cm-cfg-chip-add", function () { plannedPreset(c, "2dp"); }, "DS-2DP7D836 : canal 1 PTZ + 4 objectifs fixes"));
-            box.appendChild(cfgBtn("view_agenda", "1 PTZ + 1 fixe", "cm-cfg-chip-add", function () { plannedPreset(c, "2sf"); }, "DS-2SF8C442 : canal 1 PTZ + 1 panoramique"));
-        } else {
+        box.appendChild(cfgBtn("add", "Mobile", "cm-cfg-chip-add", function () { addPlannedChannels(c, "mobile", 1, addLens(c, "mobile")); }, "Ajouter un canal mobile (PTZ)"));
+        box.appendChild(cfgBtn("add", "Fixe", "cm-cfg-chip-add", function () { addPlannedChannels(c, "fixe", 1, addLens(c, "fixe")); }, "Ajouter un canal fixe"));
+        if (chs.length > 1) {
             box.appendChild(cfgBtn("remove", "", "cm-cfg-chip-add cm-btn-danger", function () { removePlannedChannel(c, E.no); }, "Retirer le canal " + E.no));
         }
     }
@@ -1290,11 +1427,16 @@
             E.form.priority = inp(c.rec.priority == null ? "" : c.rec.priority, { placeholder: "1 = urgent" });
             E.form.priority.type = "number"; E.form.priority.min = "1"; E.form.priority.max = "999";
             E.form.mount = sel(PLANNED_MOUNTS, c.rec.mount || "");
+            E.form.model = sel([["", c.rec.moves ? "Camera existante (son modele)" : "A definir"]].concat(modelsList().map(function (m) {
+                return [m._id, m.name + (m.multi ? " (" + modelLayout(m).length + " canaux)" : "")];
+            })), c.rec.model_id || "");
+            E.form.model.addEventListener("change", function () { setPlannedModel(c, E.form.model.value); });
             E.form.height = inp(c.rec.mount_height == null ? "" : String(c.rec.mount_height).replace(".", ","), { placeholder: "ex. 6", inputmode: "decimal" });
             E.form.replaces = (c.rec.replaces || []).map(function (r) { return r._id; });
             pf.appendChild(field("Nom", E.form.name));
             pf.appendChild(field("Statut", E.form.status));
             pf.appendChild(field("Priorite", E.form.priority));
+            pf.appendChild(field("Modele", E.form.model, "cm-span2"));
             pf.appendChild(field("Support de pose", E.form.mount));
             pf.appendChild(field("Hauteur de pose (m)", E.form.height));
             pf.appendChild(field("Note", E.form.note, "cm-span2"));
@@ -1340,7 +1482,7 @@
         // Modele / objectif : prereglage de l'ouverture et de la portee
         var lensRow = el("div", "cm-cfg-lens");
         var curKey = lensKeyFor(c, ch);
-        var sLens = sel([["", "Modele / objectif : valeurs libres"]].concat(LENSES.map(function (l) { return [l.k, lensLabel(l)]; })), curKey);
+        var sLens = lensSelect(curKey);
         sLens.className = "cm-select";
         sLens.title = "Prereglage d'apres la fiche technique : ouverture horizontale et portee DORI 'Observer'";
         sLens.addEventListener("change", function () { applyLens(sLens.value); });
@@ -2291,6 +2433,154 @@
         });
     }
 
+    /* ---------------- catalogue des modeles ---------------- */
+    // Modeles (cameras_models) : objectifs des canaux, modele des cameras en
+    // projet, materiel et fiches techniques du dossier travaux
+    function openModels() {
+        getJSON(API.models).then(function (list) {
+            M.models = list;
+            renderModels();
+            var dlg = $("cm-models-dialog");
+            if (!dlg.open) dlg.showModal();
+        }).catch(function (e) { toast("error", "Catalogue indisponible : " + e.message); });
+    }
+    function reloadModels(extraNew) {
+        return getJSON(API.models).then(function (list) { M.models = list; renderModels(extraNew); });
+    }
+    function fmtSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " Mo" : Math.max(1, Math.round(n / 1024)) + " Ko"; }
+    function uploadDatasheet(m, file) {
+        var fd = new FormData();
+        fd.append("file", file);
+        return fetch(API.models + "/" + m._id + "/datasheet", {
+            method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf() }, body: fd,
+        }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (j) {
+                if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+                return j;
+            });
+        });
+    }
+    function renderModels(extraNew) {
+        var list = $("cm-models-list");
+        list.textContent = "";
+        var items = modelsList().slice();
+        if (extraNew) items.unshift({ _id: "", brand: "", ref: "", match: "", multi: false, note: "", used: 0, datasheet: null,
+            lenses: [{ k: "", label: "", optics: "fixe", fov: 90, range: 30, count: 1 }] });
+        if (!items.length) list.appendChild(el("p", "cm-help", "Aucun modele."));
+        items.forEach(function (m) { list.appendChild(modelCard(m)); });
+    }
+    function modelCard(m) {
+        var box = el("div", "cm-model");
+        var head = el("div", "cm-model-head");
+        var iB = inp(m.brand, { maxlength: 40, placeholder: "Hikvision" });
+        var iR = inp(m.ref, { maxlength: 80, placeholder: "DS-2DP7D836IW-AE" });
+        var iM = inp(m.match, { maxlength: 40, placeholder: "2DP7D836" });
+        iM.title = "Partie de la reference reconnue dans le modele des cameras existantes (objectif deduit automatiquement)";
+        head.appendChild(field("Marque", iB));
+        head.appendChild(field("Reference", iR));
+        head.appendChild(field("Motif reconnu", iM));
+        var multi = el("label", "cm-model-multi"), cbM = document.createElement("input");
+        cbM.type = "checkbox"; cbM.checked = !!m.multi;
+        multi.title = "Un seul appareil a plusieurs capteurs (ex. 1 PTZ + 4 fixes) : le nombre de chaque objectif donne la disposition des canaux";
+        multi.appendChild(cbM);
+        multi.appendChild(document.createTextNode("Multi-capteurs"));
+        head.appendChild(multi);
+        box.appendChild(head);
+        var iN = inp(m.note, { maxlength: 300, placeholder: "Note (usage, alimentation...)" });
+        box.appendChild(field("Note", iN));
+
+        // Objectifs
+        var lensBox = el("div", "cm-model-lenses"), rows = [];
+        var hd = el("div", "cm-model-lens is-head");
+        ["Objectif (ex. fixe 2,8 mm, PTZ)", "Optique", "Ouverture (deg)", "Portee (m)", "Nombre", ""].forEach(function (t) { hd.appendChild(el("span", "", t)); });
+        lensBox.appendChild(hd);
+        function addRow(x) {
+            var r = el("div", "cm-model-lens");
+            var o = { k: x.k || "", label: inp(x.label, { maxlength: 60 }), optics: sel([["fixe", "Fixe"], ["mobile", "Mobile (PTZ)"]], x.optics || "fixe"),
+                fov: inp(x.fov, { inputmode: "decimal" }), range: inp(x.range, { inputmode: "numeric" }), count: inp(x.count || 1, { inputmode: "numeric" }) };
+            o.fov.setAttribute("aria-label", "Ouverture horizontale en degres");
+            o.range.setAttribute("aria-label", "Portee DORI observer en metres");
+            o.count.setAttribute("aria-label", "Nombre de capteurs de cet objectif");
+            [o.label, o.optics, o.fov, o.range, o.count].forEach(function (i) { r.appendChild(i); });
+            var del = el("button", "cm-icon-btn"); del.type = "button"; del.title = "Retirer cet objectif"; del.appendChild(icon("remove"));
+            del.addEventListener("click", function () {
+                if (rows.length < 2) { toast("warning", "Un modele garde au moins un objectif"); return; }
+                rows = rows.filter(function (y) { return y !== o; });
+                r.remove();
+            });
+            r.appendChild(del);
+            o.row = r;
+            rows.push(o);
+            lensBox.insertBefore(r, addBtn);
+            syncMulti();
+        }
+        function syncMulti() { rows.forEach(function (o) { o.count.classList.toggle("is-hidden", !cbM.checked); }); }
+        cbM.addEventListener("change", syncMulti);
+        var addBtn = cfgBtn("add", "Objectif", "", function () { addRow({ optics: "fixe", fov: 90, range: 30, count: 1 }); }, "Ajouter un objectif (ou une variante de focale)");
+        lensBox.appendChild(addBtn);
+        (m.lenses || []).forEach(addRow);
+        box.appendChild(lensBox);
+
+        // Fiche technique et actions
+        var foot = el("div", "cm-model-foot");
+        if (m._id && m.datasheet) {
+            var a = el("a", "", "Fiche technique : " + m.datasheet.name + " (" + fmtSize(m.datasheet.size) + ")");
+            a.href = API.models + "/" + m._id + "/datasheet";
+            a.target = "_blank";
+            a.rel = "noopener";
+            foot.appendChild(icon("picture_as_pdf"));
+            foot.appendChild(a);
+        } else if (m._id) {
+            foot.appendChild(el("span", "", "Pas de fiche technique"));
+        }
+        if (m._id) {
+            var file = document.createElement("input");
+            file.type = "file"; file.accept = "application/pdf,.pdf"; file.hidden = true;
+            file.addEventListener("change", function () {
+                if (!file.files.length) return;
+                uploadDatasheet(m, file.files[0]).then(function () {
+                    toast("success", "Fiche technique enregistree");
+                    return reloadModels();
+                }).catch(function (e) { toast("error", e.message); });
+            });
+            foot.appendChild(file);
+            foot.appendChild(cfgBtn("upload_file", m.datasheet ? "Remplacer le PDF" : "Ajouter la fiche (PDF)", "", function () { file.click(); }, "Fiche technique du constructeur, jointe au dossier travaux"));
+            if (m.datasheet) foot.appendChild(cfgBtn("delete", "", "", function () {
+                confirmToast("Retirer la fiche technique de " + m.name + " ?", "Retirer").then(function (ok) {
+                    if (!ok) return;
+                    send("DELETE", API.models + "/" + m._id + "/datasheet").then(function () { return reloadModels(); }).catch(function (e) { toast("error", e.message); });
+                });
+            }, "Retirer la fiche technique"));
+            foot.appendChild(el("span", "", m.used ? "utilise par " + m.used + " camera(s) en projet" : "inutilise"));
+        }
+        foot.appendChild(el("span", "cm-spacer"));
+        if (m._id) {
+            var del = cfgBtn("delete", "", "", function () {
+                confirmToast("Supprimer le modele " + m.name + " ?", "Supprimer").then(function (ok) {
+                    if (!ok) return;
+                    send("DELETE", API.models + "/" + m._id).then(function () {
+                        toast("success", "Modele supprime");
+                        return reloadModels();
+                    }).catch(function (e) { toast("error", e.message); });
+                });
+            }, m.used ? "Utilise par " + m.used + " camera(s) en projet" : "Supprimer le modele");
+            del.disabled = m.used > 0;
+            foot.appendChild(del);
+        }
+        foot.appendChild(cfgBtn("check", m._id ? "Enregistrer" : "Creer", "cm-btn-primary", function () {
+            var body = { brand: iB.value.trim(), ref: iR.value.trim(), match: iM.value.trim(), multi: cbM.checked, note: iN.value.trim(),
+                lenses: rows.map(function (o) {
+                    return { k: o.k, label: o.label.value.trim(), optics: o.optics.value, fov: o.fov.value, range: o.range.value, count: o.count.value };
+                }) };
+            (m._id ? send("PUT", API.models + "/" + m._id, body) : send("POST", API.models, body)).then(function () {
+                toast("success", "Modele enregistre");
+                return reloadModels();
+            }).catch(function (e) { toast("error", e.message); });
+        }));
+        box.appendChild(foot);
+        return box;
+    }
+
     /* ---------------- evenements ---------------- */
     // Nombre de filtres actifs sur l'onglet "Filtres" de la barre du bas
     function mnavBadge() {
@@ -2356,6 +2646,11 @@
             if (c) removeCams([c]);
         });
         $("cm-profiles-btn").addEventListener("click", openProfiles);
+        $("cm-models-btn").addEventListener("click", openModels);
+        $("cm-model-add").addEventListener("click", function () { renderModels(true); $("cm-models-list").scrollTop = 0; });
+        Array.prototype.forEach.call(document.querySelectorAll("#cm-models-dialog [data-close]"), function (b) {
+            b.addEventListener("click", function () { $("cm-models-dialog").close(); });
+        });
         $("cm-map-btn").addEventListener("click", function () { setView(S.view === "map" ? "list" : "map"); });
         $("cm-capture-all").addEventListener("click", startCaptureAll);
         $("cm-map-edit").addEventListener("click", function () { setMapEdit(!M.edit); });

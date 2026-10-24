@@ -87,6 +87,8 @@ class FakeCollection:
         valeurs = update.get("$set", {})
         if cible is not None:
             cible.update(valeurs)
+            for cle in update.get("$unset", {}):
+                cible.pop(cle, None)
         elif upsert:
             nouveau = dict(filtre)
             nouveau.update(valeurs)

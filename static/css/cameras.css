@@ -465,3 +465,32 @@
 .cm-dossier-grid .cm-span2 { grid-column: 1 / -1; }
 .cm-dossier-status { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: .82rem; }
 @media (max-width: 820px) { .cm-dossier-grid { grid-template-columns: 1fr; } }
+
+/* Reemploi des cameras deposees, catalogue des modeles */
+.cm-plan-reuse { display: flex; flex-direction: column; gap: 5px; }
+.cm-plan-hint { color: #c2410c; }
+.cm-plan-cands:empty { display: none; }
+.cm-plan-cand .cm-btn { padding: 2px 8px; min-height: 0; font-size: .74rem; }
+.cm-plan-reuse .cm-plan-cand { flex-wrap: wrap; cursor: default; }
+.cm-plan-reuse .cm-plan-cand > span:first-child { flex: 1 1 100%; }
+.cm-plan-reuse .cm-plan-cand > small { flex: 1; }
+.cm-plan-cand .cm-btn span { flex: none; overflow: visible; }
+.cm-plan-chip-tag { margin-left: 4px; color: #c2410c; font-size: .68rem; }
+.cm-dossier-annex { display: flex; align-items: center; gap: 6px; font-size: .82rem; margin-top: 8px; }
+.cm-models-dialog { width: min(980px, calc(100vw - 32px)); }
+.cm-model { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--bg); margin-bottom: 10px; }
+.cm-model-head { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) minmax(0, .9fr) auto; gap: 8px; align-items: end; }
+.cm-model-head .cm-field input, .cm-model-lens input, .cm-model-lens select { height: 30px; }
+.cm-model-multi { display: flex; align-items: center; gap: 4px; font-size: .78rem; white-space: nowrap; padding-bottom: 6px; }
+.cm-model-lenses { display: flex; flex-direction: column; gap: 4px; }
+.cm-model-lens { display: grid; grid-template-columns: minmax(0, 1.6fr) 110px 80px 80px 70px auto; gap: 6px; align-items: center; }
+.cm-model-lens.is-head { font-size: .7rem; color: var(--muted); }
+.cm-model-lens .is-hidden { visibility: hidden; }
+.cm-model-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .76rem; color: var(--muted); }
+.cm-model-foot a { color: inherit; }
+.cm-model-foot .cm-spacer { flex: 1; }
+@media (max-width: 820px) {
+  .cm-model-head { grid-template-columns: 1fr 1fr; }
+  .cm-model-lens { grid-template-columns: 1fr 1fr 1fr; }
+  .cm-model-lens.is-head { display: none; }
+}

@@ -47,6 +47,9 @@
       <button class="cm-btn" id="cm-privacy-all-btn" type="button" hidden title="Super admin : activer ou desactiver les masques de vie privee de toutes les cameras">
         <span class="material-symbols-outlined">privacy_tip</span><span class="cm-btn-label">Masques</span>
       </button>
+      <button class="cm-btn" id="cm-models-btn" type="button" title="Catalogue des modeles de cameras : objectifs (ouverture, portee) et fiches techniques PDF">
+        <span class="material-symbols-outlined">inventory_2</span><span class="cm-btn-label">Modeles</span>
+      </button>
       <button class="cm-btn" id="cm-profiles-btn" type="button" title="Profils d'identifiants (mots de passe chiffres)">
         <span class="material-symbols-outlined">key</span><span class="cm-btn-label">Identifiants</span>
       </button>
@@ -218,13 +221,29 @@
   </div>
 </dialog>
 
+<dialog class="cm-dialog cm-models-dialog" id="cm-models-dialog" aria-labelledby="cm-models-title">
+  <div class="cm-dialog-head">
+    <h3 id="cm-models-title"><span class="material-symbols-outlined">inventory_2</span> Modeles de cameras</h3>
+    <button type="button" class="cm-icon-btn" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+  </div>
+  <div class="cm-dialog-body">
+    <p class="cm-help">Chaque modele sert aux objectifs des canaux (ouverture horizontale et portee DORI "observer" de la fiche technique), au modele des cameras en projet et au materiel du dossier travaux, ou sa fiche technique peut etre jointe en annexe. Motif : partie de la reference reconnue dans le modele des cameras existantes (ex. 2DP7D836). Multi-capteurs : un seul appareil, ses objectifs et leur nombre donnent la disposition des canaux.</p>
+    <div id="cm-models-list"></div>
+  </div>
+  <div class="cm-dialog-foot">
+    <button type="button" class="cm-btn" id="cm-model-add"><span class="material-symbols-outlined">add</span>Nouveau modele</button>
+    <span style="flex:1"></span>
+    <button type="button" class="cm-btn" data-close>Fermer</button>
+  </div>
+</dialog>
+
 <dialog class="cm-dialog" id="cm-dossier-dialog" aria-labelledby="cm-dossier-title">
   <div class="cm-dialog-head">
     <h3 id="cm-dossier-title"><span class="material-symbols-outlined">picture_as_pdf</span> Dossier de planification des travaux</h3>
     <button type="button" class="cm-icon-btn" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
   </div>
   <div class="cm-dialog-body">
-    <p class="cm-help">PDF A4 paysage : couverture, plan d'ensemble, une planche par camera en projet (classees par priorite : vue micro et vue macro sur orthophoto IGN, angles de vue, GPS et Lambert 93, support de pose, cameras remplacees ou deplacees), recapitulatif et quantitatif.</p>
+    <p class="cm-help">PDF A4 paysage : couverture, plan d'ensemble, une planche par camera en projet (classees par priorite : vue micro et vue macro sur orthophoto IGN, angles de vue, GPS et Lambert 93, support de pose, cameras remplacees ou deplacees), recapitulatif et quantitatif ; fiches techniques des modeles en annexe si demande.</p>
     <div class="cm-dossier-grid">
       <label class="cm-field cm-span2">Titre<input type="text" id="cm-dos-title" maxlength="90" placeholder="Cameras - nouvelles implantations"></label>
       <label class="cm-field cm-span2">Sous-titre<input type="text" id="cm-dos-subtitle" maxlength="120" placeholder="Planification des travaux d'installation"></label>
@@ -239,6 +258,7 @@
       <label><input type="checkbox" value="validee" checked> Validee</label>
       <label><input type="checkbox" value="commandee" checked> Commandee</label>
     </div>
+    <label class="cm-dossier-annex"><input type="checkbox" id="cm-dos-datasheets"> Joindre en annexe les fiches techniques des modeles prevus</label>
     <p class="cm-help" id="cm-dos-count"></p>
   </div>
   <div class="cm-dialog-foot">

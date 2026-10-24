@@ -19,3 +19,4 @@ pandas>=2.0.0
 # Lecture du journal XML des cameras Axis License Plate Verifier (anpr_lpv.py)
 defusedxml>=0.7.1
 reportlab>=4.0   # dossier PDF de planification des cameras (cameras_dossier.py)
+pypdf>=4.0   # fiches techniques jointes au dossier PDF (cameras_dossier.py)
