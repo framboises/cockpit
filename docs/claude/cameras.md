@@ -89,6 +89,14 @@ compose d'un socle et d'un module par marque :
 - `hik/hik_control.py` ne contient plus que l'outil en ligne de commande ; il
   reexporte `HikCamera` (`from hik.hik_control import HikCamera` marche
   toujours, y compris lance depuis `hik/`).
+- Verrou piste de l'outil en ligne de commande (24/10/2026) : `load_cameras`
+  ecarte toute entree de `hik_cameras.json` reconnue par
+  `cameras.is_piste_device` (IP 10.34.2.x hors exception, modele lu dans
+  `notes`) OU dont l'IP est une camera de piste du referentiel
+  `cockpit_cameras` (groupe SeeTec "Pistes" / "Cam Courses", enregistreurs).
+  Regle ou base injoignable : l'outil REFUSE de demarrer (code 2), sans mode
+  degrade. Les commandes `credential` passent avant (rien n'est envoye aux
+  cameras). `--camera N` numerote la liste SANS la piste.
 - Tests : `tests/test_camera_drivers.py` (URL par marque, lecture des
   reponses, masques), requests remplace par un double.
 
@@ -213,8 +221,7 @@ generiques sont geres (inventaire, identifiants, usages) mais pas pilotes.
   (total, done, changed, unchanged, nomask, failed, failures, by), jauge du
   dialogue qui peut etre ferme pendant la manoeuvre.
   Logique par marque : `HikCamera.privacy` (hik/drivers). `hik/hik_control.py`
-  (privacy / privacy-all en ligne de commande) n'est pas utilise par Cockpit
-  et ne respecte pas la regle piste : ne pas s'en servir sur le parc.
+  (privacy / privacy-all en ligne de commande) n'est pas utilise par Cockpit.
 - Rappeler un preset change la vue pour TOUS (operateurs SeeTec compris) :
   confirmation dans la page, puis capture automatique 4 s apres.
 

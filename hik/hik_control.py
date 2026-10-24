@@ -102,8 +102,58 @@ def credential_delete(group_name):
 # Chargement de la configuration
 ################################################################################
 
+################################################################################
+# Cameras de piste : JAMAIS RIEN (regle non negociable, securite piste)
+################################################################################
+#
+# Meme regle que Cockpit (cameras.is_piste_device, docs/claude/cameras.md) :
+# aucune commande, pas meme une capture ou une lecture, vers les cameras de
+# piste. Criteres : ceux de l'entree du JSON (IP 10.34.2.x, modele dans
+# `notes`) ET le referentiel Cockpit (cockpit_cameras : groupe SeeTec
+# "Pistes" / "Cam Courses", enregistreurs), pour qu'une camera reclassee dans
+# SeeTec ne redevienne pas pilotable ici. Sans la regle ou sans la base, l'outil
+# refuse de demarrer : pas de mode degrade.
+
+PISTE_DB_TIMEOUT_MS = 5000
+
+
+def _piste_rule():
+    """(is_piste_device, IP de piste du referentiel Cockpit). Quitte si la
+    verification est impossible."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        from cameras import is_piste_device
+        from pymongo import MongoClient
+    except Exception as e:
+        print(f"{C_RED}Regle piste introuvable ({e}) : rien n'est fait (securite piste).{C_RESET}")
+        sys.exit(2)
+    env = os.getenv("TITAN_ENV", "dev").strip().lower()
+    try:
+        client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"),
+                             serverSelectionTimeoutMS=PISTE_DB_TIMEOUT_MS)
+        db = client["titan" if env in ("prod", "production") else "titan_dev"]
+        ips = {str(d.get("ip") or "").strip() for d in db["cockpit_cameras"].find(
+            {}, {"ip": 1, "group_path": 1, "model": 1}) if is_piste_device(d)}
+        client.close()
+    except Exception as e:
+        print(f"{C_RED}Base Cockpit injoignable ({e}) : impossible de verifier les cameras "
+              f"de piste, rien n'est fait (securite piste).{C_RESET}")
+        sys.exit(2)
+    return is_piste_device, ips
+
+
+def is_piste_entry(entry, is_piste_device, piste_ips):
+    """Entree de hik_cameras.json appartenant a la piste."""
+    ip = str(entry.get("ip") or "").strip()
+    return ip in piste_ips or is_piste_device({"ip": ip, "model": entry.get("notes") or entry.get("model") or "",
+                                               "group_path": entry.get("group_path") or ""})
+
+
 def load_cameras():
-    """Charge les cameras depuis hik_cameras.json avec resolution des credentials."""
+    """Charge les cameras depuis hik_cameras.json avec resolution des credentials.
+    Les cameras de piste sont ecartees (jamais pilotees)."""
     if not os.path.exists(CONFIG_FILE):
         print(f"{C_RED}Fichier de config introuvable: {CONFIG_FILE}{C_RESET}")
         print(f"Creez le fichier avec la structure attendue (voir hik_cameras.json)")
@@ -115,7 +165,13 @@ def load_cameras():
     cred_groups = config.get("credential_groups", {})
     cameras = []
 
-    for cam in config.get("cameras", []):
+    is_piste_device, piste_ips = _piste_rule()
+    entries = [c for c in config.get("cameras", []) if not is_piste_entry(c, is_piste_device, piste_ips)]
+    skipped = len(config.get("cameras", [])) - len(entries)
+    if skipped:
+        print(f"{C_YELLOW}{skipped} camera(s) de piste ecartee(s) : aucun pilotage (securite piste).{C_RESET}")
+
+    for cam in entries:
         # Resoudre le user et password
         group_name = cam.get("credential_group")
         user = cam.get("user", "admin")
@@ -921,8 +977,6 @@ def interactive_menu(cam, all_cameras=None):
 ################################################################################
 
 def main():
-    cameras = load_cameras()
-
     # Parser les arguments
     args = sys.argv[1:]
     cam_index = None
@@ -937,6 +991,10 @@ def main():
     if args and args[0].lower() == "credential":
         cmd_credential(args[1:], config_path=CONFIG_FILE)
         return
+
+    # Cameras pilotables (piste ecartee) : apres les commandes credential, qui
+    # n'envoient rien aux cameras
+    cameras = load_cameras()
 
     # Commandes batch (toutes les cameras)
     if args and args[0].lower() == "privacy-all" and len(args) >= 2:

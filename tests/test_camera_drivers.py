@@ -162,3 +162,45 @@ def test_masques_dahua_seuls_les_emplacements_dessines(net):
     cam("dahua").privacy(set_to=False)
     sets = [p for m, p in net.calls if "setConfig" in p]
     assert sets == ["/cgi-bin/configManager.cgi?action=setConfig&PrivacyMasking[0][0].Enable=false"]
+
+
+# ---------------------------------------------------------------------------
+# Outil en ligne de commande : verrou piste
+# ---------------------------------------------------------------------------
+import json  # noqa: E402
+
+import hik.hik_control as cli  # noqa: E402
+from cameras import is_piste_device  # noqa: E402
+
+
+def test_cli_ecarte_la_piste(tmp_path, monkeypatch):
+    cfg = {"credential_groups": {}, "cameras": [
+        {"name": "Porte Houx", "ip": "10.34.1.171", "password": "x", "notes": "DS-2DP7D836"},
+        {"name": "Cam 1C Bugatti", "ip": "10.34.2.21", "password": "x", "notes": ""},
+        {"name": "XVR", "ip": "10.34.1.250", "password": "x", "notes": "DH-XVR5108HS"},
+        # IP hors 10.34.2.x mais classee piste dans le referentiel Cockpit
+        {"name": "Reclassee", "ip": "10.34.1.90", "password": "x", "notes": ""},
+        {"name": "Technoparc Formation", "ip": "10.34.2.180", "password": "x", "notes": ""},
+    ]}
+    path = tmp_path / "hik_cameras.json"
+    path.write_text(json.dumps(cfg))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(path))
+    monkeypatch.setattr(cli, "_piste_rule", lambda: (is_piste_device, {"10.34.1.90"}))
+    names = [c.name for c in cli.load_cameras()]
+    assert names == ["Porte Houx", "Technoparc Formation"]
+
+
+def test_cli_refuse_sans_base(monkeypatch):
+    import pymongo
+
+    class Down:
+        def __init__(self, *a, **k):
+            pass
+
+        def __getitem__(self, name):
+            raise pymongo.errors.ServerSelectionTimeoutError("injoignable")
+
+    monkeypatch.setattr(pymongo, "MongoClient", Down)
+    with pytest.raises(SystemExit) as e:
+        cli._piste_rule()
+    assert e.value.code == 2
