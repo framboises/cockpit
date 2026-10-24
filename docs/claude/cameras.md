@@ -68,6 +68,30 @@ la page LAPI renvoie ici (`/cameras?usage=anpr`).
   (dechiffre le profil ; repli `HIK_PASSWORD` si l'appareil n'a pas de profil).
   Utilise aussi par la capture de la main courante (`/api/pcorg/camera-capture`).
 
+## Pilotes (hik/drivers)
+
+`HikCamera` (nom historique, multi-marques) = `hik/drivers/__init__.py`,
+compose d'un socle et d'un module par marque :
+- `base.py` : HTTP Digest (`_get` / `_put` / `_delete`), `_onvif`, `_kv`, et
+  les REPARTITEURS par `brand` (`get_device_info`, `list_presets`,
+  `goto_preset`, `set_preset`, `delete_preset`, `capture_image`, `privacy`).
+  `PRIVACY_BRANDS` (masques pilotables) est defini ici, relu par cameras.py.
+- `hikvision.py` (ISAPI, Uniview compris : PTZ, essuie-glace, Smart Events...),
+  `dahua.py`, `bosch.py` (ONVIF, RCP+ `BOSCH_PRIV_CMD`), `hanwha.py`
+  (`_hanwha_get`), `axis.py`.
+- Ajouter une marque : un module pilote (mixin) + ses entrees dans les
+  repartiteurs de `base.py` + la marque dans `cameras.CONTROLLABLE_BRANDS`.
+- `privacy(set_to)` = masques VERIFIES sur le parc (anciennes fonctions
+  `_privacy_*` de cameras.py, deplacees a l'identique le 24/10/2026).
+  `get_privacy_masks` / `set_privacy_masks_enabled` / `_get_privacy_*` ne
+  servent qu'a l'outil en ligne de commande, historiques et FAUX pour Dahua
+  (VideoWidget) et Hanwha (media.cgi "Submenu Not Found").
+- `hik/hik_control.py` ne contient plus que l'outil en ligne de commande ; il
+  reexporte `HikCamera` (`from hik.hik_control import HikCamera` marche
+  toujours, y compris lance depuis `hik/`).
+- Tests : `tests/test_camera_drivers.py` (URL par marque, lecture des
+  reponses, masques), requests remplace par un double.
+
 ## Pilotage
 
 Marques pilotables : `CONTROLLABLE_BRANDS` (hikvision, bosch, dahua, hanwha,
@@ -150,7 +174,7 @@ generiques sont geres (inventaire, identifiants, usages) mais pas pilotes.
   - Hanwha : `image.cgi?msubmenu=privacy&action=view|set&Channel=0&Enable=`
     (interrupteur global ; les zones ne sont listees que masques actifs sur
     certains firmwares : nombre inconnu sinon). `media.cgi
-    msubmenu=privacymask` de hik_control.py repond "Submenu Not Found".
+    msubmenu=privacymask` de l'outil hik_control.py repond "Submenu Not Found".
   - Dahua (domes SD) : `configManager.cgi name=PrivacyMasking`, 24
     emplacements `[canal][i]` sans interrupteur global ; seuls les
     emplacements dessines (Rect / Polygon non nuls) sont bascules. Ceux
@@ -188,8 +212,9 @@ generiques sont geres (inventaire, identifiants, usages) mais pas pilotes.
   bascule + journal (`bulk`) + capture de controle. `GET` = progression
   (total, done, changed, unchanged, nomask, failed, failures, by), jauge du
   dialogue qui peut etre ferme pendant la manoeuvre.
-  `hik/hik_control.py` (privacy / privacy-all en ligne de commande) n'est
-  pas utilise par Cockpit pour cela.
+  Logique par marque : `HikCamera.privacy` (hik/drivers). `hik/hik_control.py`
+  (privacy / privacy-all en ligne de commande) n'est pas utilise par Cockpit
+  et ne respecte pas la regle piste : ne pas s'en servir sur le parc.
 - Rappeler un preset change la vue pour TOUS (operateurs SeeTec compris) :
   confirmation dans la page, puis capture automatique 4 s apres.
 

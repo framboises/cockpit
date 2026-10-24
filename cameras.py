@@ -397,7 +397,7 @@ def credentials_for(doc):
 
 def make_hik_camera(doc, channel=None):
     """HikCamera pour un appareil (et un canal). Utilise aussi par la main courante."""
-    from hik.hik_control import HikCamera
+    from hik.drivers import HikCamera
     if is_piste_device(doc):
         raise PisteCameraLocked("Camera de piste : aucun pilotage depuis Cockpit (securite piste)")
     user, password = credentials_for(doc)
@@ -1784,112 +1784,14 @@ def goto_preset(cam_id):
 # 0x0bd8, ONVIF GetMasks = "Action Failed"). Axis : non pilotable. Chaque
 # bascule est tracee dans `cameras_privacy_log`.
 # ---------------------------------------------------------------------------
-PRIVACY_BRANDS = {"hikvision", "hanwha", "dahua", "bosch"}
-
-
-def _privacy_hik(cam, set_to=None):
-    """Canaux ayant au moins une zone dessinee ; set_to : bascule leur interrupteur."""
-    xml = re.sub(r'xmlns="[^"]*"', "", cam._get("/ISAPI/System/Video/inputs/channels").text)
-    ids = [int(i) for i in re.findall(r"<VideoInputChannel[^>]*>\s*<id>(\d+)</id>", xml)] or [cam.channel]
-    chans = []
-    for cid in ids:
-        try:
-            raw = cam._get("/ISAPI/System/Video/inputs/channels/%d/privacyMask" % cid).text
-        except requests.exceptions.HTTPError:
-            continue  # canal sans fonction masque
-        regions = len(re.findall(r"<PrivacyMaskRegion\b", raw))
-        if not regions:
-            continue
-        if set_to is not None:
-            body = re.sub(r"(<enabled>)(true|false)(</enabled>)", r"\g<1>%s\3" % ("true" if set_to else "false"), raw, count=1)
-            cam._put("/ISAPI/System/Video/inputs/channels/%d/privacyMask" % cid, data=body.encode("utf-8"))
-            raw = cam._get("/ISAPI/System/Video/inputs/channels/%d/privacyMask" % cid).text
-        m = re.search(r"<enabled>(true|false)</enabled>", re.sub(r'xmlns="[^"]*"', "", raw))
-        chans.append({"no": cid, "masks": regions, "enabled": bool(m and m.group(1) == "true")})
-    return chans
-
-
-def _privacy_hanwha(cam, set_to=None):
-    ch = cam.channel - 1
-    if set_to is not None:
-        r = cam._get("/stw-cgi/image.cgi?msubmenu=privacy&action=set&Channel=%d&Enable=%s" % (ch, "True" if set_to else "False"))
-        if r.text.lstrip().startswith("NG"):
-            raise RuntimeError("Refus de la camera : %s" % " ".join(r.text.split())[:120])
-    r = cam._get("/stw-cgi/image.cgi?msubmenu=privacy&action=view&Channel=%d" % ch)
-    if r.text.lstrip().startswith("NG"):
-        raise RuntimeError("Masques illisibles : %s" % " ".join(r.text.split())[:120])
-    on = re.search(r"Channel\.%d\.Enable=(True|False)" % ch, r.text, re.I)
-    # Masques listes seulement quand l'interrupteur est actif sur certains firmwares
-    masks = len(re.findall(r"MaskIndex=", r.text))
-    return [{"no": cam.channel, "masks": masks if masks else None, "enabled": bool(on and on.group(1).lower() == "true")}]
-
-
-def _privacy_dahua(cam, set_to=None):
-    ch = cam.channel - 1
-    txt = cam._get("/cgi-bin/configManager.cgi?action=getConfig&name=PrivacyMasking").text
-    slots = {}
-    for k, _field, v in re.findall(r"PrivacyMasking\[%d\]\[(\d+)\]\.((?:Rect|Polygon)\[[\d\]\[]+\])=(-?\d+)" % ch, txt):
-        slots.setdefault(int(k), False)
-        if v != "0":
-            slots[int(k)] = True
-    drawn = sorted(i for i, used in slots.items() if used)
-    if set_to is not None and drawn:
-        params = "&".join("PrivacyMasking[%d][%d].Enable=%s" % (ch, i, "true" if set_to else "false") for i in drawn)
-        r = cam._get("/cgi-bin/configManager.cgi?action=setConfig&" + params)
-        if "OK" not in r.text:
-            raise RuntimeError("Refus de la camera : %s" % r.text.strip()[:120])
-        txt = cam._get("/cgi-bin/configManager.cgi?action=getConfig&name=PrivacyMasking").text
-    on = [i for i in drawn if re.search(r"PrivacyMasking\[%d\]\[%d\]\.Enable=true" % (ch, i), txt)]
-    return [{"no": cam.channel, "masks": len(drawn), "enabled": bool(on)}] if drawn else []
-
-
-BOSCH_PRIV_CMD = "0x0bd8"  # RCP+ CONF_PRIV_MSK_POLY (base de connaissances Bosch / Keenfinity)
-
-
-def _bosch_priv_read(cam):
-    r = cam._get("/rcp.xml?command=%s&type=P_OCTET&direction=READ&num=1" % BOSCH_PRIV_CMD)
-    if re.search(r"<err>", r.text):
-        raise RuntimeError("Masques illisibles (RCP+ %s)" % re.search(r"<err>([^<]*)", r.text).group(1))
-    m = re.search(r"<str>(.*?)</str>", r.text, re.S)
-    data = bytes.fromhex(re.sub(r"\s+", "", m.group(1))) if m else b""
-    recs, i = [], 0
-    while i + 4 <= len(data):  # enregistrements [longueur 2 octets][type 2 octets][contenu]
-        ln, tag = int.from_bytes(data[i:i + 2], "big"), int.from_bytes(data[i + 2:i + 4], "big")
-        if ln < 4:
-            break
-        recs.append((tag, data[i + 4:i + ln]))
-        i += ln
-    return recs
-
-
-def _privacy_bosch(cam, set_to=None):
-    """RCP+ (Digest) : type 0x0002 = un masque (polygone si longueur > 8),
-    type 0x0003 = reglage global des domes, 1er octet 01 = masques desactives
-    (case "Disable Masks" de l'interface web). Seul cet octet est reecrit, le
-    reste de l'enregistrement est conserve (l'exemple Bosch remet a zero le
-    3e octet, qui vaut 01 sur nos AUTODOME). Teste le 21/10/2026 sur
-    10.34.1.36 (AUTODOME 5000i, 7 masques) : bascule visible, retour
-    identique octet pour octet. Fixes Bosch sans 0x0003 : non pilotees."""
-    recs = _bosch_priv_read(cam)
-    drawn = sum(1 for tag, body in recs if tag == 2 and len(body) > 8)
-    glob = [body for tag, body in recs if tag == 3]
-    if not drawn or not glob:
-        return []
-    body = glob[0]
-    if set_to is not None:
-        new = bytes([0 if set_to else 1]) + body[1:]
-        r = cam._get("/rcp.xml?command=%s&type=P_OCTET&direction=WRITE&num=1&payload=0x%04x0003%s"
-                     % (BOSCH_PRIV_CMD, len(new) + 4, new.hex()))
-        if re.search(r"<err>", r.text):
-            raise RuntimeError("Refus de la camera (RCP+ %s)" % re.search(r"<err>([^<]*)", r.text).group(1))
-        body = [b for tag, b in _bosch_priv_read(cam) if tag == 3][0]
-    return [{"no": cam.channel, "masks": drawn, "enabled": body[:1] == b"\x00"}]
+# Marques dont les masques sont pilotables : logique par marque dans les
+# pilotes (hik/drivers, methode privacy), verifiee sur le parc
+from hik.drivers import PRIVACY_BRANDS  # noqa: E402
 
 
 def _privacy_run(doc, set_to=None):
     cam = make_hik_camera(doc)
-    fn = {"hikvision": _privacy_hik, "hanwha": _privacy_hanwha, "dahua": _privacy_dahua, "bosch": _privacy_bosch}[doc.get("brand")]
-    chans = call_camera(doc, lambda: fn(cam, set_to))
+    chans = call_camera(doc, lambda: cam.privacy(set_to))
     known = [c for c in chans if c["masks"] is not False]
     return {
         "supported": True,
