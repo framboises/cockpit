@@ -693,7 +693,9 @@ def capture_camera_list():
     /api/pcorg/cameras d'app.py, droits "user" comme la capture) : actives,
     marque pilotable, profil d'identifiants, jamais de piste. Position GPS lue
     dans la couche carto `cameras` (FeatureCollection, propriete IP) pour
-    proposer les plus proches de la fiche en tete du selecteur."""
+    proposer les plus proches de la fiche en tete du selecteur. `views` :
+    angles de vue dessines des canaux actifs (carte de la page Cameras), pour
+    mettre en tete les cameras dont un canal couvre la fiche (pcorg.js)."""
     _ensure_db()
     pos = {}
     layer = _db["cameras"].find_one({"type": "FeatureCollection"}, {"features.geometry": 1, "features.properties.IP": 1}) or {}
@@ -703,13 +705,20 @@ def capture_camera_list():
         if ip and len(coords) >= 2:
             pos.setdefault(ip, (coords[1], coords[0]))
     out = []
-    for d in _col_cameras.find(_CAPTURE_QUERY, {"name": 1, "ip": 1, "location": 1, "site": 1, "group_path": 1, "model": 1}).sort("name", 1):
+    for d in _col_cameras.find(_CAPTURE_QUERY, {"name": 1, "ip": 1, "location": 1, "site": 1, "group_path": 1,
+                                                "model": 1, "map": 1, "channels": 1}).sort("name", 1):
         if is_piste_device(d):
             continue
         p = pos.get(d.get("ip"))
+        if not p and isinstance(d.get("map"), dict) and d["map"].get("lat") is not None:
+            p = (d["map"]["lat"], d["map"]["lng"])  # placee a la main (page Detection)
+        views = [{"no": c.get("no", 1), "name": c.get("name", ""), "optics": c.get("optics") or "",
+                  "az": c["view"]["az"], "fov": c["view"]["fov"], "range": c["view"]["range"]}
+                 for c in d.get("channels") or []
+                 if c.get("enabled", True) is not False and isinstance(c.get("view"), dict) and c["view"].get("az") is not None]
         out.append({"_id": str(d["_id"]), "name": d.get("name", ""), "ip": d.get("ip", ""),
                     "location": d.get("location") or d.get("site", ""),
-                    "lat": p[0] if p else None, "lon": p[1] if p else None})
+                    "lat": p[0] if p else None, "lon": p[1] if p else None, "views": views})
     return out
 
 

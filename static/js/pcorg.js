@@ -2012,10 +2012,10 @@
       camBtn.appendChild(matIcon("videocam"));
       camBtn.title = "Joindre une capture camera";
       camBtn.addEventListener("click", function () {
-        openCameraPicker(function (camId, camName) {
+        openCameraPicker(function (camId, camName, channel) {
           camBtn.disabled = true;
           showToast("info", "Capture " + camName + " en cours...");
-          apiCall("POST", "/api/pcorg/camera-capture", { cam_id: camId, fiche_id: d.id })
+          apiCall("POST", "/api/pcorg/camera-capture", { cam_id: camId, fiche_id: d.id, channel: channel })
             .then(function (r) {
               camBtn.disabled = false;
               if (r.ok) {
@@ -4894,13 +4894,13 @@
       camBtn.appendChild(matIcon("videocam"));
       camBtn.appendChild(document.createTextNode(" Joindre une capture camera"));
       camBtn.addEventListener("click", function () {
-        openCameraPicker(function (camId, camName) {
+        openCameraPicker(function (camId, camName, channel) {
           camBtn.disabled = true;
           camBtn.textContent = "";
           camBtn.appendChild(matIcon("hourglass_top"));
           camBtn.appendChild(document.createTextNode(" Capture " + camName + "..."));
           // Capture sans fiche (pas encore creee)
-          apiCall("POST", "/api/pcorg/camera-capture", { cam_id: camId })
+          apiCall("POST", "/api/pcorg/camera-capture", { cam_id: camId, channel: channel })
             .then(function (r) {
               camBtn.disabled = false;
               if (r.ok) {
@@ -5888,6 +5888,9 @@
   // est reserve aux admins). Si la fiche a une position, les cameras sont
   // triees de la plus proche a la plus lointaine (GPS de la couche carto
   // `cameras`, par IP) ; les cameras sans position suivent par ordre alpha.
+  // Avant elles : les cameras dont un canal COUVRE la fiche (angle de vue
+  // dessine sur la carte de la page Cameras : direction, ouverture, portee),
+  // capturees sur ce canal. Pour une PTZ, le cone est sa position de repos.
   // Recherche sur nom, numero, IP et lieu, sans accents.
   var _camPickerOverlay = null;
   var _camPickerCallback = null;
@@ -5903,6 +5906,27 @@
     var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
     return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  function camBearing(lat1, lon1, lat2, lon2) {
+    var rad = Math.PI / 180;
+    var y = Math.sin((lon2 - lon1) * rad) * Math.cos(lat2 * rad);
+    var x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) -
+      Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos((lon2 - lon1) * rad);
+    return (Math.atan2(y, x) / rad + 360) % 360;
+  }
+  // Canal qui couvre le point (le plus centre dans son cone), ou null
+  function camCoveringView(cam, o, dist) {
+    if (!o || dist == null || !cam.views || !cam.views.length) return null;
+    var brg = dist < 1 ? null : camBearing(cam.lat, cam.lon, o.lat, o.lon);
+    var best = null;
+    cam.views.forEach(function (v) {
+      if (dist > v.range) return;
+      var off = brg == null ? 0 : Math.abs(((brg - v.az + 540) % 360) - 180);
+      if (v.fov < 360 && off > v.fov / 2) return;
+      var score = v.fov >= 360 ? 1 : off / (v.fov / 2);
+      if (!best || score < best.score) best = { view: v, score: score };
+    });
+    return best ? best.view : null;
   }
   function camFmtDist(m) {
     return m < 1000 ? (Math.round(m / 10) * 10) + " m" : (m / 1000).toFixed(1).replace(".", ",") + " km";
@@ -6005,19 +6029,23 @@
     var terms = camNorm(document.getElementById("pcorg-cam-picker-q").value).split(/\s+/).filter(Boolean);
     var cams = _camPickerCache.map(function (c) {
       var dist = (o && c.lat != null && c.lon != null) ? camDistM(o.lat, o.lon, c.lat, c.lon) : null;
-      return { cam: c, dist: dist, hay: camNorm([c.name, c.ip, c.location].join(" ")) };
+      return { cam: c, dist: dist, sees: camCoveringView(c, o, dist), hay: camNorm([c.name, c.ip, c.location].join(" ")) };
     }).filter(function (x) {
       return terms.every(function (t) { return x.hay.indexOf(t) >= 0; });
     });
+    var seeing = cams.filter(function (x) { return x.sees; }).length;
     cams.sort(function (a, b) {
+      if (!!a.sees !== !!b.sees) return a.sees ? -1 : 1;
       if (a.dist != null && b.dist != null) return a.dist - b.dist;
       if (a.dist != null) return -1;
       if (b.dist != null) return 1;
       return camNorm(a.cam.name) < camNorm(b.cam.name) ? -1 : 1;
     });
-    hint.textContent = o
-      ? "Les plus proches de la fiche en premier"
-      : "Fiche sans position : ordre alphabetique";
+    hint.textContent = !o
+      ? "Fiche sans position : ordre alphabetique"
+      : seeing
+        ? seeing + " camera" + (seeing > 1 ? "s couvrent" : " couvre") + " la fiche (angle de vue), puis les plus proches"
+        : "Les plus proches de la fiche en premier";
 
     list.textContent = "";
     if (!cams.length) {
@@ -6034,7 +6062,8 @@
         var thumb = mkEl("div", "pcorg-cam-picker-thumb");
         var img = mkEl("img", "");
         img.loading = "lazy";
-        img.src = "/api/pcorg/cameras/" + encodeURIComponent(cam._id) + "/snapshot";
+        img.src = "/api/pcorg/cameras/" + encodeURIComponent(cam._id) + "/snapshot" +
+          (x.sees && x.sees.no !== 1 ? "?channel=" + encodeURIComponent(x.sees.no) : "");
         img.alt = "";
         img.addEventListener("error", function () { img.style.display = "none"; placeholder.style.display = ""; });
         img.addEventListener("load", function () { img.style.display = "block"; placeholder.style.display = "none"; });
@@ -6057,6 +6086,15 @@
           dist.textContent = camFmtDist(x.dist);
           info.appendChild(dist);
         }
+        if (x.sees) {
+          var sees = mkEl("span", "pcorg-cam-picker-sees");
+          sees.appendChild(matIcon("visibility"));
+          sees.appendChild(document.createTextNode(
+            (cam.views.length > 1 ? "Canal " + x.sees.no + " couvre la fiche" : "Couvre la fiche") +
+            (x.sees.optics === "mobile" ? " (position de repos)" : "")));
+          sees.title = x.sees.name || "";
+          info.appendChild(sees);
+        }
 
         var arrow = matIcon("chevron_right");
         arrow.style.cssText = "color:var(--muted);font-size:20px;";
@@ -6068,7 +6106,7 @@
         item.addEventListener("click", function () {
           var cb = _camPickerCallback;
           closeCameraPicker();
-          if (cb) cb(cam._id, cam.name);
+          if (cb) cb(cam._id, cam.name, x.sees ? x.sees.no : null);
         });
 
         list.appendChild(item);

@@ -408,6 +408,13 @@ laisser trainer.
   `cameras` (FeatureCollection, propriete `IP`). Vignettes :
   `/api/pcorg/cameras/<id>/snapshot`. Une camera absente de la carte reste
   proposee, apres les autres (ordre alphabetique).
+  Avant les plus proches : les cameras dont un canal actif COUVRE la fiche
+  (`views` de `capture_camera_list` = angles de vue dessines ; point a moins
+  de `range` et dans `fov/2` de `az`, `camCoveringView` de pcorg.js), avec
+  la pastille "Couvre la fiche" (+ "position de repos" pour une PTZ) et la
+  vignette de CE canal ; le clic capture ce canal (`channel` envoye a
+  `/api/pcorg/camera-capture`). Position : couche par IP, sinon position
+  manuelle de la page Detection.
 - `/api/cameras-list` (centrale d'alertes) ne liste que les appareils qui ont
   un `camera_path` (+ chemins LAPI) : sans chemin, aucun evenement n'arrive.
 - Le recepteur (`E:\TITAN\production\PCA\SCRIPTS\ecoutehik2.py`, service
