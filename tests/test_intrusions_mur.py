@@ -64,7 +64,10 @@ def test_en_cours_a_traiter_et_comptes(db):
     assert e["ia"]["label"] == "personne"
     assert [e["camera"] for e in d["a_traiter"]] == ["Parking Bleu"]
     assert d["a_traiter"][0]["type"] == "vehicle"
-    assert d["derniere"]["camera"] == "Parking Bleu"
+    # Derniere intrusion du mur calme : la plus recente, ecartee comprise
+    # (l'oiseau de Tribune Nord), affichee avec sa vraie nature
+    assert d["derniere"]["camera"] == "Tribune Nord"
+    assert d["derniere"]["nature"]["label"] == "oiseau" and d["derniere"]["nature"]["fausse"]
     assert d["totaux"] == {"intrusions": 3, "human": 2, "vehicle": 1, "a_traiter": 2,
                            "filtrees": 1, "hors_planning": 1}
     assert d["par_heure"][20] == 2 and d["par_heure"][19] == 1  # heures de Paris (20:58, 20:20, 19:30)
@@ -183,3 +186,30 @@ def test_intrusion_de_test_sur_le_mur(db, monkeypatch):
     # Fini apres TEST_MUR_S
     assert D.etat_mur(db, datetime.now(timezone.utc) + timedelta(seconds=D.TEST_MUR_S + 1))["en_cours"] == []
     assert A.app.test_client().post("/api/detection/test-mur", json={"camera_id": "x"}).status_code == 404
+
+
+def test_derniere_intrusion_avec_sa_vraie_nature(db):
+    # Camera "pieton", IA sur le cadre orange : oiseau. Ecartee (filtree) :
+    # jamais en cours ni a traiter, mais gardee comme derniere intrusion
+    # du mur calme, affichee OISEAU
+    cam = _camera(db, "Porte Houx")
+    oiseau = {"status": "filtered", "photo": "intrusions/b.jpg", "guess": [{"label": "oiseau", "p": 0.81}]}
+    _intrusion(db, cam, "Porte Houx", 10, 500, ai=oiseau,
+               photos=[{"photo": "intrusions/b.jpg", "rect": {"x": 0.3, "y": 0.2, "w": 0.05, "h": 0.1},
+                        "ai": {"guess": [{"label": "oiseau", "p": 0.81}], "detections": []}}])
+    d = D.etat_mur(db, MAINTENANT)
+    assert d["en_cours"] == [] and d["a_traiter"] == []
+    n = d["derniere"]["nature"]
+    assert (n["label"], n["mot"], n["source"], n["fausse"]) == ("oiseau", "Oiseau", "ia", True)
+    # L'avis de l'operateur l'emporte sur l'IA
+    db.hik_intrusions.update_one({}, {"$set": {"ai_vote": {"vote": "down", "truth": "grillage"}}})
+    n = D.etat_mur(db, MAINTENANT)["derniere"]["nature"]
+    assert (n["label"], n["source"]) == ("grillage", "operateur")
+    # Vraie personne vue par l'IA : pas une fausse alerte
+    db.hik_intrusions.delete_many({})
+    _intrusion(db, cam, "Porte Houx", 10, 500, ai={"status": "confirmed", "photo": "intrusions/b.jpg"},
+               photos=[{"photo": "intrusions/b.jpg", "rect": {"x": 0.3, "y": 0.2, "w": 0.05, "h": 0.1},
+                        "ai": {"detections": [{"category": "personne", "conf": 0.9,
+                                               "box": {"x": 0.3, "y": 0.2, "w": 0.05, "h": 0.1}}]}}])
+    n = D.etat_mur(db, MAINTENANT)["a_traiter"][0]["nature"]
+    assert (n["label"], n["fausse"]) == ("personne", False)

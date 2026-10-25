@@ -2376,6 +2376,37 @@
         });
         $("dt-detail-close").addEventListener("click", closeDetail);
         $("dt-edit-btn").addEventListener("click", function () { setEdit(!S.edit); });
+        // Tester le mur TV : menu des cameras de detection (devices())
+        $("dt-testmur-btn").addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            var menu = $("dt-testmur-menu"), liste = $("dt-testmur-liste");
+            var ouvrir = menu.hidden;
+            menu.hidden = !ouvrir;
+            this.setAttribute("aria-expanded", ouvrir ? "true" : "false");
+            if (!ouvrir) return;
+            liste.textContent = "";
+            var cams = devices().filter(function (dv) {
+                return dv.channels.some(function (c) { return (c.modes || []).indexOf("alerte") >= 0; });
+            });
+            if (!cams.length) liste.appendChild(el("p", "dt-help", "Aucune camera de detection d'intrusion."));
+            cams.forEach(function (dv) {
+                var b = el("button", "dt-testmur-cam"); b.type = "button";
+                b.appendChild(icon("videocam"));
+                b.appendChild(document.createTextNode(dv.name));
+                b.addEventListener("click", function () {
+                    menu.hidden = true;
+                    send("POST", "/api/detection/test-mur", { camera_id: dv.id }).then(function (r) {
+                        toast("success", "Intrusion de test sur le mur TV pendant " + r.duree_s + " s : " + dv.name +
+                            (r.photo ? " (derniere photo de la camera)" : " (pas encore de photo pour cette camera)"));
+                    }).catch(function (e) { toast("error", e.message); });
+                });
+                liste.appendChild(b);
+            });
+        });
+        document.addEventListener("click", function (ev) {
+            var m = $("dt-testmur-menu");
+            if (!m.hidden && !m.contains(ev.target)) { m.hidden = true; $("dt-testmur-btn").setAttribute("aria-expanded", "false"); }
+        });
         $("dt-config-close").addEventListener("click", function () { setEdit(false); });
         $("dt-lightbox").addEventListener("click", closeLightbox);
         document.addEventListener("keydown", function (e) {

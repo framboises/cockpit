@@ -1210,6 +1210,45 @@ def _mur_episode(ep, zones, now):
     }
 
 
+# Nature de la cible pour le mur : mot affiche (pastille)
+NATURE_MOT = {"personne": "Piéton", "vehicule": "Véhicule", "velo": "Vélo", "animal": "Animal",
+              "oiseau": "Oiseau", "panneau": "Panneau", "branche": "Branche", "reflet": "Reflet",
+              "sol": "Sol / ombre", "grillage": "Grillage", "rien": "Rien"}
+_CAMERA_NATURE = {"human": "personne", "vehicle": "vehicule"}
+
+
+def _natures(db, items):
+    """Ajoute `nature` aux intrusions affichees : ce qu'est VRAIMENT la cible,
+    par ordre de foi : reponse de l'operateur (ai_vote.truth), reponse de
+    l'IA sur le cadre orange (_ai_answer de la photo qui a decide), sinon ce
+    que la camera a cru voir. `fausse` : ni personne, ni vehicule, ni velo
+    (une camera "pieton" qui est un oiseau). Une seule lecture des
+    intrusions affichees (photos completes), pas de toute la periode."""
+    ids = [_oid(it["id"]) for it in items if it and _oid(it["id"])]
+    if not ids:
+        return
+    docs = {str(d["_id"]): d for d in db["hik_intrusions"].find(
+        {"_id": {"$in": ids}}, {"ai": 1, "ai_vote": 1, "photos.photo": 1, "photos.rect": 1, "photos.ai": 1})}
+    for it in items:
+        d = docs.get(it["id"]) if it else None
+        if d is None:
+            continue
+        pub = _pub_ai(d) or {}
+        ans = pub.get("answer") or {}
+        if pub.get("truth"):
+            label, source, p = pub["truth"], "operateur", None
+        elif ans.get("label"):
+            label, source, p = ans["label"], "ia", ans.get("p")
+        elif pub.get("status") == "filtered" and pub.get("label"):
+            # Ecartee sans reponse par photo : l'etiquette de l'IA (SigLIP)
+            label, source, p = pub["label"], "ia", pub.get("conf")
+        else:
+            label, source, p = _CAMERA_NATURE.get(it["type"], ""), "camera", None
+        it["nature"] = {"label": label, "mot": NATURE_MOT.get(label, label or "Cible"), "source": source,
+                        "p": round(p, 2) if isinstance(p, (int, float)) else None,
+                        "fausse": bool(label) and label not in ("personne", "vehicule", "velo")}
+
+
 def etat_mur(db, now=None):
     """Tout ce que le mur affiche, en un appel (rafraichi toutes les 5 s).
 
@@ -1238,6 +1277,10 @@ def etat_mur(db, now=None):
         pt = portee(ep)
         if pt == "ecartee":
             tot["filtrees"] += du_jour
+            # Garde la "derniere intrusion" du mur calme, avec sa VRAIE nature
+            # (oiseau...) : jamais en cours, jamais a traiter
+            if derniere is None:
+                derniere = _mur_episode(ep, zones, now)
             continue
         item = None
         # Douteuse (filtree, mais SigLIP voit une personne) : a traiter seulement
@@ -1263,6 +1306,7 @@ def etat_mur(db, now=None):
         if derniere is None and not actif:
             derniere = item or _mur_episode(ep, zones, now)
 
+    _natures(db, en_cours + a_traiter + ([derniere] if derniere else []))
     tests = _tests_mur(db, zones, now)
     en_cours = tests + en_cours
     for t in tests:

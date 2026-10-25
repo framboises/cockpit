@@ -118,6 +118,9 @@
   .infos .depuis{grid-row:1 / span 2; grid-column:2; text-align:right}
   .infos .depuis .val{font-size:var(--t-geant); font-weight:900; line-height:1}
   .type{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:99px; font-weight:800; color:#0b1220; white-space:nowrap}
+  .type.faux{background:var(--muted-2); color:#f1f5f9}
+  .type .src{font-size:0.62em; font-weight:700; opacity:0.8; margin-left:0.35em}
+  .camnote{color:var(--muted); font-size:0.85em; white-space:nowrap}
   .type.human{background:var(--pieton)} .type.vehicle{background:var(--vehicule)} .type.other{background:var(--muted)}
   .zone{display:inline-flex; align-items:center; gap:0.3vw; white-space:nowrap; flex:0 0 auto}
   .infos .ia{color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
@@ -257,6 +260,30 @@
     return p;
   }
 
+  // Ce qu'est VRAIMENT la cible (detection._natures) : reponse de
+  // l'operateur, sinon de l'IA sur le cadre orange, sinon la camera. Un
+  // "pieton" de la camera qui est un oiseau s'affiche OISEAU, en gris.
+  var NATURE_ICO = { personne: "directions_walk", vehicule: "directions_car", velo: "pedal_bike", animal: "pets",
+                     oiseau: "flutter_dash", panneau: "signpost", branche: "park", reflet: "flare", sol: "texture",
+                     grillage: "fence", rien: "do_not_disturb_on" };
+  var NATURE_CLS = { personne: "human", vehicule: "vehicle", velo: "human" };
+  function pastilleNature(e) {
+    var n = e.nature;
+    if (!n || n.source === "camera" || !n.label) return pastilleType(e.type);
+    var p = el("span", "type " + (n.fausse ? "faux" : (NATURE_CLS[n.label] || "other")));
+    p.appendChild(ico(NATURE_ICO[n.label] || "help"));
+    p.appendChild(document.createTextNode(n.mot));
+    p.appendChild(el("small", "src", n.source === "operateur" ? "opérateur"
+      : "IA" + (n.p != null ? " " + Math.round(n.p * 100) + " %" : "")));
+    return p;
+  }
+  // "camera : pieton" quand l'IA ou l'operateur dit autre chose
+  function noteCamera(e) {
+    var n = e.nature;
+    if (!n || !n.fausse) return null;
+    return el("span", "camnote", "caméra : " + (TYPES[e.type] || TYPES.other).mot.toLowerCase());
+  }
+
   /* ---------------- carte ---------------- */
   function initCarte() {
     // Zoom fractionnaire : la carte serre au plus pres les cameras (un zoom
@@ -367,7 +394,7 @@
     return s;
   }
 
-  function zoom(url, rect, type) {
+  function zoom(url, rect, type, nature) {
     var z = el("div", "zoom");
     if (!url || !rect) return z;
     var im = new Image(); im.alt = "";
@@ -377,7 +404,8 @@
       im.style.left = (-r.x / r.w * 100) + "%";
       im.style.top = (-r.y / r.h * 100) + "%";
       var b = el("div", "cadre"); placerCadre(b, rect, r); z.appendChild(b);
-      var t = el("div", "tag"); t.appendChild(ico("zoom_in")); t.appendChild(document.createTextNode(" " + (TYPES[type] || TYPES.other).mot));
+      var t = el("div", "tag"); t.appendChild(ico("zoom_in"));
+      t.appendChild(document.createTextNode(" " + (nature && nature.source !== "camera" && nature.mot ? nature.mot : (TYPES[type] || TYPES.other).mot)));
       z.appendChild(t);
     };
     im.src = url;
@@ -394,7 +422,7 @@
     var rect = enCours && e.photo_der ? e.rect_der : e.rect;
     var ph = el("div", "photos");
     ph.appendChild(scene(url, rect));
-    ph.appendChild(zoom(url, rect, e.type));
+    ph.appendChild(zoom(url, rect, e.type, e.nature));
     if (!rect) ph.style.gridTemplateColumns = "1fr";
     une.appendChild(ph);
 
@@ -410,15 +438,15 @@
     dep.appendChild(val);
     inf.appendChild(dep);
     var sous = el("div", "sous");
-    sous.appendChild(pastilleType(e.type));
+    sous.appendChild(pastilleNature(e));
+    var cn = noteCamera(e);
+    if (cn) sous.appendChild(cn);
     e.zones.forEach(function (z) {
       var zz = el("span", "zone une-ligne"); var i = el("i"); i.style.background = z.couleur;
       zz.appendChild(i); zz.appendChild(document.createTextNode(z.nom)); sous.appendChild(zz);
     });
-    if (e.ia && e.ia.statut === "confirmed" && e.ia.label) {
-      var ia = el("span", "ia"); ia.title = e.ia.label + (e.ia.conf != null ? " " + Math.round(e.ia.conf * 100) + " %" : "");
-      ia.appendChild(ico("verified")); ia.appendChild(document.createTextNode(" IA"));
-      sous.appendChild(ia);
+    if (!enCours && e.nature && e.nature.fausse) {
+      sous.appendChild(el("span", "camnote", "fausse alerte"));
     } else if (!enCours && e.statut === "new") {
       sous.appendChild(el("span", "", "non traitée"));
     }
@@ -435,7 +463,7 @@
     } else {
       vig.appendChild(ico("no_photography"));
     }
-    if (cls === "vignette") vig.appendChild(pastilleType(e.type));
+    if (cls === "vignette") vig.appendChild(pastilleNature(e));
     v.appendChild(vig);
     var t = el("div", "t");
     if (cls === "vignette") {
@@ -641,14 +669,15 @@
     var url = e.photo_der || e.photo, rect = e.photo_der ? e.rect_der : e.rect;
     var ph = el("div", "photos");
     ph.appendChild(scene(url, rect));
-    ph.appendChild(zoom(url, rect, e.type));
+    ph.appendChild(zoom(url, rect, e.type, e.nature));
     if (!rect) ph.style.gridTemplateColumns = "1fr";
     pl.appendChild(ph);
     var pd = el("div", "pied-plein");
-    pd.appendChild(pastilleType(e.type));
+    pd.appendChild(pastilleNature(e));
+    var cn2 = noteCamera(e);
+    if (cn2) pd.appendChild(cn2);
     if (e.canal && e.canal !== e.camera) pd.appendChild(el("span", "", e.canal));
     if (e.test) pd.appendChild(el("span", "", "Exercice : aucune alerte réelle" + (e.par ? " (lancé par " + e.par + ")" : "")));
-    else if (e.ia && e.ia.statut === "confirmed" && e.ia.label) pd.appendChild(el("span", "", "Vérifiée par l'IA : " + e.ia.label));
     pd.appendChild(el("span", "reste", ""));
     pl.appendChild(pd);
     pl.appendChild(el("div", "barre"));

@@ -69,6 +69,16 @@
       <button class="dt-icon-btn dt-only-phone" id="dt-refresh-btn" type="button" title="Actualiser" aria-label="Actualiser">
         <span class="material-symbols-outlined">refresh</span>
       </button>
+      <div class="dt-testmur">
+        <button class="dt-btn" id="dt-testmur-btn" type="button" title="Envoyer une fausse intrusion de 90 s sur le mur TV /intrusions-mur (aucune alerte, rien dans la liste)" aria-haspopup="true" aria-expanded="false">
+          <span class="material-symbols-outlined">connected_tv</span><span class="dt-btn-label">Tester le mur TV</span>
+        </button>
+        <div class="dt-testmur-menu" id="dt-testmur-menu" hidden>
+          <div class="dt-testmur-tete">Simuler une intrusion sur quelle camera ?</div>
+          <div id="dt-testmur-liste"></div>
+          <a href="/intrusions-mur" target="_blank" rel="noopener" class="dt-testmur-lien">Ouvrir le mur TV</a>
+        </div>
+      </div>
       <button class="dt-btn ia-only-intrusions" id="dt-edit-btn" type="button" title="Placer les cameras et dessiner les zones">
         <span class="material-symbols-outlined">edit_location_alt</span><span class="dt-btn-label">Configurer</span>
       </button>
