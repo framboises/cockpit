@@ -32,6 +32,10 @@
         vehicle: { label: "Vehicule", icon: "directions_car", color: "#3b82f6", cls: "dt-b-vehicle" },
         other: { label: "Autre", icon: "help", color: "#94a3b8", cls: "dt-b-other" },
     };
+    // Cadre de la cible signalee par la camera : TOUJOURS orange, quel que
+    // soit le type (les questions d'avis parlent du "cadre orange" ; il etait
+    // bleu pour un vehicule)
+    var CIBLE_COLOR = "#f97316";
     var STATUS = { "new": "Nouvelle", seen: "Vue", closed: "Cloturee" };
     // Etiquette du cadre de la cible sur la photo
     var BOX_LABEL = { human: "personne", vehicle: "vehicule" };
@@ -919,7 +923,10 @@
     function truthPicker(ep) {
         var ai = ep.ai || {};
         var wrap = el("div", "dt-ai-vote");
-        wrap.appendChild(el("span", "dt-ai-vote-q", ep.photos && ep.photos.length > 1
+        var dp = (ep.photos || []).filter(function (p) { return ai.photo && p.photo === ai.photo; })[0] || (ep.photos || [])[0];
+        if (dp && !dp.rect) {
+            wrap.appendChild(el("span", "dt-ai-vote-q", "La camera n'a pas indique ou etait la cible sur cette photo : qu'est-ce qui a declenche l'alerte ? Clique la bonne reponse : ca entraine l'IA."));
+        } else wrap.appendChild(el("span", "dt-ai-vote-q", ep.photos && ep.photos.length > 1
             ? "Pour l'intrusion : dans le cadre orange de la photo qui a declenche l'alerte" + decisionPhotoNo(ep) +
               ", c'est quoi ? Chaque photo a aussi sa propre reponse, sous le zoom."
             : "Qu'est-ce que la cible signalee (cadre orange) ? Clique la bonne reponse : ca entraine l'IA."));
@@ -987,10 +994,14 @@
         // La question porte sur le cadre ORANGE ; on nomme le cadre IA qui y tombe
         var tgt = targetBox(p);
         var q = el("span", "dt-ai-vote-q");
-        q.appendChild(document.createTextNode("Dans le "));
-        q.appendChild(el("b", "dt-q-orange", "cadre orange"));
-        q.appendChild(document.createTextNode(" (cible de la camera)" + (tgt ? ", = cadre IA " + tgt.n : "") + ", c'est quoi ? " +
+        if (!p.rect) q.appendChild(document.createTextNode("Pas de cadre de la camera sur cette photo : qu'est-ce qu'on y voit ? " +
             (g.photos.length > 1 ? "(" + n + " / " + g.photos.length + " photos repondues)" : "")));
+        else {
+            q.appendChild(document.createTextNode("Dans le "));
+            q.appendChild(el("b", "dt-q-orange", "cadre orange"));
+            q.appendChild(document.createTextNode(" (cible de la camera)" + (tgt ? ", = cadre IA " + tgt.n : "") + ", c'est quoi ? " +
+                (g.photos.length > 1 ? "(" + n + " / " + g.photos.length + " photos repondues)" : "")));
+        }
         wrap.appendChild(q);
         wrap.appendChild(truthRow(p.ai, p.answer, t.truth, "Retirer ma reponse", function (lab, on) {
             sendPhotoTruth(g, p, idx, on ? null : lab, on ? null : t.note);
@@ -1172,7 +1183,7 @@
             var bx = el("div", "dt-box" + (p.rect.y < 0.06 ? " tag-inside" : ""));
             bx.style.left = (p.rect.x * 100) + "%"; bx.style.top = (p.rect.y * 100) + "%";
             bx.style.width = (p.rect.w * 100) + "%"; bx.style.height = (p.rect.h * 100) + "%";
-            bx.style.setProperty("--bc", (TYPE[p.type] || TYPE.other).color);
+            bx.style.setProperty("--bc", CIBLE_COLOR);
             bx.appendChild(boxTag(p));
             wrap.appendChild(bx);
         }
@@ -1219,7 +1230,7 @@
             var bx = el("div", "dt-box");
             bx.style.left = ((p.rect.x - r.x) / r.w * 100) + "%"; bx.style.top = ((p.rect.y - r.y) / r.h * 100) + "%";
             bx.style.width = (p.rect.w / r.w * 100) + "%"; bx.style.height = (p.rect.h / r.h * 100) + "%";
-            bx.style.setProperty("--bc", (TYPE[p.type] || TYPE.other).color);
+            bx.style.setProperty("--bc", CIBLE_COLOR);
             bx.appendChild(boxTag(p));
             if ((p.rect.y - r.y) / r.h < 0.08) bx.classList.add("tag-inside");
             z.appendChild(bx);

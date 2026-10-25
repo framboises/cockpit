@@ -189,6 +189,11 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   (anciens avis, "Oui a tout" de la galerie). Galerie : 3 propositions +
   personne / vehicule + "Autre..." (ouvre la fiche). Seul le cadre orange
   compte : les vehicules gares vus par l'IA autour ne sont que du decor.
+- CADRE DE LA CAMERA TOUJOURS ORANGE (`CIBLE_COLOR`, 25/10/2026) : il
+  prenait la couleur du type, BLEU pour un vehicule, alors que les questions
+  d'avis parlent du "cadre orange" ; les cadres IA (pointilles) gardent leur
+  couleur (vehicule bleu). Photo sans `rect` : la question ne parle plus du
+  cadre orange.
 - "A verifier" (badge orange, `aiDoubt`) : filtree alors que SigLIP voit une
   personne / un vehicule >= 0,5. Jamais "fausse alerte probable" dans ce cas.
 - ECARTEE PAR L'IA (25/10/2026, `detection.portee`) : filtree sans doute
