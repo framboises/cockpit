@@ -107,6 +107,29 @@ class TestAnalyse:
         e = P.analyser_porte("PORTE EST", p, T, {}, None, True, {"PDA.12"}, avec_series=False)
         assert not e["pda_renfort"] and e["uam"] == ["PDA.12"]
 
+    def test_accueil_des_tripodes_affiche_hors_charge(self):
+        # 4 tripodes ouverts, 1 agent d'accueil (tient 3 tripodes) : 1 sans
+        # accueil ; la charge reste celle de la securite (2 agents)
+        devs = {"TRI-%d" % i: (30, 0, "tripode") for i in range(1, 5)}
+        p = self._flux(120, 0, devs)
+        slot = {datetime(2026, 5, 10, 9, 30): 2, datetime(2026, 5, 10, 9, 0): 2}
+        accueil = {"PORTE EST": {datetime(2026, 5, 10, 9, 30): 1, datetime(2026, 5, 10, 9, 0): 1}}
+        sans = P.analyser_porte("PORTE EST", p, T, {"PORTE EST": slot}, None, True, set(), avec_series=False)
+        e = P.analyser_porte("PORTE EST", p, T, {"PORTE EST": slot}, None, True, set(), avec_series=False,
+                             accueil=accueil)
+        assert e["capacite"]["agents_accueil"] == 1 and e["capacite"]["tripodes_tenus"] == 3
+        assert e["tripodes_sans_accueil"] == 1
+        assert e["charge"] == sans["charge"] and e["niveau"] == sans["niveau"]
+        assert sans["tripodes_sans_accueil"] == 0 and sans["capacite"]["agents_accueil"] is None
+
+    def test_poste_d_accueil_aux_tripodes(self):
+        import door_security as D
+        tri = {"positioning": "En arrière des tripodes, en intérieur site."}
+        assert D._is_tripode_accueil({"affectation": "Porte Nord - Accès Piétons"}, tri)
+        assert not D._is_tripode_accueil({"affectation": "Porte Nord piétons - Chef de Poste"}, tri)
+        assert not D._is_tripode_accueil({"affectation": "Porte Est - Chef de poste"}, {"positioning": "Au niveau de la porte Est."})
+        assert D._is_tripode_accueil({"affectation": "Porte X"}, {"positioning": "", "mission_tripodes": "Aider au passage"})
+
     def test_n1_tous_sens_ne_prevoit_rien(self):
         p = self._flux(100, 0, {"TRI-1": (100, 0, "tripode")})
         n1 = {T - timedelta(minutes=15): [1000, 0], T: [3000, 0], T + timedelta(minutes=15): [3000, 0],

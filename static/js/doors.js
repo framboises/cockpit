@@ -196,6 +196,7 @@
     var nom = el("div", "nom", p.porte);
     if (NIVEAU_MOT[p.niveau]) nom.appendChild(el("span", "badge " + p.niveau, NIVEAU_MOT[p.niveau]));
     if (p.pda_renfort) nom.appendChild(el("span", "badge info", "PDA renfort"));
+    if (p.tripodes_sans_accueil) nom.appendChild(el("span", "badge vigilance", p.tripodes_sans_accueil + " tripode(s) sans accueil"));
     if (p.uam && p.uam.length) nom.appendChild(el("span", "badge info", "UAM"));
     if (p.calme && !p.fermee) nom.appendChild(el("span", "badge info", "calme"));
     g.appendChild(nom);
@@ -203,6 +204,7 @@
     var a = p.appareils;
     inf.appendChild(txtB("app. ", (a.entree + a.deux_sens) + "E / " + (a.sortie + a.deux_sens) + "S"));
     if (p.capacite.agents) inf.appendChild(txtB("sécu ", p.capacite.agents + " ag."));
+    if (p.capacite.agents_accueil) inf.appendChild(txtB("accueil ", p.capacite.agents_accueil + " ag."));
     if (p.refus_pct !== null && p.refus_pct >= 5) inf.appendChild(txtB("refus ", p.refus_pct + " %"));
     if (p.fiches && p.fiches.length) inf.appendChild(txtB("fiches ", String(p.fiches.length)));
     if (p.fermee && p.derniere_activite) inf.appendChild(el("span", null, "dernier passage " + p.derniere_activite));
@@ -299,6 +301,13 @@
     if (p.capacite.securite) {
       k.appendChild(dkpi("Charge sécurité", pct(p.charge.securite), null,
         p.capacite.agents + " agents prévus = " + fmt(p.capacite.securite) + "/h", couleurCharge(p.charge.securite)));
+    }
+    if (p.capacite.agents_accueil || p.tripodes_sans_accueil) {
+      // Affiche seulement : la charge reste celle de la securite
+      var nt = p.appareils.tripodes;
+      k.appendChild(dkpi("Accueil tripodes", String(p.capacite.agents_accueil || 0), "agents",
+        "hors chef · tient " + (p.capacite.tripodes_tenus || 0) + " tripodes, " + nt + " ouvert(s)",
+        p.tripodes_sans_accueil ? NIVEAU_COUL.vigilance : null));
     }
     k.appendChild(dkpi("Appareils entrée", pct(p.charge.scan_entree), null,
       "capacité " + fmt(p.capacite.scan_entree) + "/h", couleurCharge(p.charge.scan_entree)));
@@ -626,7 +635,7 @@
     var jour = b.jours.filter(function (j) { return j.jour === bilanJour; })[0];
     if (!jour) return;
     var cols = ["Porte", "Entrées", "Sorties", "Véhicules", "Pic entrée", "Pic sortie", "Modes", "Charge sécu max",
-                "Saturation", "Agents max", "PDA renfort", "Refus"];
+                "Saturation", "Agents sécu max", "Accueil tripodes max", "PDA renfort", "Refus"];
     var tr = el("tr");
     cols.forEach(function (c) { tr.appendChild(el("th", null, c)); });
     t.appendChild(tr);
@@ -655,13 +664,15 @@
       if (r.minutes_saturation) sat.style.color = NIVEAU_COUL.saturation;
       l.appendChild(sat);
       l.appendChild(el("td", null, r.agents_max ? String(r.agents_max) : "--"));
+      l.appendChild(el("td", null, r.accueil_max ? String(r.accueil_max) : "--"));
       l.appendChild(el("td", null, r.pda_renfort_min ? dureeTxt(r.pda_renfort_min) : "--"));
       l.appendChild(el("td", null, r.refus_pct === null ? "--" : r.refus_pct + " %"));
       t.appendChild(l);
     });
     $("bilan-note").textContent = "Débits de pic en passages/h sur un quart d'heure. Charge sécurité = entrées de personnes face aux agents prévus au planning × " +
       b.seuils.agent_h + "/h ; « saturation » = temps passé au-dessus de 100 %. Les sorties sont une borne basse à l'exode (contrôle souvent levé)." +
-      (b.securite ? "" : " Aucun planning sécurité pour cette édition.");
+      (b.securite ? "" : " Aucun planning sécurité pour cette édition.") +
+      " Accueil tripodes = agents d'accueil positionnés aux tripodes (hors chef de poste), un agent tient 3 tripodes ; affiché seulement, hors charge.";
   }
   function cellPic(v, a) {
     var c = el("td");

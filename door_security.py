@@ -25,6 +25,13 @@ table codee en dur.
 Seuls les postes SECURITE PIETONS comptent : un poste d'acces vehicules ne
 palpe pas les spectateurs.
 
+ACCUEIL AUX TRIPODES (affiche, jamais dans la charge, choix de
+l'exploitation 25/10/2026) : postes ACCUEIL de la bible positionnes aux
+tripodes ("En arriere des tripodes"), HORS chef de poste, agents prevus
+`accueil_surete = "A"` du planning. Un agent d'accueil tient
+ACCUEIL_TRIPODES_PAR_AGENT tripodes : au-dela, des tripodes ouverts sont
+sans accueil.
+
 Module pur : `db` en argument, aucun import Flask.
 """
 
@@ -41,6 +48,7 @@ from scan_staffing import calendar_collection_name
 logger = logging.getLogger(__name__)
 
 AGENT_RATE_H = 350  # personnes / heure / agent de palpation (valeur terrain)
+ACCUEIL_TRIPODES_PAR_AGENT = 3  # un agent d'accueil tient 3 tripodes (exploitation)
 
 # Mots qui ne distinguent pas une porte d'une autre (des deux cotes : bible
 # et noms du controle d'acces).
@@ -148,10 +156,49 @@ def load_door_posts(db, event, year, gate_names):
     return out, unmatched
 
 
-def load_security_staffing(db, event, year, posts):
+def _is_tripode_accueil(post, fiche):
+    """Poste d'accueil aux tripodes, hors chef de poste."""
+    aff = norm(post.get("affectation"))
+    if "CHEF" in aff.split():
+        return False
+    fiche = fiche or {}
+    return ("TRIPODE" in norm(fiche.get("positioning")).split() or "TRIPODE" in aff.split()
+            or bool(fiche.get("mission_tripodes")))
+
+
+def load_accueil_posts(db, event, year, gate_names):
+    """{numero de poste: nom de porte} pour l'ACCUEIL aux tripodes (hors chef).
+
+    Meme repli d'annee que load_door_posts (bible de l'edition, sinon la plus
+    recente du meme evenement)."""
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return {}
+    q = {"event": event, "post.metier": "ACCUEIL"}
+    years = sorted({d.get("year") for d in db["bible"].find(q, {"year": 1}) if isinstance(d.get("year"), int)})
+    if not years:
+        return {}
+    use = year if year in years else max([y for y in years if y <= year] or years)
+    out = {}
+    for d in db["bible"].find(dict(q, year=use), {"post": 1, "fiche.positioning": 1, "fiche.mission_tripodes": 1}):
+        p = d.get("post") or {}
+        num = p.get("number")
+        if not isinstance(num, int) or not p.get("active", True):
+            continue
+        if not _is_tripode_accueil(p, d.get("fiche")):
+            continue
+        g = match_gate(p.get("affectation"), gate_names)
+        if g:
+            out[num] = g
+    return out
+
+
+def load_security_staffing(db, event, year, posts, accueil_surete="S"):
     """{porte: {debut de creneau 30 min (Paris naif): agents prevus}}.
 
-    `posts` = {numero: porte} (load_door_posts). Rend {} si le calendrier est
+    `posts` = {numero: porte} (load_door_posts, ou load_accueil_posts avec
+    accueil_surete="A"). Rend {} si le calendrier est
     absent : l'appelant doit alors s'abstenir (jamais une capacite nulle, qui
     se lirait comme une porte saturee en permanence).
     """
@@ -165,7 +212,7 @@ def load_security_staffing(db, event, year, posts):
         logger.warning("door_security : liste des collections illisible", exc_info=True)
         return {}
     out = defaultdict(lambda: defaultdict(int))
-    for d in db[name].find({"accueil_surete": "S"}, {"shiftcode": 1, "donnees_presences": 1}):
+    for d in db[name].find({"accueil_surete": accueil_surete}, {"shiftcode": 1, "donnees_presences": 1}):
         try:
             door = posts.get(int(d.get("shiftcode")))
         except (TypeError, ValueError):

@@ -308,6 +308,26 @@ def staffing_securite(db, event, year, gate_names):
     return staffing
 
 
+_ACCUEIL_CACHE = {}
+
+
+def staffing_accueil(db, event, year, gate_names):
+    """Accueil aux tripodes (hors chef) : {porte: {creneau 30 min: agents}}.
+    AFFICHE seulement, la charge reste celle de la securite."""
+    key = (event, int(year), tuple(sorted(gate_names)))
+    hit = _ACCUEIL_CACHE.get(key)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    try:
+        posts = door_security.load_accueil_posts(db, event, year, gate_names)
+        staffing = door_security.load_security_staffing(db, event, year, posts, accueil_surete="A")
+    except Exception:
+        logger.warning("portes_etat : effectifs accueil illisibles", exc_info=True)
+        staffing = {}
+    _ACCUEIL_CACHE[key] = (time.time(), staffing)
+    return staffing
+
+
 # ---------------------------------------------------------------------------
 # N-1 : la meme porte, l'edition precedente, alignee sur le jour de course
 # ---------------------------------------------------------------------------
@@ -561,7 +581,7 @@ def _arrondi(v, n=0):
 
 
 def analyser_porte(nom, p, end, staffing, n1_serie, tripode_jour, uam_devices,
-                   debut_jour=None, avec_series=True, n1_tous_sens=False):
+                   debut_jour=None, avec_series=True, n1_tous_sens=False, accueil=None):
     """Etat d'une porte a `end` (fin de la derniere tranche complete) et,
     si demande, ses series du jour par quart d'heure."""
     tot, devs = _fenetre(p, end, MODE_FENETRE_MIN)
@@ -583,6 +603,7 @@ def analyser_porte(nom, p, end, staffing, n1_serie, tripode_jour, uam_devices,
     calme = (not fermee) and (e + s) < MIN_PASSAGES_MODE
 
     agents = door_security.agents_at(staffing, nom, end) if staffing else 0
+    agents_accueil = door_security.agents_at(accueil, nom, end) if accueil else 0
     cap_secu = agents * AGENT_RATE_H if agents else None
     charge_secu = _ratio(rate_pe, cap_secu)
     charge_scan_e = _ratio(rate_e, cap_e)
@@ -618,6 +639,7 @@ def analyser_porte(nom, p, end, staffing, n1_serie, tripode_jour, uam_devices,
     scans = e + s + re_ + rs_
     refus_pct = round(100.0 * (re_ + rs_) / scans, 1) if scans else None
     actifs = set(devs)
+    n_trip = sum(1 for cp in actifs if devs[cp][2] == "tripode" and devs[cp][0] + devs[cp][1])
     # Renfort PDA : sur une porte equipee de tripodes ce jour-la, un PDA (hors
     # equipe mobile UAM) scanne -> debordement des tourniquets (scans.md).
     pda_renfort = bool(tripode_jour) and any(
@@ -658,6 +680,10 @@ def analyser_porte(nom, p, end, staffing, n1_serie, tripode_jour, uam_devices,
                                        for cp in actifs if devs[cp][0] + devs[cp][1]),
                                       key=lambda x: x["nom"])},
         "capacite": {"securite": cap_secu, "agents": agents or None,
+                     # Accueil aux tripodes (hors chef) : un agent tient
+                     # ACCUEIL_TRIPODES_PAR_AGENT tripodes ; affiche, hors charge
+                     "agents_accueil": agents_accueil or None,
+                     "tripodes_tenus": agents_accueil * door_security.ACCUEIL_TRIPODES_PAR_AGENT if agents_accueil else None,
                      "scan_entree": round(cap_e) or None, "scan_sortie": round(cap_s) or None},
         "charge": {"entree": _arrondi(charge_e, 2), "securite": _arrondi(charge_secu, 2),
                    "scan_entree": _arrondi(charge_scan_e, 2), "sortie": _arrondi(charge_s, 2),
@@ -668,6 +694,9 @@ def analyser_porte(nom, p, end, staffing, n1_serie, tripode_jour, uam_devices,
                       "sortie": [(h, round(r)) for h, r in prev_s],
                       "pire": dict(pire_prev, charge=round(pire_prev["charge"], 2)) if pire_prev else None},
         "refus_pct": refus_pct,
+        # Plus de tripodes ouverts que l'accueil prevu n'en tient
+        "tripodes_sans_accueil": max(0, n_trip - agents_accueil * door_security.ACCUEIL_TRIPODES_PAR_AGENT)
+        if (accueil and n_trip) else 0,
         "pda_renfort": pda_renfort,
         "uam": uam_now,
         "niveau": niveau,
@@ -771,6 +800,7 @@ def etat(db, event, year, jour=None, at=None, vue="operateur", maintenant=None):
 
     gate_names = raw["gate_names"]
     staffing = staffing_securite(db, event, year, gate_names)
+    accueil = staffing_accueil(db, event, year, gate_names)
     n1, n1_src, n1_year = charger_n1(db, event, year, debut, fin_jour + timedelta(hours=2),
                                      race or _race_label(db, event, year))
 
@@ -785,7 +815,7 @@ def etat(db, event, year, jour=None, at=None, vue="operateur", maintenant=None):
         portes.append(analyser_porte(nom, p, end, staffing, n1.get(norm_porte(nom)),
                                      tripode_jour, raw["uam_devices"], debut,
                                      avec_series=(vue != "tv"),
-                                     n1_tous_sens=(n1_src == "portes_total")))
+                                     n1_tous_sens=(n1_src == "portes_total"), accueil=accueil))
 
     ordre_niveau = {"saturation": 0, "saturation_prevue": 1, "vigilance": 2, "normal": 3}
     portes.sort(key=lambda x: (x["fermee"], ordre_niveau.get(x["niveau"], 9),
@@ -803,6 +833,7 @@ def etat(db, event, year, jour=None, at=None, vue="operateur", maintenant=None):
         "n1": {"annee": n1_year, "source": n1_src,
                "decalage_jours": decalage_n1(race, _race_label(db, event, n1_year)) if n1_year else None},
         "securite": bool(staffing),
+        "accueil": bool(accueil),
         "totaux": _totaux(portes),
         "alertes": alertes(portes),
         "portes": portes,
@@ -918,12 +949,13 @@ def bilan(db, event, year):
         return {"event": event, "year": int(year), "disponible": False,
                 "motif": "aucune donnee de controle d'acces live pour cette edition"}
     staffing = staffing_securite(db, event, year, raw["gate_names"])
+    accueil = staffing_accueil(db, event, year, raw["gate_names"])
     race = raw.get("race_dt")
     jours = defaultdict(lambda: defaultdict(lambda: {
         "e": 0, "s": 0, "ve": 0, "vs": 0, "refus": 0,
         "pic_e": 0, "pic_e_t": None, "pic_s": 0, "pic_s_t": None,
         "modes": defaultdict(int), "charge_max": None, "charge_max_t": None,
-        "min_sature": 0, "pda_renfort_q": 0, "agents_max": 0}))
+        "min_sature": 0, "pda_renfort_q": 0, "agents_max": 0, "accueil_max": 0}))
     for nom, p in raw["portes"].items():
         if p.get("kind") != "porte":
             continue
@@ -958,6 +990,8 @@ def bilan(db, event, year):
             m = mode_de(e, s, n_e + n_es, n_s + n_es)
             if m:
                 j["modes"][m] += 15
+            if accueil:
+                j["accueil_max"] = max(j["accueil_max"], door_security.agents_at(accueil, nom, t))
             ag = door_security.agents_at(staffing, nom, t) if staffing else 0
             if ag:
                 j["agents_max"] = max(j["agents_max"], ag)
@@ -989,6 +1023,7 @@ def bilan(db, event, year):
                 "charge_secu_max_a": j["charge_max_t"],
                 "minutes_saturation": j["min_sature"],
                 "agents_max": j["agents_max"] or None,
+                "accueil_max": j["accueil_max"] or None,
                 "pda_renfort_min": j["pda_renfort_q"] * 15,
             })
         if not rows:
@@ -1001,7 +1036,7 @@ def bilan(db, event, year):
                        "portes": rows})
     return {"event": event, "year": int(year), "disponible": True, "direct": raw["direct"],
             "race": race.isoformat(timespec="minutes") if race else None,
-            "securite": bool(staffing), "jours": sortie,
+            "securite": bool(staffing), "accueil": bool(accueil), "jours": sortie,
             "seuils": {"agent_h": AGENT_RATE_H, "saturation": CHARGE_SATURATION}}
 
 
