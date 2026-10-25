@@ -78,6 +78,11 @@ AGENT_RATE_H = door_security.AGENT_RATE_H
 CHARGE_VIGILANCE = 0.80
 CHARGE_SATURATION = 1.00
 MIN_RATE_ALERTE = 300    # /h : en dessous, jamais d'alerte (nuit, portes calmes)
+# Regle d'exploitation : une porte garde TOUJOURS au moins un appareil dans
+# l'autre sens (en entree, un tripode en sortie, ou un agent PDA sans
+# tripode ; en sortie, un PDA ou un tripode en entree). Lu sur 60 min : un
+# appareil de contre-sens peut rester 15 min sans personne.
+CONTRE_SENS_FENETRE_MIN = 60
 
 # Refus : rafale signalee au-dela de 15 % sur 15 min, avec au moins 20 scans.
 REFUS_ALERTE_PCT = 15.0
@@ -551,6 +556,29 @@ def _fenetre(p, end, minutes):
     return tot, devs
 
 
+def contre_sens(p, end, mode, rate_e, rate_s):
+    """Appareil(s) garde(s) dans l'autre sens que le flux principal.
+
+    Porte en entree : appareils qui ont fait sortir quelqu'un sur les
+    CONTRE_SENS_FENETRE_MIN dernieres minutes, en retenant UN appareil par
+    defaut (le plus oriente vers la sortie) ; porte en sortie : idem en
+    entree. `manquant` : aucun alors que le flux principal depasse
+    MIN_RATE_ALERTE (la regle veut toujours un appareil de contre-sens)."""
+    if mode not in ("entree", "sortie"):
+        return {"sens": None, "appareils": [], "manquant": False}
+    sens = "sortie" if mode == "entree" else "entree"
+    i = 1 if sens == "sortie" else 0
+    _tot, devs = _fenetre(p, end, CONTRE_SENS_FENETRE_MIN)
+    cand = [(cp, v) for cp, v in devs.items() if v[i] > 0]
+    # Le plus oriente vers le contre-sens d'abord ; les appareils mixtes du
+    # flux principal ne comptent qu'a defaut d'un appareil dedie
+    cand.sort(key=lambda kv: -kv[1][i] / float(kv[1][0] + kv[1][1]))
+    dedies = [cp for cp, v in cand if v[i] / float(v[0] + v[1]) >= 0.5]
+    appareils = dedies or [cp for cp, _v in cand[:1]]
+    principal = rate_e if mode == "entree" else rate_s
+    return {"sens": sens, "appareils": appareils, "manquant": not appareils and principal >= MIN_RATE_ALERTE}
+
+
 def _capacites_appareils(devs):
     """(capacite entree, capacite sortie, nb appareils E, S, ES) : chaque
     appareil compte dans un sens au prorata de son flux sur la fenetre."""
@@ -640,6 +668,13 @@ def analyser_porte(nom, p, end, staffing, n1_serie, tripode_jour, uam_devices,
     refus_pct = round(100.0 * (re_ + rs_) / scans, 1) if scans else None
     actifs = set(devs)
     n_trip = sum(1 for cp in actifs if devs[cp][2] == "tripode" and devs[cp][0] + devs[cp][1])
+    contre = contre_sens(p, end, mode, rate_e, rate_s)
+    # Accueil : il tient les tripodes du flux principal ; le tripode garde
+    # dans l'autre sens n'en a pas besoin (10 tripodes, 3 agents = 9 tenus +
+    # 1 en sortie : rien ne manque)
+    n_trip_accueil = max(0, n_trip - sum(1 for cp in contre["appareils"]
+                                         if (devs.get(cp) or [0, 0, ""])[2] == "tripode" and cp in actifs)) \
+        if contre["sens"] == "sortie" else n_trip
     # Renfort PDA : sur une porte equipee de tripodes ce jour-la, un PDA (hors
     # equipe mobile UAM) scanne -> debordement des tourniquets (scans.md).
     pda_renfort = bool(tripode_jour) and any(
@@ -695,8 +730,10 @@ def analyser_porte(nom, p, end, staffing, n1_serie, tripode_jour, uam_devices,
                       "pire": dict(pire_prev, charge=round(pire_prev["charge"], 2)) if pire_prev else None},
         "refus_pct": refus_pct,
         # Plus de tripodes ouverts que l'accueil prevu n'en tient
-        "tripodes_sans_accueil": max(0, n_trip - agents_accueil * door_security.ACCUEIL_TRIPODES_PAR_AGENT)
-        if (accueil and n_trip) else 0,
+        "tripodes_sans_accueil": max(0, n_trip_accueil - agents_accueil * door_security.ACCUEIL_TRIPODES_PAR_AGENT)
+        if (accueil and n_trip_accueil) else 0,
+        "tripodes_flux_principal": n_trip_accueil,
+        "contre_sens": contre,
         "pda_renfort": pda_renfort,
         "uam": uam_now,
         "niveau": niveau,

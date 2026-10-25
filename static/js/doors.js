@@ -197,6 +197,7 @@
     if (NIVEAU_MOT[p.niveau]) nom.appendChild(el("span", "badge " + p.niveau, NIVEAU_MOT[p.niveau]));
     if (p.pda_renfort) nom.appendChild(el("span", "badge info", "PDA renfort"));
     if (p.tripodes_sans_accueil) nom.appendChild(el("span", "badge vigilance", p.tripodes_sans_accueil + " tripode(s) sans accueil"));
+    if (p.contre_sens && p.contre_sens.manquant) nom.appendChild(el("span", "badge vigilance", "rien en " + p.contre_sens.sens));
     if (p.uam && p.uam.length) nom.appendChild(el("span", "badge info", "UAM"));
     if (p.calme && !p.fermee) nom.appendChild(el("span", "badge info", "calme"));
     g.appendChild(nom);
@@ -304,9 +305,10 @@
     }
     if (p.capacite.agents_accueil || p.tripodes_sans_accueil) {
       // Affiche seulement : la charge reste celle de la securite
-      var nt = p.appareils.tripodes;
+      var nt = p.appareils.tripodes, np = p.tripodes_flux_principal;
       k.appendChild(dkpi("Accueil tripodes", String(p.capacite.agents_accueil || 0), "agents",
-        "hors chef · tient " + (p.capacite.tripodes_tenus || 0) + " tripodes, " + nt + " ouvert(s)",
+        "hors chef · tient " + (p.capacite.tripodes_tenus || 0) + " tripodes · " + np + " en " + (p.mode === "sortie" ? "sortie" : "entrée") +
+        (nt > np ? " (+" + (nt - np) + " gardé(s) en sortie)" : ""),
         p.tripodes_sans_accueil ? NIVEAU_COUL.vigilance : null));
     }
     k.appendChild(dkpi("Appareils entrée", pct(p.charge.scan_entree), null,
@@ -393,6 +395,16 @@
 
   function blocAppareils(p) {
     var s = section("Appareils actifs", p.appareils.tripodes + " tripode(s) · " + p.appareils.pda + " PDA");
+    // Regle d'exploitation : toujours au moins un appareil dans l'autre sens
+    var cs = p.contre_sens;
+    if (cs && cs.sens) {
+      var n = el("p", "note", cs.appareils.length
+        ? "Gardé(s) en " + cs.sens + " (60 min) : " + cs.appareils.join(", ")
+        : (cs.manquant ? "Aucun appareil en " + cs.sens + " depuis 60 min alors que la porte débite : la règle veut toujours un tripode ou un PDA dans l'autre sens."
+                       : "Aucun passage en " + cs.sens + " depuis 60 min."));
+      if (cs.manquant) n.style.color = NIVEAU_COUL.vigilance;
+      s.appendChild(n);
+    }
     if (!p.appareils.liste.length) { s.appendChild(el("p", "note", "Aucun appareil actif sur la fenêtre.")); return s; }
     var t = el("table", "mini");
     var th = el("tr");

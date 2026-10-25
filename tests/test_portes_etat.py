@@ -122,6 +122,28 @@ class TestAnalyse:
         assert e["charge"] == sans["charge"] and e["niveau"] == sans["niveau"]
         assert sans["tripodes_sans_accueil"] == 0 and sans["capacite"]["agents_accueil"] is None
 
+    def test_tripode_garde_en_sortie_sans_accueil(self):
+        # 10 tripodes dont 1 garde en sortie, 3 agents d'accueil (9 tenus) :
+        # rien ne manque
+        devs = {"TRI-%d" % i: (30, 0, "tripode") for i in range(1, 10)}
+        devs["TRI-10"] = (0, 6, "tripode")
+        p = self._flux(270, 6, devs)
+        accueil = {"PORTE EST": {datetime(2026, 5, 10, 9, 30): 3, datetime(2026, 5, 10, 9, 0): 3}}
+        e = P.analyser_porte("PORTE EST", p, T, {}, None, True, set(), avec_series=False, accueil=accueil)
+        assert e["mode"] == "entree"
+        assert e["contre_sens"] == {"sens": "sortie", "appareils": ["TRI-10"], "manquant": False}
+        assert e["tripodes_flux_principal"] == 9 and e["tripodes_sans_accueil"] == 0
+
+    def test_aucun_appareil_en_contre_sens(self):
+        # Porte en entree qui debite, aucune sortie depuis 60 min : signale
+        p = self._flux(150, 0, {"TRI-1": (75, 0, "tripode"), "TRI-2": (75, 0, "tripode")})
+        e = P.analyser_porte("PORTE EST", p, T, {}, None, True, set(), avec_series=False)
+        assert e["contre_sens"]["manquant"]
+        # En sortie : au moins un PDA en entree
+        p = self._flux(2, 150, {"PDA.1": (2, 0, "pda"), "TRI-1": (0, 150, "tripode")})
+        e = P.analyser_porte("PORTE EST", p, T, {}, None, True, set(), avec_series=False)
+        assert e["mode"] == "sortie" and e["contre_sens"]["appareils"] == ["PDA.1"]
+
     def test_poste_d_accueil_aux_tripodes(self):
         import door_security as D
         tri = {"positioning": "En arrière des tripodes, en intérieur site."}
