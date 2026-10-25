@@ -924,6 +924,10 @@ def stocker_erreurs(txs, evenement, evenement_clean, cache_titres=None):
         print(f"  {len(ops)} transactions en erreur upsertees dans hsh_erreurs.")
 
 
+# Statuts qui sont des PASSAGES (cf. live_scan_units.ACCEPTED_ERROR_STATUSES).
+STATUTS_PASSAGE = {"0", "107", "133"}
+
+
 def agreger_transactions(txs, evenement, cache_titres=None):
     """Agrege les transactions par checkpoint + tranche de 5 minutes."""
     if cache_titres is None:
@@ -963,6 +967,7 @@ def agreger_transactions(txs, evenement, cache_titres=None):
                 "gate_name": gate_name,
                 "tranche": tranche,
                 "ok": 0, "erreurs": 0, "entrees": 0, "sorties": 0,
+                "entrees_valides": 0, "sorties_valides": 0,
                 "entrees_vehicules": 0, "sorties_vehicules": 0,
                 "entrees_enfants": 0, "sorties_enfants": 0,
                 "entrees_accredites": 0, "sorties_accredites": 0,
@@ -978,6 +983,17 @@ def agreger_transactions(txs, evenement, cache_titres=None):
             b["entrees"] += 1
         elif direction == "Sortie":
             b["sorties"] += 1
+        # `entrees` / `sorties` comptent aussi les scans REFUSES (3 a 7 % du
+        # flux d'une porte) : conserves tels quels pour les lecteurs existants
+        # (live_scan_units retire les refus a partir de hsh_erreurs). Les
+        # passages valides par sens sont comptes a part : statut 0, plus 107
+        # (checkpoint hors ligne) et 133 (entree sans sortie prealable), que le
+        # compteur HSH compte aussi comme des passages.
+        if str(tx.get("status")) in STATUTS_PASSAGE:
+            if direction == "Entree":
+                b["entrees_valides"] += 1
+            elif direction == "Sortie":
+                b["sorties_valides"] += 1
 
         # Compteurs par type de scan
         cat = categoriser_scan(tx.get("utid"), cache_titres, tx.get("upid"))
@@ -1011,6 +1027,8 @@ def agreger_transactions(txs, evenement, cache_titres=None):
                     "erreurs": b["erreurs"],
                     "entrees": b["entrees"],
                     "sorties": b["sorties"],
+                    "entrees_valides": b["entrees_valides"],
+                    "sorties_valides": b["sorties_valides"],
                     "entrees_vehicules": b["entrees_vehicules"],
                     "sorties_vehicules": b["sorties_vehicules"],
                     "entrees_enfants": b["entrees_enfants"],

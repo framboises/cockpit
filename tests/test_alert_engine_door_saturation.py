@@ -397,6 +397,32 @@ class TestHandler:
         d = {"slug": "door-sat", "params": {"capacities": {"Porte Est": 5000}}}
         assert AE.detect_door_saturation_forecast(d, {"now": _now(T0), "db": db}) is None
 
+    def test_capacite_dans_le_sens_surveille(self):
+        # Porte mixte : TRI-A-1 en entree (70 / 5 min = 840/h), TRI-A-2 en
+        # sortie. Seul le tripode d'entree compte : 840/h pour 900/h (93 %).
+        # Avant, les 2 tripodes comptaient (1800/h, 47 %) et rien ne sonnait.
+        docs = []
+        for i in range(12):
+            t = T0 - timedelta(minutes=5 * (12 - i))
+            docs.append(_tx("PORTE EST", "TRI-A-1", t, 70))
+            sortie = _tx("PORTE EST", "TRI-A-2", t, 0)
+            sortie.update({"sorties": 60, "ok": 60})
+            docs.append(sortie)
+        res = AE.detect_door_saturation_forecast(DEF, {"now": _now(T0), "db": _base_db(docs)})
+        assert res and res[0]["actionData"]["capacity"] == 900
+        assert res[0]["actionData"]["method"] == "constate"
+
+    def test_refus_exclus_du_debit(self):
+        # 150 scans / 5 min dont 40 refuses : 110 passages valides = 1320/h,
+        # sous 90 % de 1800/h. Compter les refus (1800/h) faisait sonner.
+        docs = _live_docs("PORTE EST", [150] * 12)
+        for d in docs:
+            d["entrees_valides"] = d["entrees"] - 20
+            d["sorties_valides"] = 0
+            d["erreurs"] = 20
+            d["ok"] = d["entrees"] - 20
+        assert AE.detect_door_saturation_forecast(DEF, {"now": _now(T0), "db": _base_db(docs)}) is None
+
     def test_services_exclus(self):
         db = _base_db(_live_docs("HELPDESK", [150] * 12))
         assert AE.detect_door_saturation_forecast(DEF, {"now": _now(T0), "db": db}) is None

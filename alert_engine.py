@@ -1390,7 +1390,7 @@ def load_n1_door_series(db, event, year_n1, start, end, sens="entrees"):
     [start, end) (heure de Paris naive, deja decalee), ou ({}, None).
 
     1. hsh_archive_tx_<event>_<annee> : meme source que le live (5 min,
-       entrees seules, memes noms de portes) -- existe pour les editions
+       passages valides par sens, memes noms de portes) -- existe pour les editions
        archivees depuis 2026.
     2. historique_controle{type: portes} : horaire, TOUS SENS confondus. Ne
        sert qu'en profil (rapport futur/courant), jamais en valeur absolue.
@@ -1402,14 +1402,18 @@ def load_n1_door_series(db, event, year_n1, start, end, sens="entrees"):
         has_archive = False
     out = {}
     if has_archive:
+        import portes_etat
         for d in db[coll].find({"tranche": {"$gte": start, "$lt": end}},
-                               {"gate_name": 1, "tranche": 1, "entrees": 1, "sorties": 1}):
+                               {"gate_name": 1, "tranche": 1, "entrees": 1, "sorties": 1,
+                                "erreurs": 1, "entrees_valides": 1, "sorties_valides": 1,
+                                "entrees_vehicules": 1, "sorties_vehicules": 1}):
             t = d.get("tranche")
             if not isinstance(t, datetime):
                 continue
-            v = int(d.get("entrees") or 0)
+            p_e, p_s, v_e, v_s, _r_e, _r_s = portes_etat.compter(d)
+            v = p_e + v_e
             if sens == "total":
-                v += int(d.get("sorties") or 0)
+                v += p_s + v_s
             key = _door_norm(d.get("gate_name"))
             out.setdefault(key, {}).setdefault(t.replace(tzinfo=None), 0)
             out[key][t.replace(tzinfo=None)] += v
@@ -1512,7 +1516,9 @@ def detect_door_saturation_forecast(definition, context):
     if coll == "hsh_transactions_agg":
         q["evenement"] = event
     docs = list(db[coll].find(q, {"gate_name": 1, "checkpoint_name": 1, "tranche": 1,
-                                  "entrees": 1, "sorties": 1, "ok": 1, "erreurs": 1}))
+                                  "entrees": 1, "sorties": 1, "ok": 1, "erreurs": 1,
+                                  "entrees_valides": 1, "sorties_valides": 1,
+                                  "entrees_vehicules": 1, "sorties_vehicules": 1}))
     tranches = [d["tranche"] for d in docs if isinstance(d.get("tranche"), datetime)]
     if not tranches:
         return None
@@ -1524,6 +1530,8 @@ def detect_door_saturation_forecast(definition, context):
         return None
     lead = (now_label - end).total_seconds() / 60.0 + window / 2.0
 
+    import portes_etat  # differe : tire live_scan_units, inutile aux autres detecteurs
+
     doors = {}
     for d in docs:
         t = d.get("tranche")
@@ -1534,13 +1542,20 @@ def detect_door_saturation_forecast(definition, context):
         if key in exclude or (only and key not in only):
             continue
         t = t.replace(tzinfo=None)
-        e = doors.setdefault(key, {"name": name, "buckets": {}, "devices": {}, "ok": 0, "err": 0})
-        v = int(d.get("entrees") or 0)
-        if sens == "total":
-            v += int(d.get("sorties") or 0)
+        e = doors.setdefault(key, {"name": name, "buckets": {}, "devices": {}, "dev_flux": {},
+                                   "ok": 0, "err": 0})
+        # Passages VALIDES : `entrees` / `sorties` comptent aussi les refus
+        # (portes_etat.compter : champs du collecteur, sinon prorata).
+        p_e, p_s, v_e, v_s, _r_e, _r_s = portes_etat.compter(d)
+        ent, sor = p_e + v_e, p_s + v_s
+        v = ent + sor if sens == "total" else ent
         e["buckets"][t] = e["buckets"].get(t, 0) + v
         if t >= end - timedelta(minutes=60) and (d.get("ok") or d.get("erreurs")):
-            e["devices"][d.get("checkpoint_name") or "?"] = _device_kind(d.get("checkpoint_name"))
+            cp = d.get("checkpoint_name") or "?"
+            e["devices"][cp] = _device_kind(cp)
+            f = e["dev_flux"].setdefault(cp, [0, 0])
+            f[0] += ent
+            f[1] += sor
         if t >= end - timedelta(minutes=window):
             e["ok"] += int(d.get("ok") or 0)
             e["err"] += int(d.get("erreurs") or 0)
@@ -1592,8 +1607,18 @@ def detect_door_saturation_forecast(definition, context):
                 continue
             cap_src = "param"
         else:
-            capacity = float(sum(dev_cap.get(k, dev_cap.get("autre", 650))
-                                 for k in e["devices"].values()))
+            # Capacite DANS LE SENS SURVEILLE : un appareil compte au prorata
+            # de ses passages en entree sur la derniere heure. Le meme
+            # tripode sert en entree le matin et en sortie le soir ; compter
+            # ceux qui sont en sortie surestimait la capacite d'une porte
+            # mixte. Un appareil actif sans passage valide compte en entier.
+            capacity = 0.0
+            for cp, k in e["devices"].items():
+                c = dev_cap.get(k, dev_cap.get("autre", 650))
+                fe, fs = e["dev_flux"].get(cp, (0, 0))
+                if sens != "total" and fe + fs:
+                    c *= fe / float(fe + fs)
+                capacity += c
             cap_src = "appareils"
             if key in cap_factor:
                 capacity *= cap_factor[key]

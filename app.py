@@ -446,6 +446,7 @@ SUPER_ADMIN_ROLE = "super_admin"
 # n'ecrit jamais (_refuser_ecriture_borne).
 PAGES_AFFICHEUR = frozenset({
     "/meteo-mur", "/api/meteo/mur",        # mur meteo (manager) et sa charge unique
+    "/portes-mur", "/api/portes/etat",     # mur des portes (manager) et son etat
     "/circulation",                         # trafic (manager) ; /alerts et /trafic/all_routes sont en user
     "/", "/doors", "/terrains", "/general_stat",  # deja en user : listees pour le mode cadre
 })
@@ -620,6 +621,7 @@ PAGE_REGISTRY = [
     {"id": "assistant_ia", "label": "Assistant IA",       "icon": "smart_toy",       "role": "manager", "paths": []},
     {"id": "circulation",  "label": "Circulation",        "icon": "moving",          "role": "manager", "paths": ["/circulation"]},
     {"id": "meteo_mur",    "label": "Mur meteo",          "icon": "radar",           "role": "manager", "paths": ["/meteo-mur"]},
+    {"id": "portes_mur",   "label": "Mur portes",         "icon": "door_sliding",    "role": "manager", "paths": ["/portes-mur"]},
     {"id": "pmv",          "label": "PMV",                "icon": "signpost",        "role": "manager", "paths": ["/pmv", "/api/pmv"]},
 ]
 ALL_PAGE_IDS = [p["id"] for p in PAGE_REGISTRY]
@@ -4277,35 +4279,85 @@ def api_terrains_mapping():
 @app.route('/doors', methods=['GET'])
 @role_required("user")
 def doors():
-    event = request.args.get('event')
-    year = request.args.get('year')
-    if not event or not year:
-        return "Missing event or year parameter", 400
+    """Analyse des portes (poste operateur) : toutes les portes actives par
+    mode (entree / mixte / sortie) et l'analyse detaillee d'une porte. Direct,
+    rejeu d'un jour passe et bilan RETEX d'une edition : portes_etat.py."""
+    payload = getattr(request, 'user_payload', {})
+    return render_template("doors.html",
+                           event=request.args.get('event') or "",
+                           year=request.args.get('year') or "",
+                           user_roles=payload.get("roles", []),
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""))
 
-    # Exemple de structure pour les portes avec des placeholders
-    doors_data = [
-        {"id": "door-1", "name": "Porte 1", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
-        {"id": "door-2", "name": "Porte 2", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
-        {"id": "door-3", "name": "Porte 3", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"}
-    ]
-    
-    return render_template("doors.html", doors=doors_data, event=event, year=year)
 
-@app.route('/update_doors', methods=['GET'])
+@app.route('/portes-mur', methods=['GET'])
+@role_required("manager")
+def portes_mur_page():
+    """Mur TV des portes : vue generale et alertes, aucune interaction. Meme
+    role que /meteo-mur ; consomme /api/portes/etat en vue tv."""
+    return render_template("portes_mur.html")
+
+
+def _portes_event_year():
+    """(event, year) de la requete, sinon l'edition suivie par le
+    live-controle, sinon l'epreuve active (event_courant)."""
+    event = (request.args.get('event') or "").strip()
+    year = (request.args.get('year') or "").strip()
+    if event and year:
+        return event, year
+    g = presents_etat.read_global(db)
+    if g.get("evenement"):
+        return g["evenement"], str(presents_etat.to_tranche_label(datetime.now(timezone.utc)).year)
+    ev, yr = EC.current_event(db)
+    return ev, str(yr)
+
+
+@app.route('/api/portes/etat', methods=['GET'])
 @role_required("user")
-def update_doors():
-    event = request.args.get('event')
-    year = request.args.get('year')
-    if not event or not year:
-        return jsonify({"error": "Missing event or year parameter"}), 400
+def api_portes_etat():
+    """Etat des portes a un instant. ?event&year (defaut : edition en direct),
+    ?jour=AAAA-MM-JJ, ?a=HH:MM (rejeu), ?vue=tv (sans series ni fiches)."""
+    import portes_etat
+    event, year = _portes_event_year()
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return jsonify({"error": "annee invalide"}), 400
+    jour = at = None
+    try:
+        if request.args.get('jour'):
+            jour = datetime.strptime(request.args['jour'], "%Y-%m-%d").date()
+        if request.args.get('a'):
+            base = jour or presents_etat.to_tranche_label(datetime.now(timezone.utc)).date()
+            hm = datetime.strptime(request.args['a'], "%H:%M")
+            at = datetime(base.year, base.month, base.day, hm.hour, hm.minute)
+    except ValueError:
+        return jsonify({"error": "jour ou heure invalide"}), 400
+    vue = "tv" if request.args.get('vue') == "tv" else "operateur"
+    return jsonify(portes_etat.etat(db, event, year, jour=jour, at=at, vue=vue))
 
-    # Remplacez ces valeurs par vos requêtes sur la base de données
-    doors_data = [
-        {"id": "door-1", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
-        {"id": "door-2", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
-        {"id": "door-3", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"}
-    ]
-    return jsonify({"doors": doors_data})
+
+@app.route('/api/portes/bilan', methods=['GET'])
+@role_required("user")
+def api_portes_bilan():
+    """Bilan RETEX des portes d'une edition (par jour et par porte)."""
+    import portes_etat
+    event, year = _portes_event_year()
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return jsonify({"error": "annee invalide"}), 400
+    return jsonify(portes_etat.bilan(db, event, year))
+
+
+@app.route('/api/portes/editions', methods=['GET'])
+@role_required("user")
+def api_portes_editions():
+    """Editions suivies par le controle d'acces live (selecteur RETEX)."""
+    import portes_etat
+    return jsonify(portes_etat.editions(db))
 
 ################################################################################
 # Gestion de la configuration des tâches automatiques cockpit
@@ -9666,8 +9718,12 @@ def hsh_get_titres_live():
 @app.route('/api/live-controle/debit-gates', methods=['GET'])
 @role_required("admin")
 def hsh_get_debit_gates():
-    """Debit par gate sur la derniere heure glissante."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    """Debit par gate sur la derniere heure glissante.
+
+    `tranche` est en heure de PARIS etiquetee UTC : la borne passe par
+    to_tranche_label. Comparee a un vrai UTC, la << derniere heure >>
+    additionnait 3 h de passages en ete et 2 h en hiver."""
+    cutoff = presents_etat.to_tranche_label(datetime.now(timezone.utc) - timedelta(hours=1))
     pipeline = [
         {"$match": {"tranche": {"$gte": cutoff}}},
         {"$group": {
@@ -9701,8 +9757,10 @@ def hsh_get_active_checkpoints():
         "derniere_transaction": {"$gte": cutoff},
     }))
 
-    # Agreger les compteurs du jour par checkpoint
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Agreger les compteurs du jour par checkpoint. `tranche` est en heure de
+    # Paris etiquetee UTC : le jour commence a minuit heure de Paris.
+    today_start = presents_etat.to_tranche_label(datetime.now(timezone.utc)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
     cp_ids = [d.get("location_id") for d in docs if d.get("location_id")]
     counts_by_cp = {}
     if cp_ids:

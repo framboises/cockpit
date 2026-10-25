@@ -1,25 +1,82 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portes</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portes - Cockpit</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/doors.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-<body>
-    <div id="grid-container">
-        {% for door in doors|sort(attribute='ranking') %}
-        <div class="card door-card" id="{{ door.id }}">
-            <div class="card-header">{{ door.name }}</div>
-            <div class="card-ranking">#{{ door.ranking }}</div>
-            <div class="card-number">{{ door.rate }} <span class="small-text">scans/min</span></div>
-            <div class="card-subtext">Total entrees : {{ door.total_entries }}</div>
-        </div>
-        {% endfor %}
+<body data-event="{{ event }}" data-year="{{ year }}">
+
+  <header class="barre">
+    <div class="titre">
+      <span class="material-symbols-outlined">door_front</span>
+      <span>Portes</span>
+      <span class="edition" id="edition">{{ event }} {{ year }}</span>
     </div>
-    <script src="{{ url_for('static', filename='js/doors.js') }}"></script>
+
+    <nav class="vues" role="tablist">
+      <button type="button" class="vue actif" data-vue="direct">
+        <span class="material-symbols-outlined">sensors</span>Direct</button>
+      <button type="button" class="vue" data-vue="rejeu">
+        <span class="material-symbols-outlined">history</span>Rejeu</button>
+      <button type="button" class="vue" data-vue="bilan">
+        <span class="material-symbols-outlined">summarize</span>Bilan RETEX</button>
+    </nav>
+
+    <div class="rejeu-ctrl" id="rejeu-ctrl" hidden>
+      <select id="rejeu-jour" aria-label="Jour"></select>
+      <input type="range" id="rejeu-heure" min="0" max="95" step="1" value="40" aria-label="Heure">
+      <span class="rejeu-h" id="rejeu-h">10:00</span>
+    </div>
+
+    <div class="bilan-ctrl" id="bilan-ctrl" hidden>
+      <select id="bilan-edition" aria-label="Edition"></select>
+    </div>
+
+    <div class="fraicheur" id="fraicheur"><span class="puce"></span><span id="fraicheur-txt">chargement</span></div>
+  </header>
+
+  <!-- ===================== Vue Direct / Rejeu ===================== -->
+  <main id="vue-etat">
+    <section class="kpis" id="kpis"></section>
+
+    <div class="etat-grille">
+      <section class="liste">
+        <div class="liste-tete">
+          <div class="legende">
+            <span class="leg entree">Entrée</span>
+            <span class="leg mixte">Mixte</span>
+            <span class="leg sortie">Sortie</span>
+            <span class="leg-note" id="leg-note"></span>
+          </div>
+        </div>
+        <div id="groupes"></div>
+      </section>
+
+      <section class="detail" id="detail">
+        <div class="vide" id="detail-vide">
+          <span class="material-symbols-outlined">touch_app</span>
+          <p>Choisir une porte pour l'analyser : débits entrée / sortie face au N-1, capacité de sécurité, appareils, prévision, fiches et programme.</p>
+        </div>
+        <div id="detail-contenu" hidden></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===================== Vue Bilan RETEX ===================== -->
+  <main id="vue-bilan" hidden>
+    <section class="bilan-jours" id="bilan-jours"></section>
+    <section class="bilan-table-wrap">
+      <table class="bilan-table" id="bilan-table"></table>
+      <p class="note" id="bilan-note"></p>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/doors.js') }}"></script>
 </body>
 </html>

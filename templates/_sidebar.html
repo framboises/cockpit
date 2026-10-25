@@ -111,6 +111,10 @@
             <span class="material-symbols-outlined">radar</span>
             <span class="label">Mur meteo</span>
         </a>{% endif %}
+        {% if _mgr and (page_allowed is not defined or page_allowed('portes_mur')) %}<a href="/portes-mur" class="nav-btn" target="_blank" rel="noopener" title="Mur des portes plein ecran (TV PC Organisation)" data-nav-item>
+            <span class="material-symbols-outlined">door_sliding</span>
+            <span class="label">Mur portes</span>
+        </a>{% endif %}
         {% endset %}
         {{ nav_group('tv', 'tv', 'Ecrans TV', _g_tv) }}
 

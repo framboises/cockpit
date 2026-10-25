@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portes - Poste de commandement</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
+
+  <style>
+  /* ==========================================================================
+     MUR DES PORTES — TV du poste de commandement
+
+     Meme contrat que le mur meteo : un PANNEAU lu de 3 a 5 m, sans clic ni
+     defilement. Il repond a deux questions, dans cet ordre :
+
+       1. Y a-t-il une porte qui sature, ou qui va saturer ? Le bandeau
+          d'alertes le dit en toutes lettres, et dit aussi quand tout va bien
+          (un ecran calme et un ecran en panne se ressemblent trop).
+       2. Comment le flux se repartit-il ? Trois colonnes ENTREE / MIXTE /
+          SORTIE : une porte change de colonne quand ses appareils basculent
+          (entree le matin, sortie a la fin de la course). La couleur du sens
+          est constante (bleu entree, violet mixte, orange sortie) et la
+          gravite a ses propres couleurs, toujours doublees d'un mot.
+
+     L'analyse d'UNE porte (courbes, appareils, fiches) vit sur la page
+     operateur /doors : ici, rien qui ne se lise d'un coup d'oeil.
+     ========================================================================== */
+  :root{
+    --bg:#0b1220; --bg-2:#0f172a; --panel:#1e293b; --panel-2:#172132;
+    --line:rgba(148,163,184,0.16); --line-2:rgba(148,163,184,0.30);
+    --text:#f1f5f9; --muted:#94a3b8; --muted-2:#64748b;
+    --entree:#3b82f6; --sortie:#f97316; --mixte:#a78bfa;
+    --ok:#22c55e; --vig:#eab308; --danger:#f97316; --crit:#ef4444;
+    --t-verdict: clamp(1.8rem, min(3.6vw, 6.4vh), 6rem);
+    --t-geant:   clamp(2rem, min(4vw, 7vh), 6rem);
+    --t-grand:   clamp(1.4rem, min(2.4vw, 4.2vh), 3.2rem);
+    --t-moyen:   clamp(1rem, min(1.55vw, 2.8vh), 2rem);
+    --t-libelle: clamp(0.75rem, min(1vw, 1.8vh), 1.25rem);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg); color:var(--text); font-family:'Outfit',system-ui,sans-serif;
+    overflow:hidden; display:flex; flex-direction:column; font-variant-numeric:tabular-nums}
+  .libelle{font-size:var(--t-libelle); font-weight:700; text-transform:uppercase; letter-spacing:0.09em; color:var(--muted)}
+  .une-ligne{white-space:nowrap; overflow:hidden; min-width:0}
+
+  .tete{display:flex; align-items:center; gap:clamp(12px,1.6vw,32px); padding:0.8vh 1.4vw;
+    background:var(--bg-2); border-bottom:1px solid var(--line); flex:0 0 auto}
+  .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted)}
+  .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
+  .edition{font-size:var(--t-moyen); color:var(--muted); white-space:nowrap}
+  .flux{margin-left:auto; font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center; white-space:nowrap}
+  .puce{width:0.8vw; height:0.8vw; min-width:12px; min-height:12px; border-radius:50%; display:inline-block; margin-right:0.5vw}
+
+  /* Chiffres de tete : entrant, sortant, presents, portes par mode */
+  .chiffres{display:flex; gap:1vw; padding:1vh 1.4vw 0; flex:0 0 auto}
+  .chiffre{background:var(--panel); border:1px solid var(--line); border-radius:1vw; padding:0.8vh 1.2vw; flex:1 1 0; min-width:0}
+  .chiffre .val{font-size:var(--t-geant); font-weight:900; line-height:1}
+  .chiffre .val small{font-size:0.4em; color:var(--muted); font-weight:700; margin-left:0.2em}
+  .chiffre.modes .val{font-size:var(--t-grand)}
+  .chiffre.modes .val > span{display:flex; gap:1.4vw; align-items:baseline}
+  .chiffre.modes .val i{font-style:normal; font-size:0.45em; color:var(--muted); font-weight:700; margin-left:0.25em}
+
+  /* Alertes */
+  .alertes{flex:0 0 auto; margin:1vh 1.4vw 0; border-radius:1vw; border-left:0.7vw solid var(--ok);
+    background:rgba(34,197,94,0.07); padding:1vh 1.4vw; display:flex; flex-direction:column; gap:0.6vh}
+  .alerte{display:flex; align-items:baseline; gap:1.2vw; min-width:0}
+  .alerte .porte{font-size:var(--t-verdict); font-weight:900; line-height:1.05; letter-spacing:-0.01em; white-space:nowrap}
+  .alerte .texte{font-size:var(--t-moyen); color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; min-width:0}
+  .alerte .quand{margin-left:auto; font-size:var(--t-grand); font-weight:800; white-space:nowrap}
+  .alerte.second .porte{font-size:var(--t-grand)}
+  .alerte.second .quand{font-size:var(--t-moyen)}
+  .alertes .plus{font-size:var(--t-moyen); color:var(--muted)}
+  .calme-titre{font-size:var(--t-verdict); font-weight:900; color:var(--ok); line-height:1.05}
+  .calme-detail{font-size:var(--t-moyen); color:var(--muted)}
+
+  /* Trois colonnes */
+  .colonnes{flex:1 1 0; min-height:0; display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:1vw; padding:1vh 1.4vw}
+  .colonne{display:flex; flex-direction:column; gap:0.7vh; min-height:0; overflow:hidden}
+  .col-tete{display:flex; align-items:baseline; gap:0.8vw; padding-bottom:0.4vh; border-bottom:0.45vh solid var(--muted-2)}
+  .col-tete .nom{font-size:var(--t-grand); font-weight:900; letter-spacing:0.02em}
+  .col-tete .nb{font-size:var(--t-moyen); color:var(--muted); font-weight:700}
+  .col-tete .deb{margin-left:auto; font-size:var(--t-moyen); font-weight:800}
+  .tuile{background:var(--panel); border-radius:0.8vw; padding:0.8vh 1vw; border-left:0.5vw solid var(--ok);
+    display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:1vw; align-items:center; flex:0 0 auto}
+  .tuile .n{font-size:var(--t-moyen); font-weight:800}
+  .tuile .d{font-size:var(--t-grand); font-weight:900; line-height:1; text-align:right}
+  .tuile .d small{font-size:0.42em; color:var(--muted); font-weight:700}
+  .tuile .jauge{grid-column:1 / -1; height:1vh; min-height:8px; border-radius:99px; background:rgba(148,163,184,0.16); margin-top:0.6vh; overflow:hidden}
+  .tuile .jauge span{display:block; height:100%; border-radius:99px}
+  .tuile .s{font-size:var(--t-libelle); color:var(--muted); font-weight:600}
+  .tuile .c{font-size:var(--t-libelle); font-weight:800; text-align:right}
+  .colonne .reste{font-size:var(--t-libelle); color:var(--muted); padding-left:0.4vw}
+  .colonne .aucune{font-size:var(--t-moyen); color:var(--muted-2); padding:1vh 0.4vw}
+
+  .pied{flex:0 0 auto; padding:0.4vh 1.4vw 0.8vh; font-size:var(--t-libelle); color:var(--muted-2); display:flex; gap:1.6vw}
+  .pied .une-ligne{flex:1 1 auto}
+  .clign{animation:clign 1.6s ease-in-out infinite}
+  @keyframes clign{0%,100%{opacity:1}50%{opacity:0.42}}
+  </style>
+</head>
+<body>
+
+  <header class="tete">
+    <span class="marque">PORTES</span>
+    <span class="horloge" id="horloge">--:--</span>
+    <span class="edition" id="edition"></span>
+    <span class="flux" id="flux"><span class="puce" style="background:var(--muted-2)"></span>chargement</span>
+  </header>
+
+  <section class="chiffres" id="chiffres"></section>
+  <section class="alertes" id="alertes"><div class="calme-titre">CHARGEMENT</div></section>
+
+  <main class="colonnes">
+    <section class="colonne" id="col-entree"></section>
+    <section class="colonne" id="col-mixte"></section>
+    <section class="colonne" id="col-sortie"></section>
+  </main>
+
+  <footer class="pied">
+    <span class="une-ligne" id="pied-infos"></span>
+    <span id="pied-maj"></span>
+  </footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var PERIODE_MS = 60000;
+  var $ = function (id) { return document.getElementById(id); };
+  var COUL = { entree: "var(--entree)", mixte: "var(--mixte)", sortie: "var(--sortie)" };
+  var NIV = { critique: "var(--crit)", danger: "var(--danger)", vigilance: "var(--vig)", info: "var(--muted)" };
+  var PORTE_NIV = { saturation: "var(--crit)", saturation_prevue: "var(--danger)", vigilance: "var(--vig)", normal: "var(--ok)" };
+  var params = new URLSearchParams(location.search);
+
+  function el(tag, cls, texte) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (texte !== undefined && texte !== null) e.textContent = texte;
+    return e;
+  }
+  function vider(e) { while (e.firstChild) e.removeChild(e.firstChild); }
+  function fmt(n) { return n === null || n === undefined ? "--" : Math.round(n).toLocaleString("fr-FR"); }
+  function couleurCharge(c) {
+    if (c === null || c === undefined) return "var(--muted-2)";
+    return c >= 1 ? "var(--crit)" : (c >= 0.8 ? "var(--vig)" : "var(--ok)");
+  }
+
+  // Reduit la police tant que l'element deborde (jamais sous 55 %).
+  function ajuster(e) {
+    e.style.fontSize = "";
+    var base = parseFloat(getComputedStyle(e).fontSize), t = base;
+    while (e.scrollWidth > e.clientWidth + 1 && t > base * 0.55) { t *= 0.94; e.style.fontSize = t + "px"; }
+  }
+  function ajusterTout() { document.querySelectorAll(".une-ligne, .alerte .porte, .alerte .texte, .tuile .n").forEach(ajuster); }
+
+  function horloge() {
+    var d = new Date();
+    $("horloge").textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  function chiffre(lib, val, unite, cls) {
+    var c = el("div", "chiffre" + (cls ? " " + cls : ""));
+    c.appendChild(el("div", "libelle", lib));
+    var v = el("div", "val");
+    if (val instanceof Node) v.appendChild(val); else v.textContent = val;
+    if (unite) v.appendChild(el("small", null, unite));
+    c.appendChild(v);
+    return c;
+  }
+
+  function majChiffres(d) {
+    var h = $("chiffres"), t = d.totaux;
+    vider(h);
+    var e = chiffre("Entrant", fmt(t.debit_entree), "/h"); e.querySelector(".val").style.color = "#93c5fd";
+    var s = chiffre("Sortant", fmt(t.debit_sortie), "/h"); s.querySelector(".val").style.color = "#fdba74";
+    h.appendChild(e); h.appendChild(s);
+    if (d.presents !== null && d.presents !== undefined) h.appendChild(chiffre("Présents", fmt(d.presents)));
+    var m = el("span");
+    [["entree", "entrée"], ["mixte", "mixte"], ["sortie", "sortie"]].forEach(function (x) {
+      var b = el("span", null, String(t.par_mode[x[0]] || 0));
+      b.style.color = COUL[x[0]];
+      b.appendChild(el("i", null, x[1]));
+      m.appendChild(b);
+    });
+    h.appendChild(chiffre("Portes actives", m, null, "modes"));
+  }
+
+  function majAlertes(d) {
+    var h = $("alertes");
+    vider(h);
+    var graves = d.alertes.filter(function (a) { return a.niveau === "critique" || a.niveau === "danger" || a.niveau === "vigilance"; });
+    if (!graves.length) {
+      h.style.borderLeftColor = "var(--ok)";
+      h.style.background = "rgba(34,197,94,0.07)";
+      h.appendChild(el("div", "calme-titre", "AUCUNE PORTE SATURÉE"));
+      h.appendChild(el("div", "calme-detail une-ligne", d.totaux.portes_actives + " portes actives, toutes sous " +
+        Math.round(d.seuils.vigilance * 100) + " % de leur capacité" +
+        (d.n1 && d.n1.annee && d.n1.source !== "portes_total" ? ", y compris dans l'heure à venir" : "")));
+      return;
+    }
+    var pire = NIV[graves[0].niveau];
+    h.style.borderLeftColor = pire;
+    h.style.background = graves[0].niveau === "critique" ? "rgba(239,68,68,0.14)" : "rgba(249,115,22,0.10)";
+    graves.slice(0, 3).forEach(function (a, i) {
+      var l = el("div", "alerte" + (i ? " second" : ""));
+      var p = el("span", "porte", a.porte);
+      p.style.color = NIV[a.niveau];
+      if (a.niveau === "critique" && i === 0) p.classList.add("clign");
+      l.appendChild(p);
+      l.appendChild(el("span", "texte", a.texte));
+      var q = el("span", "quand", a.quand);
+      q.style.color = NIV[a.niveau];
+      l.appendChild(q);
+      h.appendChild(l);
+    });
+    if (graves.length > 3) h.appendChild(el("div", "plus", "+ " + (graves.length - 3) + " autre(s) alerte(s) — détail sur la page Portes"));
+  }
+
+  function tuile(p, sens) {
+    var t = el("div", "tuile");
+    t.style.borderLeftColor = PORTE_NIV[p.niveau] || "var(--ok)";
+    t.appendChild(el("div", "n une-ligne", p.porte.replace(/^PORTE /, "")));
+    var deb = sens === "mixte" ? (p.debit.entree + p.debit.sortie) : p.debit[sens];
+    var d = el("div", "d", fmt(deb));
+    d.appendChild(el("small", null, "/h"));
+    t.appendChild(d);
+    var c = sens === "sortie" ? p.charge.sortie : (sens === "mixte"
+      ? Math.max(p.charge.entree || 0, p.charge.sortie || 0) : p.charge.entree);
+    var j = el("div", "jauge"), b = el("span");
+    b.style.width = Math.min(100, Math.round((c || 0) * 100)) + "%";
+    b.style.background = couleurCharge(c);
+    j.appendChild(b); t.appendChild(j);
+    var a = p.appareils;
+    var sous = sens === "mixte" ? ("↓" + fmt(p.debit.entree) + "  ↑" + fmt(p.debit.sortie)) :
+      ((sens === "entree" ? a.entree + a.deux_sens : a.sortie + a.deux_sens) + " appareils" +
+       (sens === "entree" && p.capacite.agents ? " · " + p.capacite.agents + " agents" : ""));
+    t.appendChild(el("div", "s une-ligne", sous));
+    var ct = el("div", "c", c === null || c === undefined ? "" : Math.round(c * 100) + " %");
+    ct.style.color = couleurCharge(c);
+    t.appendChild(ct);
+    return t;
+  }
+
+  function majColonnes(d) {
+    var hauteur = window.innerHeight;
+    [["entree", "ENTRÉE"], ["mixte", "MIXTE"], ["sortie", "SORTIE"]].forEach(function (x) {
+      var col = $("col-" + x[0]);
+      vider(col);
+      var portes = d.portes.filter(function (p) { return !p.fermee && p.mode === x[0]; });
+      var tete = el("div", "col-tete");
+      tete.style.borderBottomColor = COUL[x[0]];
+      var n = el("span", "nom", x[1]); n.style.color = COUL[x[0]];
+      tete.appendChild(n);
+      tete.appendChild(el("span", "nb", portes.length + (portes.length > 1 ? " portes" : " porte")));
+      var tot = portes.reduce(function (s, p) {
+        return s + (x[0] === "mixte" ? p.debit.entree + p.debit.sortie : p.debit[x[0]]);
+      }, 0);
+      tete.appendChild(el("span", "deb", fmt(tot) + "/h"));
+      col.appendChild(tete);
+      if (!portes.length) { col.appendChild(el("div", "aucune", "aucune porte")); return; }
+      // Autant de tuiles que la hauteur le permet ; le reste est nomme.
+      var place = Math.max(2, Math.floor((col.clientHeight - tete.offsetHeight) / (hauteur * 0.105)));
+      portes.slice(0, place).forEach(function (p) { col.appendChild(tuile(p, x[0])); });
+      if (portes.length > place) {
+        col.appendChild(el("div", "reste une-ligne", "+ " + portes.slice(place).map(function (p) {
+          return p.porte.replace(/^PORTE /, "");
+        }).join(", ")));
+      }
+    });
+  }
+
+  function majPied(d) {
+    var b = ["Contrôle d'accès HSH, passages valides",
+             "mode sur " + d.seuils.fenetre_min + " min : entrée < " + Math.round(d.seuils.entree * 100) + " % de sorties < mixte < " +
+             Math.round(d.seuils.sortie * 100) + " % < sortie",
+             d.securite ? "charge d'entrée = agents de sécurité prévus × " + d.seuils.agent_h + "/h" : "charge = capacité des appareils",
+             !(d.n1 && d.n1.annee) ? "sans prévision N-1" : (d.n1.source === "portes_total"
+               ? "N-1 " + d.n1.annee + " tous sens confondus : pas de prévision" : "prévision : profil " + d.n1.annee)];
+    if (d.totaux.portes_fermees) b.push(d.totaux.portes_fermees + " porte(s) fermée(s)");
+    $("pied-infos").textContent = b.join("   ·   ");
+    $("pied-maj").textContent = "mesure jusqu'à " + d.a + "  ·  mis à jour à " +
+      new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function majFlux(d) {
+    var f = $("flux");
+    vider(f);
+    var p = el("span", "puce");
+    var ok = d.direct;
+    p.style.background = ok ? "var(--ok)" : "var(--vig)";
+    f.appendChild(p);
+    f.appendChild(document.createTextNode(ok ? "direct" : "hors direct · " + d.jour + " " + d.a));
+  }
+
+  function charger() {
+    var q = new URLSearchParams({ vue: "tv" });
+    ["event", "year", "jour", "a"].forEach(function (k) { if (params.get(k)) q.set(k, params.get(k)); });
+    fetch("/api/portes/etat?" + q.toString(), { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        $("edition").textContent = (d.event || "") + " " + (d.year || "");
+        if (!d.disponible) {
+          vider($("alertes"));
+          $("alertes").appendChild(el("div", "calme-titre", "AUCUN CONTRÔLE D'ACCÈS EN COURS"));
+          $("alertes").appendChild(el("div", "calme-detail", d.motif || ""));
+          $("alertes").style.borderLeftColor = "var(--muted-2)";
+          ["entree", "mixte", "sortie"].forEach(function (k) { vider($("col-" + k)); });
+          vider($("chiffres"));
+          return;
+        }
+        majFlux(d);
+        majChiffres(d);
+        majAlertes(d);
+        majColonnes(d);
+        majPied(d);
+        ajusterTout();
+      })
+      .catch(function (e) {
+        console.error("[Mur portes]", e);
+        // Un mur sans donnees doit le dire en grand, sinon il montre
+        // l'ancienne situation comme si elle etait courante.
+        vider($("alertes"));
+        var t = el("div", "calme-titre clign", "DONNÉES INDISPONIBLES");
+        t.style.color = "var(--crit)";
+        $("alertes").appendChild(t);
+        $("alertes").appendChild(el("div", "calme-detail", "le mur n'est plus alimenté — vérifier Cockpit"));
+        $("alertes").style.borderLeftColor = "var(--crit)";
+        vider($("flux"));
+        var p = el("span", "puce"); p.style.background = "var(--crit)";
+        $("flux").appendChild(p);
+        $("flux").appendChild(document.createTextNode("liaison perdue"));
+      });
+  }
+
+  horloge();
+  setInterval(horloge, 1000);
+  window.addEventListener("resize", charger);
+  charger();
+  setInterval(charger, PERIODE_MS);
+})();
+</script>
+</body>
+</html>
