@@ -196,3 +196,26 @@ def test_pdf(db, monkeypatch, tmp_path):
     import io
     assert len(PdfReader(io.BytesIO(pdf)).pages) == 6 + 1 + 2
     assert D.build_pdf(db, {"statuses": ["commandee"], "ids": [ObjectId()]})[0] is None
+
+
+def test_deplacement_impose_en_chaine(db):
+    """A -> emplacement de B, B -> emplacement de M : chaine admise ; une camera
+    deja reinstallee ailleurs n'est reprise qu'avec take_move."""
+    import flask
+    p1, p2 = ObjectId(), ObjectId()
+    db["cameras_planned"].docs = [
+        {"_id": p1, "name": "A chez B", "lat": 47.948, "lng": 0.21, "moves_camera_id": A, "replaces": [B], "channels": [{"no": 1}]},
+        {"_id": p2, "name": "B chez M", "lat": 47.929, "lng": 0.1924, "moves_camera_id": B, "replaces": [M], "channels": [{"no": 1}]},
+    ]
+    assert C._planned_conflict(p1, db["cameras_planned"].docs[0]) is None
+    assert C._planned_conflict(p2, db["cameras_planned"].docs[1]) is None
+    app = flask.Flask(__name__)
+    p3 = db["cameras_planned"].insert_one({"_id": ObjectId(), "name": "Nouveau", "lat": 47.95, "lng": 0.22, "channels": [{"no": 1}]}).inserted_id
+    doc = db["cameras_planned"].find_one({"_id": p3})
+    with app.test_request_context():
+        r = C._planned_save(doc, {"moves_camera_id": A})
+        assert r[1] == 409
+        r = C._planned_save(doc, {"moves_camera_id": A}, take_move=True)
+        assert r.get_json()["released"] == ["A chez B"]
+    assert "moves_camera_id" not in db["cameras_planned"].find_one({"_id": p1})
+    assert db["cameras_planned"].find_one({"_id": p3})["moves_camera_id"] == A

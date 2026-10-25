@@ -1129,9 +1129,8 @@
                 });
             }, "Retirer le lien avec la camera deplacee"));
             box.appendChild(mv);
-        } else {
-            box.appendChild(reuseBox(c, function () { box.replaceWith(plannedLinks(c)); }));
         }
+        box.appendChild(reuseBox(c, function () { box.replaceWith(plannedLinks(c)); }));
         var head = el("div", "cm-plan-rep-head");
         head.appendChild(el("b", "", "Remplace"));
         var chips = el("div", "cm-plan-chips");
@@ -1190,39 +1189,58 @@
     }
     // Nouvel emplacement d'une camera existante : en tete, les cameras deposees
     // (remplacees par un autre projet) pas encore reinstallees ; recherche
-    // parmi toutes les cameras existantes sinon
+    // parmi TOUTES les cameras existantes (placees ou non) sinon. Une camera
+    // deja reinstallee par un autre projet peut lui etre reprise ("Imposer
+    // ici", take_move) : deplacements en chaine A -> B -> C reorganises.
     function reuseBox(c, redraw) {
         var E = M.coneEdit, rec = c.rec, box = el("div", "cm-plan-reuse");
         var head = el("div", "cm-plan-rep-head");
-        head.appendChild(el("b", "", "Reemploi / deplacement"));
+        head.appendChild(el("b", "", rec.moves ? "Changer la camera reinstallee ici" : "Reemploi / deplacement"));
         box.appendChild(head);
+        var removedBy = {}, movedBy = {};
+        (M.planned || []).forEach(function (p) {
+            (p.replaces || []).forEach(function (r) { removedBy[r._id] = p; });
+            if (p.moves) movedBy[p.moves._id] = p;
+        });
+        function dist(id) {
+            var q = M.pos[id];
+            return q && q.lat != null ? bearingDist(rec.lat, rec.lng, { lat: q.lat, lng: q.lng }).d : null;
+        }
         var seen = {}, dep = [];
         (M.planned || []).forEach(function (p) {
             if (p._id === rec._id) return;
             (p.replaces || []).forEach(function (r) {
-                if (seen[r._id] || r.reused_by || r.exists === false || E.form.replaces.indexOf(r._id) >= 0) return;
+                if (seen[r._id] || movedBy[r._id] || r.exists === false || E.form.replaces.indexOf(r._id) >= 0) return;
                 seen[r._id] = 1;
-                var q = M.pos[r._id];
-                dep.push({ _id: r._id, name: r.name, by: p.name, d: q ? bearingDist(rec.lat, rec.lng, { lat: q.lat, lng: q.lng }).d : null });
+                dep.push({ _id: r._id, name: r.name, by: p.name, d: dist(r._id) });
             });
         });
         dep.sort(function (a, b) { return (a.d == null ? 1e12 : a.d) - (b.d == null ? 1e12 : b.d); });
         function link(x) {
-            confirmToast(x.name + " sera reinstallee ici" + (x.by ? " (deposee par " + x.by + ")" : "") + " ?", "Reinstaller ici").then(function (ok) {
+            var other = movedBy[x._id] && movedBy[x._id]._id !== rec._id ? movedBy[x._id] : null;
+            var msg = other ? x.name + " est deja reinstallee par " + other.name + " : la reinstaller ici a la place ? (" + other.name + " ne la deplacera plus)"
+                : x.name + " sera reinstallee ici" + (removedBy[x._id] ? " (deposee par " + removedBy[x._id].name + ")" : "") +
+                  (rec.moves ? " a la place de " + rec.moves.name : "") + " ?";
+            confirmToast(msg, other ? "Imposer ici" : "Reinstaller ici").then(function (ok) {
                 if (!ok) return;
-                send("PUT", API.planned + "/" + c.pid, { moves_camera_id: x._id }).then(function (r) {
+                send("PUT", API.planned + "/" + c.pid, { moves_camera_id: x._id, take_move: !!other }).then(function (r) {
                     patchRec(c, r);
+                    if (other) other.moves = null;
+                    syncReuse();
                     redraw();
                     render();
-                    toast("success", "Nouvel emplacement de " + x.name + " enregistre");
+                    toast("success", "Nouvel emplacement de " + x.name + " enregistre" +
+                        (r.released && r.released.length ? " ; " + r.released.join(", ") + " ne la deplace plus" : ""));
                 }).catch(function (e) { toast("error", e.message); });
             });
         }
-        function row(list, x, sub) {
+        function row(list, x, sub, label, off) {
             var l = el("div", "cm-plan-cand");
             l.appendChild(el("span", "", x.name));
-            l.appendChild(el("small", "", [x.d != null ? Math.round(x.d) + " m" : "", sub].filter(Boolean).join(" - ")));
-            l.appendChild(cfgBtn("move_location", "Reinstaller ici", "", function () { link(x); }, "Ce projet devient le nouvel emplacement de " + x.name));
+            l.appendChild(el("small", "", [x.d != null ? Math.round(x.d) + " m" : "non placee", sub].filter(Boolean).join(" - ")));
+            var b = cfgBtn("move_location", label || "Reinstaller ici", "", function () { link(x); }, off || "Ce projet devient le nouvel emplacement de " + x.name);
+            b.disabled = !!off;
+            l.appendChild(b);
             list.appendChild(l);
         }
         if (dep.length) {
@@ -1231,20 +1249,26 @@
             dep.slice(0, 10).forEach(function (x) { row(dl, x, "deposee par " + x.by); });
             box.appendChild(dl);
         }
-        var q = inp("", { placeholder: "Autre camera existante a reinstaller ici (nom, IP)...", "aria-label": "Camera existante a reinstaller ici" });
+        var q = inp("", { placeholder: "Chercher une camera existante a deplacer ici (nom, IP)", "aria-label": "Camera existante a deplacer ici" });
         q.type = "search";
         q.className = "cm-input";
         var res = el("div", "cm-plan-cands");
         q.addEventListener("input", function () {
             res.textContent = "";
             var t = q.value.trim().toLowerCase();
-            if (t.length < 2) return;
-            var taken = {};
-            (M.planned || []).forEach(function (p) { if (p.moves) taken[p.moves._id] = 1; });
-            existingNear(rec.lat, rec.lng, Infinity).filter(function (x) {
-                return !taken[x._id] && E.form.replaces.indexOf(x._id) < 0 && (x.name.toLowerCase().indexOf(t) >= 0 || x.ip.indexOf(t) >= 0);
-            }).slice(0, 8).forEach(function (x) { row(res, x, x.ip); });
-            if (!res.childNodes.length) res.appendChild(el("span", "cm-plan-none", "Aucune camera existante libre"));
+            if (!t) return;
+            var hits = (S.cams || []).filter(function (x) {
+                return (x.name || "").toLowerCase().indexOf(t) >= 0 || (x.ip || "").indexOf(t) >= 0;
+            }).map(function (x) { return { _id: x._id, name: x.name || x.ip, ip: x.ip || "", d: dist(x._id) }; });
+            hits.sort(function (a, b) { return (a.d == null ? 1e12 : a.d) - (b.d == null ? 1e12 : b.d); });
+            hits.slice(0, 12).forEach(function (x) {
+                var mv = movedBy[x._id], rb = removedBy[x._id];
+                if (rec.moves && rec.moves._id === x._id) return row(res, x, "deja reinstallee ici", "Ici", "Deja le nouvel emplacement de cette camera");
+                if (E.form.replaces.indexOf(x._id) >= 0) return row(res, x, "remplacee par ce projet", "", "Remplacee par ce projet : retirez-la de Remplace d'abord");
+                if (mv) return row(res, x, "reinstallee par " + mv.name, "Imposer ici", "");
+                row(res, x, [x.ip, rb ? "deposee par " + rb.name : ""].filter(Boolean).join(" - "));
+            });
+            if (!res.childNodes.length) res.appendChild(el("span", "cm-plan-none", "Aucune camera existante"));
         });
         box.appendChild(q);
         box.appendChild(res);

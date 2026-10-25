@@ -1394,17 +1394,19 @@ def _planned_doc(pid):
     return _db["cameras_planned"].find_one({"_id": oid}) if oid else None
 
 
-def _planned_conflict(doc_id, merged):
+def _planned_conflict(doc_id, merged, take_move=False):
     """Message d'erreur si le projet est incoherent avec lui-meme ou les autres.
     Une camera n'est deplacee (reinstallee) que par un projet et remplacee
     (deposee) que par un projet ; un projet ne la remplace pas et la deplace a
     la fois. Remplacee par un projet ET reinstallee par un autre : reemploi,
-    admis (la camera deposee repart sur un nouvel emplacement)."""
+    admis (la camera deposee repart sur un nouvel emplacement). take_move :
+    la camera deja reinstallee par un autre projet lui est reprise (deplacements
+    en chaine reorganises), voir _planned_save."""
     moves, repl = merged.get("moves_camera_id"), merged.get("replaces") or []
     if moves and moves in repl:
         return "Une camera ne peut pas etre a la fois deplacee et remplacee par ce projet"
     q = {"_id": {"$ne": doc_id}} if doc_id else {}
-    if moves:
+    if moves and not take_move:
         other = _db["cameras_planned"].find_one(dict(q, moves_camera_id=moves), {"name": 1})
         if other:
             return "Cette camera est deja reinstallee par le projet %s" % other.get("name", "")
@@ -1416,19 +1418,33 @@ def _planned_conflict(doc_id, merged):
     return None
 
 
-def _planned_save(doc, f, unset=None):
+def _planned_save(doc, f, unset=None, take_move=False):
+    """take_move : la camera deplacee par ce projet est retiree du projet qui
+    la reinstallait jusque-la (nom de ces projets dans `released`)."""
     merged = dict(doc, **f)
     for k in unset or {}:
         merged.pop(k, None)
-    conflict = _planned_conflict(doc["_id"], merged)
+    take_move = take_move and bool(f.get("moves_camera_id"))
+    conflict = _planned_conflict(doc["_id"], merged, take_move)
     if conflict:
         return jsonify({"error": conflict}), 409
-    f.update({"updated_by": _who(), "updatedAt": datetime.now(timezone.utc)})
+    now = datetime.now(timezone.utc)
+    f.update({"updated_by": _who(), "updatedAt": now})
     upd = {"$set": f}
     if unset:
         upd["$unset"] = unset
+    released = []
+    if take_move:
+        for o in list(_db["cameras_planned"].find({"_id": {"$ne": doc["_id"]}, "moves_camera_id": f["moves_camera_id"]}, {"name": 1})):
+            _db["cameras_planned"].update_one({"_id": o["_id"]}, {"$unset": {"moves_camera_id": ""},
+                                                                  "$set": {"updated_by": _who(), "updatedAt": now}})
+            released.append(o.get("name", ""))
+            logger.info("Camera en projet %s : deplacement repris par %s (%s)", o.get("name"), merged.get("name"), _who())
     _db["cameras_planned"].update_one({"_id": doc["_id"]}, upd)
-    return jsonify(_pub_planned(_db["cameras_planned"].find_one({"_id": doc["_id"]})))
+    out = _pub_planned(_db["cameras_planned"].find_one({"_id": doc["_id"]}))
+    if released:
+        out["released"] = released
+    return jsonify(out)
 
 
 @cameras_bp.route("/api/cameras/planned", methods=["GET"])
@@ -1511,10 +1527,11 @@ def update_planned(pid):
     doc = _planned_doc(pid)
     if not doc:
         return jsonify({"error": "Camera en projet introuvable"}), 404
-    f, unset, err = _planned_fields(request.get_json(silent=True) or {}, _planned_channels(doc))
+    data = request.get_json(silent=True) or {}
+    f, unset, err = _planned_fields(data, _planned_channels(doc))
     if err:
         return jsonify({"error": err}), 400
-    return _planned_save(doc, f, unset)
+    return _planned_save(doc, f, unset, take_move=bool(data.get("take_move")))
 
 
 @cameras_bp.route("/api/cameras/planned/<pid>/channels", methods=["POST"])

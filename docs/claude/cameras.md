@@ -400,9 +400,15 @@ projet ET reinstallee par un autre (`_planned_refs` rend `removed_by` /
 `reused_by` sur chaque camera citee). Volet d'un projet sans camera deplacee :
 bloc "Reemploi / deplacement" qui propose en tete les cameras deposees par
 les autres projets pas encore reinstallees (les plus proches d'abord, bouton
-"Reinstaller ici" = `moves_camera_id`), et une recherche parmi toutes les
-cameras existantes libres ; apres l'ajout d'un remplacement, un message
-rappelle qu'elles seront proposees. Puce d'une camera remplacee :
+"Reinstaller ici" = `moves_camera_id`), et une recherche (nom, IP) parmi
+TOUTES les cameras existantes, placees ou non, les plus proches d'abord. Le
+bloc reste affiche quand le projet deplace deja une camera ("Changer la
+camera reinstallee ici"). Camera deja reinstallee par un autre projet :
+"Imposer ici" (`PUT {moves_camera_id, take_move: true}`), le lien est retire
+de l'autre projet (nom rendu dans `released`) : deplacements en chaine
+(A chez B, B chez C, C chez D : chaque projet remplace la camera du lieu et
+reinstalle la precedente). Apres l'ajout d'un remplacement, un message
+rappelle que les cameras deposees seront proposees. Puce d'une camera remplacee :
 "reemploi : <projet>".
 Sur la carte : trait orange pointille ancienne position -> projet, croix
 rouge et trait rouge sur les cameras remplacees. Une camera supprimee depuis
