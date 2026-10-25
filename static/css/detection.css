@@ -878,18 +878,3 @@ body:not(.ia-mode-intrusions) .dt-tabs { display: none !important; }
 .dt-kpi.is-link { cursor: pointer; }
 .dt-kpi.is-link:hover { outline: 1px solid var(--line, #cbd5e1); }
 
-/* Tester le mur TV (en-tete) : menu des cameras de detection */
-.dt-testmur { position: relative; }
-.dt-testmur-menu {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 1200; min-width: 260px; max-height: 60vh; overflow: auto;
-  background: var(--card, #fff); border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 8px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, .18);
-}
-.dt-testmur-tete { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted, #64748b); padding: 4px 6px 8px; }
-.dt-testmur-cam {
-  display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: transparent; text-align: left;
-  font: inherit; font-size: .88rem; padding: 7px 8px; border-radius: 7px; cursor: pointer; color: var(--text, #1f2d3d);
-}
-.dt-testmur-cam:hover { background: var(--bg, #f1f5f9); }
-.dt-testmur-cam .material-symbols-outlined { font-size: 18px; color: var(--muted, #64748b); }
-.dt-testmur-lien { display: block; margin-top: 6px; padding: 6px 8px; font-size: .8rem; font-weight: 600; color: var(--brand, #2563eb); border-top: 1px solid var(--line, #e2e8f0); }

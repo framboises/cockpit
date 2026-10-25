@@ -746,9 +746,9 @@ n'accepte que `intrusions/`, jamais `captures/`).
   78 %", "camera : pieton", "fausse alerte". La DERNIERE intrusion du mur
   calme peut etre une ecartee (affichee avec sa vraie nature), jamais en
   cours ni a traiter.
-- TEST : bouton "Tester le mur TV" dans l'EN-TETE de `/detection` (tous
-  modes, menu des cameras de detection ; aussi l'icone TV de chaque camera
-  du volet Configurer) -> `POST /api/detection/test-mur {camera_id,
+- TEST : icone TV "Tester sur le mur TV" sur chaque camera du volet
+  Configurer de `/detection` (un bouton dans l'en-tete a ete essaye puis
+  retire a la demande de l'utilisateur) -> `POST /api/detection/test-mur {camera_id,
   channel?}` -> `detection_tests` (TTL sur `until`, `TEST_MUR_S` 90 s),
   derniere photo reelle de la camera. JAMAIS dans `hik_intrusions` : ni
   alerte, ni WhatsApp, ni liste, ni compteurs. Mur : en cours, plein ecran,
