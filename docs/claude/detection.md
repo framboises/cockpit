@@ -738,8 +738,17 @@ n'accepte que `intrusions/`, jamais `captures/`).
   manquante laisse voir Esri, plus de carre noir) ; tuile IGN en echec
   re-demandee apres 2 s, 4 s... (5 essais, `tileerror`) : le mur ne
   recharge jamais sa carte.
-- TEST : bouton "Tester sur le mur TV" (icone TV) sur chaque camera du volet
-  Configurer de `/detection` -> `POST /api/detection/test-mur {camera_id,
+- NATURE DE LA CIBLE (`detection._natures`) : la pastille du mur dit ce
+  qu'est VRAIMENT la cible, par ordre de foi : reponse de l'operateur
+  (`ai_vote.truth`), reponse de l'IA sur le cadre orange (`_ai_answer` de la
+  photo qui a decide), etiquette de l'IA d'une ecartee, sinon la camera.
+  Ni personne, ni vehicule, ni velo = `fausse` : pastille grise "Oiseau IA
+  78 %", "camera : pieton", "fausse alerte". La DERNIERE intrusion du mur
+  calme peut etre une ecartee (affichee avec sa vraie nature), jamais en
+  cours ni a traiter.
+- TEST : bouton "Tester le mur TV" dans l'EN-TETE de `/detection` (tous
+  modes, menu des cameras de detection ; aussi l'icone TV de chaque camera
+  du volet Configurer) -> `POST /api/detection/test-mur {camera_id,
   channel?}` -> `detection_tests` (TTL sur `until`, `TEST_MUR_S` 90 s),
   derniere photo reelle de la camera. JAMAIS dans `hik_intrusions` : ni
   alerte, ni WhatsApp, ni liste, ni compteurs. Mur : en cours, plein ecran,
