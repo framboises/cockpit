@@ -172,6 +172,9 @@
   .plein .pied-plein .reste{margin-left:auto; color:var(--muted)}
   .plein .barre{position:absolute; left:0; bottom:0; height:0.6vh; background:var(--text); opacity:0.6}
   @keyframes entree{from{transform:scale(1.04); opacity:0}to{transform:none; opacity:1}}
+  .son{font-size:var(--t-libelle); font-weight:800; padding:0.3vh 0.7vw; border-radius:99px; white-space:nowrap;
+    background:var(--panel); border:1px solid var(--line); color:var(--muted)}
+  .son.bloque{background:var(--warn); color:#0b1220; border-color:var(--warn)}
   .test-marque{display:inline-block; background:#fff; color:var(--crit); font-weight:900; padding:0 0.6vw; border-radius:0.4vw; margin-right:0.6vw; letter-spacing:0.06em}
   .clign{animation:clign 1.2s ease-in-out infinite}
   @keyframes clign{0%,100%{opacity:1}50%{opacity:0.45}}
@@ -183,6 +186,7 @@
     <span class="marque">INTRUSIONS</span>
     <span class="horloge" id="horloge">--:--</span>
     <div class="groupes" id="groupes"></div>
+    <span class="son" id="son" hidden></span>
     <span class="flux" id="flux"><span class="puce" style="background:var(--muted-2)"></span>chargement</span>
   </header>
 
@@ -536,6 +540,73 @@
     ]);
   }
 
+  /* ---------------- son ----------------
+     Carillon doux a deux notes (type annonce de gare), synthetise : aucun
+     fichier. A chaque nouvelle intrusion (deux fois), puis un rappel toutes
+     les RAPPEL_MS tant qu'une intrusion est en cours. ?son=0 coupe le son.
+     Les navigateurs bloquent le son tant que personne n'a touche la page :
+     pastille "SON BLOQUE" ; un clic / une touche le debloque (en kiosque :
+     Chromium --autoplay-policy=no-user-gesture-required, et allow="autoplay"
+     sur l'iframe du portail). */
+  var SON = new URLSearchParams(location.search).get("son") !== "0";
+  var RAPPEL_MS = 30000;
+  var audio = null;
+
+  function contexteAudio() {
+    if (!audio) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      audio = new AC();
+    }
+    if (audio.state === "suspended") audio.resume().catch(function () {});
+    return audio;
+  }
+
+  function note(ctx, freq, debut, duree, volume) {
+    // Sinus + harmonique douce, attaque rapide, longue decroissance (cloche)
+    [[1, volume], [2, volume * 0.25]].forEach(function (h) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = freq * h[0];
+      g.gain.setValueAtTime(0.0001, debut);
+      g.gain.exponentialRampToValueAtTime(h[1], debut + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, debut + duree);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(debut); o.stop(debut + duree + 0.05);
+    });
+  }
+
+  function carillon(fois) {
+    if (!SON) return;
+    var ctx = contexteAudio();
+    if (!ctx || ctx.state !== "running") return;
+    var t = ctx.currentTime + 0.05;
+    for (var i = 0; i < (fois || 1); i++) {
+      note(ctx, 659.25, t, 1.4, 0.35);        // mi
+      note(ctx, 523.25, t + 0.55, 1.8, 0.35); // do
+      t += 2.4;
+    }
+  }
+
+  function etatSon() {
+    var b = $("son");
+    if (!SON) { b.hidden = true; return; }
+    var ok = audio && audio.state === "running";
+    b.hidden = false;
+    b.className = "son" + (ok ? "" : " bloque");
+    b.textContent = ok ? "\u266A son actif" : "SON BLOQUÉ : toucher l'écran";
+  }
+
+  function debloquerSon() {
+    var ctx = contexteAudio();
+    if (ctx) ctx.resume().then(etatSon).catch(etatSon);
+  }
+  ["click", "keydown", "touchstart"].forEach(function (ev) { document.addEventListener(ev, debloquerSon); });
+
+  function sonner(d, neuve) {
+    if (neuve) { carillon(2); S.dernierSon = Date.now(); return; }
+    if (d.en_cours.length && Date.now() - (S.dernierSon || 0) >= RAPPEL_MS) { carillon(1); S.dernierSon = Date.now(); }
+  }
+
   /* ---------------- plein ecran ---------------- */
   function ouvrirPlein(e) {
     var pl = $("plein");
@@ -575,6 +646,7 @@
     // intrusion terminee le referme avant la fin des 20 s
     var neuve = null;
     d.en_cours.forEach(function (e) { if (!S.vus[e.id]) { S.vus[e.id] = true; neuve = neuve || e; } });
+    sonner(d, neuve);
     if (neuve) ouvrirPlein(neuve);
     else if (S.plein && !d.en_cours.some(function (e) { return e.id === S.plein; })) fermerPlein();
   }
@@ -607,6 +679,7 @@
         if (br) br.style.width = (reste / PLEIN_MS * 100) + "%";
       }
     }
+    etatSon();
     var f = $("flux"), age = (Date.now() - S.recu) / 1000;
     f.textContent = "";
     var pu = el("span", "puce");
@@ -632,6 +705,7 @@
   }
 
   initCarte();
+  if (SON) contexteAudio();  // tente de demarrer le son (kiosque autorise)
   charger();
   setInterval(tic, 1000);
   tic();

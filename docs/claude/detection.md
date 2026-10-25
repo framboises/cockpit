@@ -740,4 +740,11 @@ n'accepte que `intrusions/`, jamais `captures/`).
   derniere photo reelle de la camera. JAMAIS dans `hik_intrusions` : ni
   alerte, ni WhatsApp, ni liste, ni compteurs. Mur : en cours, plein ecran,
   pastille TEST, "Exercice lance par ... : aucune alerte reelle".
+- SON : carillon doux mi-do synthetise (Web Audio, aucun fichier), deux fois
+  a chaque nouvelle intrusion (tests compris), puis un rappel toutes les 30 s
+  tant qu'une intrusion est en cours. `?son=0` le coupe. Le navigateur bloque
+  le son sans geste : pastille "SON BLOQUE : toucher l'ecran" (un clic le
+  debloque). Afficheur en kiosque : Chromium
+  `--autoplay-policy=no-user-gesture-required` ; en cadre depuis le portail,
+  l'iframe doit porter `allow="autoplay"`.
 - Le mur ne traite rien : le traitement reste dans `/detection`.
