@@ -181,8 +181,8 @@ def test_pdf(db, monkeypatch, tmp_path):
     monkeypatch.setattr(D, "_tile", lambda z, x, y: Image.new("RGB", (256, 256), (120, 140, 110)))
     pdf, n = D.build_pdf(db, {"statuses": ["souhaitee", "validee"], "author": "L. Arnault", "indice": "b"})
     assert n == 3 and pdf.startswith(b"%PDF")
-    # couverture + plan d'ensemble + 3 fiches + recapitulatif
-    assert b"/Count 6" in pdf
+    # couverture + plan d'ensemble + suivi des deplacements + 3 fiches + recapitulatif
+    assert b"/Count 7" in pdf
     # Fiche technique du modele en annexe : intercalaire + ses pages
     import cameras_models
     from reportlab.pdfgen import canvas as rl
@@ -194,7 +194,7 @@ def test_pdf(db, monkeypatch, tmp_path):
     pdf, _n = D.build_pdf(db, {"statuses": ["souhaitee", "validee"], "datasheets": True})
     from pypdf import PdfReader
     import io
-    assert len(PdfReader(io.BytesIO(pdf)).pages) == 6 + 1 + 2
+    assert len(PdfReader(io.BytesIO(pdf)).pages) == 7 + 1 + 2
     assert D.build_pdf(db, {"statuses": ["commandee"], "ids": [ObjectId()]})[0] is None
 
 
@@ -219,3 +219,57 @@ def test_deplacement_impose_en_chaine(db):
         assert r.get_json()["released"] == ["A chez B"]
     assert "moves_camera_id" not in db["cameras_planned"].find_one({"_id": p1})
     assert db["cameras_planned"].find_one({"_id": p3})["moves_camera_id"] == A
+
+
+# --- comptage du materiel et enchainements ------------------------------------
+def _dev(db, chans, model_ref=None):
+    import cameras_models
+    models = cameras_models.catalogue(db)
+    pm = next(m for m in models if m["ref"] == model_ref) if model_ref else None
+    return [lab for lab, _m in cameras_models.devices(cameras_models.resolve_channels(models, chans), pm)]
+
+
+def test_un_plus_quatre_compte_une_camera(db):
+    # Saisi canal par canal (+ Mobile, + Fixe) : une seule camera multi-capteurs
+    chans = [{"no": 1, "optics": "mobile", "model": "ptz"}] + [{"no": i, "optics": "fixe", "model": "bullet-wide"} for i in range(2, 6)]
+    assert _dev(db, chans) == ["Caméra multi-capteurs 1 PTZ + 4 fixes (modèle à définir)"]
+    assert _dev(db, [{"no": 1, "optics": "mobile"}] + [{"no": i, "optics": "fixe"} for i in range(2, 6)]) == \
+        ["Caméra multi-capteurs 1 PTZ + 4 fixes (modèle à définir)"]
+    # Modele multi choisi pour l'emplacement : 1 appareil quels que soient les objectifs des canaux
+    assert _dev(db, chans, "DS-2DP7D836") == ["Hikvision DS-2DP7D836 (1 PTZ + 4 objectifs fixes)"]
+    # Deux fixes d'un modele choisi : deux cameras
+    assert _dev(db, [{"no": 1, "optics": "fixe", "model": "bullet-wide"}, {"no": 2, "optics": "fixe", "model": "bullet-tele"}]) == \
+        ["Hikvision iDS-2CD7A87G0 – fixe 2,8 mm", "Hikvision iDS-2CD7A87G0 – fixe 12 mm"]
+
+
+def test_enchainement_dans_l_ordre(db):
+    pa, pb, pc = ObjectId(), ObjectId(), ObjectId()
+    db["cameras_planned"].docs = [
+        # ordre de priorite volontairement different de l'ordre des travaux
+        {"_id": pc, "name": "M chez B", "status": "souhaitee", "priority": 1, "lat": 47.948, "lng": 0.21,
+         "moves_camera_id": M, "channels": [{"no": 1}]},
+        {"_id": pa, "name": "Neuve chez A", "status": "souhaitee", "priority": 2, "lat": 47.947, "lng": 0.209,
+         "replaces": [A], "channels": [{"no": 1, "optics": "fixe"}]},
+        {"_id": pb, "name": "A chez B", "status": "souhaitee", "priority": 3, "lat": 47.948, "lng": 0.2101,
+         "moves_camera_id": A, "replaces": [B], "channels": [{"no": 1}]},
+    ]
+    items, _e = D.collect(db, statuses=["souhaitee"])
+    chains = D.build_chains(items)
+    by = {it["name"]: it for it in items}
+    assert [[it["name"] for it in ch["steps"]] for ch in chains] == [["M chez B"], ["Neuve chez A", "A chez B"]]
+    assert by["A chez B"]["chain"] == {"id": "D2", "step": 2, "total": 2, "cycle": False}
+    rep = {it["rep"]: it for it in items}
+    assert "IP actuelle 10.34.1.72" in D.pose_text(by["A chez B"], rep) and "(étape 1)" in D.pose_text(by["A chez B"], rep)
+    assert D.depose_rows(by["Neuve chez A"], rep) == [("048 - Ouest – IP actuelle 10.34.1.72", "réinstallée en C3 (étape 2)")]
+    assert D.depose_rows(by["A chez B"], rep) == [("086 - Beausejour – IP actuelle 10.34.1.80", "retour au stock")]
+
+
+def test_permutation(db):
+    p1, p2 = ObjectId(), ObjectId()
+    db["cameras_planned"].docs = [
+        {"_id": p1, "name": "A chez B", "status": "souhaitee", "lat": 47.948, "lng": 0.21, "moves_camera_id": A, "replaces": [B], "channels": [{"no": 1}]},
+        {"_id": p2, "name": "B chez A", "status": "souhaitee", "lat": 47.947, "lng": 0.209, "moves_camera_id": B, "replaces": [A], "channels": [{"no": 1}]},
+    ]
+    items, _e = D.collect(db, statuses=["souhaitee"])
+    chains = D.build_chains(items)
+    assert len(chains) == 1 and chains[0]["cycle"] and len(chains[0]["steps"]) == 2

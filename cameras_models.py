@@ -145,6 +145,67 @@ def _plural(label):
                     for w in label.split(" "))
 
 
+GENERIC_LENSES = ("ptz",)  # objectif "modele a definir"
+
+
+def resolve_channels(models, chans, device_model="", fallback=True, idx=None):
+    """Canaux avec leur objectif : [{..., lens, lens_model, lens_obj,
+    explicit}] ; explicit = objectif choisi sur le canal (pas deduit)."""
+    idx = lens_index(models) if idx is None else idx
+    out = []
+    for j, c in enumerate(chans):
+        k = lens_key(models, c, device_model, j, fallback=fallback, idx=idx)
+        m, lens = idx.get(k, (None, None))
+        out.append(dict(c, lens=k, lens_model=m, lens_obj=lens, explicit=c.get("model") in idx))
+    return out
+
+
+def devices(chans, project_model=None):
+    """[(libelle, modele ou None)] des appareils d'un emplacement. Regle :
+    - modele multi-capteurs choisi pour l'emplacement : UN appareil par
+      disposition complete (1 PTZ + 4 fixes = 1 ; 10 canaux = 2) ;
+    - objectifs d'un modele multi-capteurs : idem, par modele ;
+    - un PTZ generique (ou sans objectif) avec des fixes hors multi-capteurs =
+      UNE camera multi-capteurs, modele a definir (canaux saisis un par un,
+      boutons + Mobile / + Fixe) ;
+    - sinon un appareil par canal (fixes simples d'un modele choisi).
+    chans : canaux resolus (resolve_channels)."""
+    pm = project_model
+    if pm and pm.get("multi"):
+        lay = layout(pm) or [None]
+        return [(device_label(pm), pm)] * max(1, -(-len(chans) // len(lay)))
+    out, multi, loose = [], {}, []
+    for ch in chans:
+        m, lens = ch.get("lens_model"), ch.get("lens_obj")
+        if m and m.get("multi"):
+            if m["_id"] not in multi:
+                multi[m["_id"]] = {"m": m, "n": {}, "at": len(out)}
+                out.append(None)  # place reservee : ordre d'apparition
+            multi[m["_id"]]["n"][lens["k"]] = multi[m["_id"]]["n"].get(lens["k"], 0) + 1
+        else:
+            loose.append(ch)
+    for g in sorted(multi.values(), key=lambda g: -g["at"]):
+        per = {x["k"]: max(1, int(x.get("count") or 1)) for x in g["m"].get("lenses") or []}
+        n = max(-(-cnt // per.get(k, 1)) for k, cnt in g["n"].items())
+        out[g["at"]:g["at"] + 1] = [(device_label(g["m"]), g["m"])] * n
+
+    ptz = [ch for ch in loose if ch.get("optics") == "mobile" and (not ch.get("lens_model") or ch.get("lens") in GENERIC_LENSES)]
+    fixes = [ch for ch in loose if ch.get("optics") == "fixe"]
+    if len(ptz) == 1 and fixes:
+        lab = "Caméra multi-capteurs 1 PTZ + %d fixe%s (modèle à définir)" % (len(fixes), "s" if len(fixes) > 1 else "")
+        out.append((lab, None))
+        loose = [ch for ch in loose if ch not in ptz and ch not in fixes]
+    for ch in loose:
+        m, lens = ch.get("lens_model"), ch.get("lens_obj")
+        if m:
+            out.append((device_label(m, lens), m))
+        elif pm:
+            out.append((device_label(pm), pm))
+        else:
+            out.append(("Caméra (modèle et optique à définir)", None))
+    return out
+
+
 def pub(m, usage=None):
     ds = m.get("datasheet") or None
     return {"_id": str(m["_id"]), "brand": m.get("brand", ""), "ref": m.get("ref", ""), "name": name(m),

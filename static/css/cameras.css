@@ -494,3 +494,4 @@
   .cm-model-lens { grid-template-columns: 1fr 1fr 1fr; }
   .cm-model-lens.is-head { display: none; }
 }
+.cm-plan-devices { font-size: .76rem; color: var(--muted); }

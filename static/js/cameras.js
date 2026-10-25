@@ -322,6 +322,7 @@
         box.appendChild(el("b", "", (r.priority ? "P" + r.priority + " - " : "") + r.name));
         var pm = plannedModel(r);
         if (pm) box.appendChild(el("div", "cm-tip-line", "Modele : " + pm.name));
+        if (!r.moves && (r.devices || []).length) box.appendChild(el("div", "cm-tip-line", (r.devices.length > 1 ? r.devices.length + " appareils" : "1 appareil") + " au dossier"));
         if (r.moves) box.appendChild(el("div", "cm-tip-line", (r.moves.removed_by ? "Reemploi de " + r.moves.name + " (deposee par " + r.moves.removed_by.name + ")" : "Deplacement de " + r.moves.name)));
         if ((r.replaces || []).length) box.appendChild(el("div", "cm-tip-line", "Remplace " + r.replaces.map(function (x) {
             return x.name + (x.reused_by ? " (reinstallee : " + x.reused_by.name + ")" : "");
@@ -1041,6 +1042,16 @@
             if (m) toast("success", "Modele " + m.name + " : " + c.channels.length + " canal(aux) " + (m.multi ? "poses d'apres le modele" : "mis a jour"));
         }).catch(function (e) { toast("error", e.message); E.form.model.value = c.rec.model_id || ""; });
     }
+    // Materiel compte au dossier (cameras_models.devices) : un 1 PTZ + 4 fixes
+    // = UNE camera ; un deplacement ne commande rien
+    function plannedDevices(rec) {
+        var box = el("div", "cm-plan-devices cm-span2"), d = rec.devices || [], n = {};
+        if (rec.moves) { box.textContent = "Materiel : aucun (camera existante reinstallee)"; return box; }
+        d.forEach(function (x) { n[x] = (n[x] || 0) + 1; });
+        box.textContent = "Compte au dossier : " + (d.length ? Object.keys(n).map(function (x) { return n[x] + " x " + x; }).join(", ") : "aucun appareil");
+        box.title = "Une camera multi-capteurs (1 PTZ + 4 fixes...) compte pour un seul appareil. Choisissez le modele pour le preciser.";
+        return box;
+    }
     function plannedModel(rec) { return modelsList().filter(function (m) { return m._id === rec.model_id; })[0] || null; }
     // Objectif d'un canal ajoute : celui du modele de l'emplacement pour cette
     // optique, sinon le profil par defaut
@@ -1461,6 +1472,7 @@
             pf.appendChild(field("Statut", E.form.status));
             pf.appendChild(field("Priorite", E.form.priority));
             pf.appendChild(field("Modele", E.form.model, "cm-span2"));
+            pf.appendChild(plannedDevices(c.rec));
             pf.appendChild(field("Support de pose", E.form.mount));
             pf.appendChild(field("Hauteur de pose (m)", E.form.height));
             pf.appendChild(field("Note", E.form.note, "cm-span2"));

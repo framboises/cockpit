@@ -282,11 +282,7 @@ def collect(db, statuses=None, ids=None):
         moves = ref_of(d["moves_camera_id"]) if d.get("moves_camera_id") else None
         replaces = [ref_of(o) for o in d.get("replaces") or []]
         kind = "deplacement" if moves else "remplacement" if replaces else "nouvelle"
-        out = []
-        for j, c in enumerate(chans):
-            k = cameras_models.lens_key(models, c, (moves or {}).get("model", ""), j, fallback=not moves, idx=lidx)
-            m, lens = lidx.get(k, (None, None))
-            out.append(dict(c, lens=k, lens_model=m, lens_obj=lens))
+        out = cameras_models.resolve_channels(models, chans, (moves or {}).get("model", ""), fallback=not moves, idx=lidx)
         items.append({
             "rep": "C%d" % i, "doc": d, "name": d.get("name", ""), "lat": d.get("lat"), "lng": d.get("lng"),
             "status": d.get("status", "souhaitee"), "priority": d.get("priority"), "note": d.get("note", ""),
@@ -302,6 +298,88 @@ def _proj_ref(ref):
     return ref["rep"] or "le projet « %s » (hors dossier)" % ref["name"]
 
 
+def build_chains(items):
+    """Enchainements de deplacements D1, D2... : un projet qui remplace une
+    camera reinstallee par un autre projet du dossier lui passe la main. Ordre
+    des travaux : pose a la tete (nouvel appareil ou deplacement simple), qui
+    depose la camera du lieu, reposee a l'etape suivante, etc. (parcours en
+    profondeur). Permutation (A chez B, B chez A) : sans tete, partie du plus
+    petit repere et signalee. Pose sur chaque projet concerne it["chain"] =
+    {id, step, total, cycle}. -> [{id, steps: [projet...], cycle}]"""
+    by_id = {it["doc"]["_id"]: it for it in items}
+    kids, parent = {}, {}
+    for it in items:
+        for r in it["replaces"]:
+            q = by_id.get((r.get("reused_by") or {}).get("_id"))
+            if q is not None and q is not it:
+                kids.setdefault(it["rep"], []).append(q)
+                parent[q["rep"]] = it
+    involved = [it for it in items if it["moves"] or it["rep"] in kids]
+    chains, seen = [], set()
+
+    def walk(it, out):
+        if it["rep"] in seen:
+            return
+        seen.add(it["rep"])
+        out.append(it)
+        for q in kids.get(it["rep"], []):
+            walk(q, out)
+
+    heads = [it for it in involved if it["rep"] not in parent]
+    rest = lambda: [it for it in involved if it["rep"] not in seen]  # noqa: E731
+    for it in heads + [None]:
+        if it is None:  # permutations restantes
+            while rest():
+                steps = []
+                walk(rest()[0], steps)
+                chains.append({"steps": steps, "cycle": True})
+            break
+        steps = []
+        walk(it, steps)
+        chains.append({"steps": steps, "cycle": False})
+    for k, ch in enumerate(chains, 1):
+        ch["id"] = "D%d" % k
+        for n, it in enumerate(ch["steps"], 1):
+            it["chain"] = {"id": ch["id"], "step": n, "total": len(ch["steps"]), "cycle": ch["cycle"]}
+    for it in items:
+        it.setdefault("chain", None)
+    return chains
+
+
+def _ip(cam):
+    return "IP actuelle %s" % cam["ip"] if cam.get("ip") else "IP non renseignée"
+
+
+def _step_of(by_rep, rep):
+    it = by_rep.get(rep)
+    return " (étape %d)" % it["chain"]["step"] if it and it.get("chain") else ""
+
+
+def pose_text(it, by_rep):
+    """Ce qui est pose sur l'emplacement (planche Suivi et fiche)."""
+    m = it["moves"]
+    if not m:
+        devs = devices_of(it)
+        return "Nouvel appareil : %s" % (", ".join(sorted(set(devs))) if devs else "à définir")
+    txt = "%s – %s – %s" % (m["name"], _ip(m), m.get("model") or "modèle non renseigné")
+    rb = m.get("removed_by")
+    if rb:
+        txt += " ; déposée en %s%s" % (_proj_ref(rb), _step_of(by_rep, rb["rep"]))
+    elif m.get("lat") is not None:
+        txt += " ; depuis sa position actuelle (%d m)" % round(distance_m(m["lat"], m["lng"], it["lat"], it["lng"]))
+    return txt
+
+
+def depose_rows(it, by_rep):
+    """[(camera deposee, devenir)] des cameras remplacees sur l'emplacement."""
+    out = []
+    for r in it["replaces"]:
+        rb = r.get("reused_by")
+        to = ("réinstallée en %s%s" % (_proj_ref(rb), _step_of(by_rep, rb["rep"])) if rb else "retour au stock")
+        out.append(("%s – %s" % (r["name"], _ip(r)), to))
+    return out
+
+
 def kind_label(it):
     if it["kind"] == "deplacement":
         rb = (it["moves"] or {}).get("removed_by")
@@ -315,28 +393,10 @@ def kind_label(it):
 
 def _device_rows(it):
     """[(libelle, modele ou None)] des appareils a commander pour un
-    emplacement (un deplacement : aucun). Multi-capteurs : un appareil par
-    disposition complete (1 PTZ + 4 fixes = 1 appareil ; 10 canaux = 2)."""
+    emplacement (un deplacement : aucun). Regle : cameras_models.devices."""
     if it["kind"] == "deplacement":
         return []
-    out, multi = [], {}
-    for ch in it["channels"]:
-        m, lens = ch.get("lens_model"), ch.get("lens_obj")
-        if not m:
-            pm = it.get("model")
-            out.append((cameras_models.device_label(pm), pm) if pm else ("Caméra (modèle et optique à définir)", None))
-        elif m.get("multi"):
-            if m["_id"] not in multi:
-                multi[m["_id"]] = {"m": m, "n": {}, "at": len(out)}
-                out.append(None)  # place reservee : ordre d'apparition
-            multi[m["_id"]]["n"][lens["k"]] = multi[m["_id"]]["n"].get(lens["k"], 0) + 1
-        else:
-            out.append((cameras_models.device_label(m, lens), m))
-    for g in sorted(multi.values(), key=lambda g: -g["at"]):
-        per = {x["k"]: max(1, int(x.get("count") or 1)) for x in g["m"].get("lenses") or []}
-        n = max(-(-cnt // per.get(k, 1)) for k, cnt in g["n"].items())
-        out[g["at"]:g["at"] + 1] = [(cameras_models.device_label(g["m"]), g["m"])] * n
-    return out
+    return cameras_models.devices(it["channels"], it.get("model"))
 
 
 def devices_of(it):
@@ -400,6 +460,7 @@ class Doc:
         self.pages = []  # (titre de planche, echelle)
         self.page_no = 0
         self.total = 0
+        self.marks = {}
 
     # --- texte ---
     def text(self, x, y, s, font="Barlow-Regular", size=9, color=NAVY, align="left"):
@@ -442,8 +503,9 @@ class Doc:
         self.text(x, y, s, "Barlow-Bold", 8.5, BLUE)
 
     # --- tableau (en-tete bleu marine, lignes alternees) ---
-    def table(self, x, y, cols, rows, size=7.6, row_h=13.5, head=True, bold_last=False):
-        """cols : [(titre, largeur, alignement)] ; renvoie le y sous le tableau."""
+    def table(self, x, y, cols, rows, size=7.6, row_h=13.5, head=True, bold_last=False, zebra=0):
+        """cols : [(titre, largeur, alignement)] ; renvoie le y sous le tableau.
+        zebra : rang de la premiere ligne (tableau dessine par morceaux)."""
         c = self.c
         width = sum(w for _, w, _ in cols)
         if head:
@@ -458,7 +520,7 @@ class Doc:
             lines = [simpleSplit(str(v), "Barlow-Regular", size, w - 8) or [""] for v, (_, w, _) in zip(row, cols)]
             n = max(len(ls) for ls in lines)
             h = row_h + (n - 1) * size * 1.25
-            if i % 2 == 0:
+            if (i + zebra) % 2 == 0:
                 c.setFillColorRGB(*GREY_ROW)
                 c.rect(x, y - h, width, h, stroke=0, fill=1)
             cx = x
@@ -535,10 +597,13 @@ class Doc:
         self.text(x + w - 28, y + h / 2 + 1, "%d/%d" % (self.page_no, self.total), "Barlow-Bold", 10.5, WHITE, "center")
         self.text(x + w - 28, y + h / 2 - 9, "PLANCHE", "Barlow-Bold", 4.2, WHITE, "center")
 
-    def new_page(self):
+    def new_page(self, mark=None):
+        """mark : nom de la partie qui commence (sommaire de la couverture)."""
         if self.page_no:
             self.c.showPage()
         self.page_no += 1
+        if mark:
+            self.marks.setdefault(mark, self.page_no)
 
     # --- carte ---
     def map(self, view, x, y, w, h, draw, north=True, scale=True):
@@ -784,12 +849,15 @@ def page_cover(d, items, views):
     n_rep = sum(1 for it in items for r in it["replaces"] if not r.get("reused_by"))
     n_dev = sum(len(devices_of(it)) for it in items)
     lines = ["%d emplacement%s, classés par ordre de priorité (C1 à C%d)" % (len(items), "s" if len(items) > 1 else "", len(items)),
-             "%d nouvelle%s caméra%s à poser (%d appareil%s)" % (n_new, "s" if n_new > 1 else "", "s" if n_new > 1 else "", n_dev, "s" if n_dev > 1 else "")]
+             "%d emplacement%s à équiper de matériel neuf : %d caméra%s à commander" % (
+                 n_new, "s" if n_new > 1 else "", n_dev, "s" if n_dev > 1 else "")]
     if n_move:
         lines.append("%d caméra%s existante%s à déplacer%s" % (n_move, "s" if n_move > 1 else "", "s" if n_move > 1 else "",
                                                              " (dont %d réemploi%s)" % (n_reuse, "s" if n_reuse > 1 else "") if n_reuse else ""))
     if n_rep:
         lines.append("%d caméra%s existante%s à déposer, retour au stock" % (n_rep, "s" if n_rep > 1 else "", "s" if n_rep > 1 else ""))
+    if d.o.get("n_chains"):
+        lines.append("%d enchaînement%s de déplacements à suivre dans l'ordre (planche Suivi)" % (d.o["n_chains"], "s" if d.o["n_chains"] > 1 else ""))
     lines.append("Statuts retenus : %s" % ", ".join(STATUS_LABELS.get(s, s) for s in d.o["statuses"]))
     for ln in lines:
         d.text(64, y, ln, "Barlow-Regular", 9.5)
@@ -809,12 +877,15 @@ def page_cover(d, items, views):
     y = my - 50
     d.text(mx, y, "SOMMAIRE", "Barlow-Bold", 10)
     y -= 26
-    toc = [("Plan d'ensemble", 2)]
-    if items:
-        toc.append(("Fiches emplacements C1 à C%d" % len(items), 3))
-    toc.append(("Récapitulatif & quantitatif", 3 + len(items)))
-    if d.o.get("annex_page"):
-        toc.append(("Annexes – fiches techniques", d.o["annex_page"]))
+    # Pages relevees a la premiere passe (Doc.marks)
+    mk = d.o.get("marks") or {}
+    toc = [("Plan d'ensemble", mk.get("overview", 2))]
+    if mk.get("chains"):
+        toc.append(("Suivi des déplacements (%d enchaînement%s)" % (d.o["n_chains"], "s" if d.o["n_chains"] > 1 else ""), mk["chains"]))
+    toc.append(("Fiches emplacements C1 à C%d" % len(items), mk.get("items", 3)))
+    toc.append(("Récapitulatif & quantitatif", mk.get("recap", 3 + len(items))))
+    if mk.get("annex"):
+        toc.append(("Annexes – fiches techniques", mk["annex"]))
     for i, (t, pg) in enumerate(toc, 1):
         c.setFillColorRGB(*NAVY)
         c.circle(mx + 6, y + 3, 6, stroke=0, fill=1)
@@ -881,7 +952,7 @@ def legend(d, x, y, with_existing=True):
 
 
 def page_overview(d, items, existing, views):
-    d.new_page()
+    d.new_page("overview")
     d.frame("Plan d'ensemble")
     v = views["overview"]
     x, y = MARGIN + 6, PAGE_H - 90 - OVERVIEW[1]
@@ -904,7 +975,7 @@ def page_overview(d, items, existing, views):
 
 
 def page_item(d, it, items, existing, views):
-    d.new_page()
+    d.new_page("items")
     d.frame("%s · %s" % (it["rep"], it["name"][:60]))
     vm, vM = views[it["rep"] + ":micro"], views[it["rep"] + ":macro"]
     lat, lng = it["lat"], it["lng"]
@@ -966,23 +1037,32 @@ def page_item(d, it, items, existing, views):
     # Operation (a cote de la vue macro)
     ox, ow = x0 + MACRO[0] + 16, MICRO[0] - MACRO[0] - 16
     oy = d.section(ox, yb, "Opération")
-    oy = d.para(ox, oy, kind_label(it), ow, font="Barlow-SemiBold", size=8.5) - 3
+    oy = d.para(ox, oy, kind_label(it), ow, font="Barlow-SemiBold", size=8.5) - 1
+    ch = it.get("chain")
+    if ch:
+        txt = "Enchaînement %s – étape %d sur %d" % (ch["id"], ch["step"], ch["total"])
+        if d.o.get("marks", {}).get("chains"):
+            txt += " (planche %d, Suivi des déplacements)" % d.o["marks"]["chains"]
+        oy = d.para(ox, oy, txt, ow, font="Barlow-Bold", size=7.6, color=ORANGE) - 3
+    else:
+        oy -= 2
+    by_rep = {o["rep"]: o for o in items}
     n = 1
-    if it["moves"]:
-        m = it["moves"]
-        txt = "Caméra %s : %s%s." % ("réemployée" if m.get("removed_by") else "déplacée", m["name"], " (%s)" % m["ip"] if m.get("ip") else "")
-        if m.get("removed_by"):
-            txt += " Déposée par %s (remplacée sur place), puis reposée ici." % _proj_ref(m["removed_by"])
-        if m.get("lat") is not None:
-            txt += " Ancienne position %.6f, %.6f – déplacement de %d m." % (m["lat"], m["lng"], round(distance_m(m["lat"], m["lng"], lat, lng)))
-        oy = d.bullet(ox, oy, n, txt, ow, size=7.4)
+    oy = d.bullet(ox, oy, n, "Pose : " + pose_text(it, by_rep) + ".", ow, size=7.4)
+    n += 1
+    m = it["moves"]
+    if m and m.get("lat") is not None and m.get("removed_by"):
+        oy = d.bullet(ox, oy, n, "Ancienne position de %s : %.6f, %.6f – %d m d'ici." % (
+            m["name"], m["lat"], m["lng"], round(distance_m(m["lat"], m["lng"], lat, lng))), ow, size=7.4)
         n += 1
-    for r in it["replaces"]:
-        txt = "Remplace %s%s : à déposer" % (r["name"], " (%s)" % r["ip"] if r.get("ip") else "")
+    elif m and not m.get("removed_by"):
+        oy = d.bullet(ox, oy, n, "Emplacement d'origine de %s libéré (aucune caméra prévue à sa place)." % m["name"], ow, size=7.4)
+        n += 1
+    for r, (cam, to) in zip(it["replaces"], depose_rows(it, by_rep)):
+        txt = "Dépose : %s" % cam
         if r.get("lat") is not None:
-            txt += ", à %d m" % round(distance_m(r["lat"], r["lng"], lat, lng))
-        txt += ", réemployée en %s" % _proj_ref(r["reused_by"]) if r.get("reused_by") else ", retour au stock"
-        oy = d.bullet(ox, oy, n, txt + ".", ow, size=7.4)
+            txt += " (à %d m)" % round(distance_m(r["lat"], r["lng"], lat, lng))
+        oy = d.bullet(ox, oy, n, "%s, %s." % (txt, to), ow, size=7.4)
         n += 1
         if oy < 60:
             break
@@ -1003,7 +1083,12 @@ def page_item(d, it, items, existing, views):
         model = ", ".join(cameras_models.name(m) or "à définir" for m in models_of(it)) or "À définir"
     rows = [("Repère", "%s – priorité %s" % (it["rep"], it["priority"] or "non définie")),
             ("Statut", STATUS_LABELS.get(it["status"], it["status"])),
-            ("Modèle", model),
+            ("Modèle", model)]
+    if it["moves"]:
+        rows.append(("Caméra reposée", "%s – %s" % (it["moves"]["name"], _ip(it["moves"]))))
+    if it.get("chain"):
+        rows.append(("Enchaînement", "%s – étape %d / %d" % (it["chain"]["id"], it["chain"]["step"], it["chain"]["total"])))
+    rows += [
             ("Support de pose", mount),
             ("GPS (WGS84)", "%.6f N  %.6f E" % (lat, lng)),
             ("", "%s  %s" % (dms(lat, "N", "S"), dms(lng, "E", "O"))),
@@ -1048,20 +1133,75 @@ def page_item(d, it, items, existing, views):
     d.cartouche("Fiche emplacement %s" % it["rep"], "%s – %s" % (scale_label(vm, MICRO[0]), scale_label(vM, MACRO[0])))
 
 
+def pages_chains(d, items, chains):
+    """Suivi des deplacements : un tableau par enchainement, dans l'ordre des
+    travaux, avec l'IP actuelle de chaque camera existante deplacee."""
+    if not chains:
+        return
+    by_rep = {it["rep"]: it for it in items}
+    x = MARGIN + 6
+    W = PAGE_W - 2 * MARGIN - 12
+    cols = [("Étape", 34, "center"), ("Emplacement", 132, "left"), ("Pose", W - 34 - 132 - 200 - 150, "left"),
+            ("Dépose", 200, "left"), ("Devenir de la caméra déposée", 150, "left")]
+
+    def start(cont):
+        d.new_page("chains")
+        d.frame("Suivi des déplacements")
+        y = PAGE_H - 84
+        if not cont:
+            y = d.para(x, y, "Ordre conseillé des travaux, enchaînement par enchaînement : à chaque étape, la caméra est posée puis "
+                       "celle qu'elle remplace est déposée et part à l'étape indiquée. IP actuelle : adresse de la caméra existante "
+                       "aujourd'hui, à conserver ou à réattribuer selon le réseau du nouvel emplacement.", W, size=7.4) - 6
+        return y
+
+    y = start(False)
+    for ch in chains:
+        rows = []
+        for it in ch["steps"]:
+            dep = depose_rows(it, by_rep)
+            if not dep and it["moves"] and not it["moves"].get("removed_by"):
+                dep_txt, to_txt = "–", "emplacement d'origine libéré"
+            else:
+                dep_txt = " ; ".join(a for a, _b in dep) or "–"
+                to_txt = " ; ".join(b for _a, b in dep) or "–"
+            rows.append((it["chain"]["step"], "%s – %s" % (it["rep"], it["name"]), pose_text(it, by_rep), dep_txt, to_txt))
+        title = "Enchaînement %s – %d étape%s" % (ch["id"], len(rows), "s" if len(rows) > 1 else "")
+        if ch["cycle"]:
+            title += " – permutation : prévoir un stockage provisoire de la première caméra déposée"
+        if y < 150:
+            d.cartouche("Suivi des déplacements", "sans échelle")
+            y = start(True)
+        y = d.section(x, y - 4, title)
+        first = True
+        for i, row in enumerate(rows):
+            lines = max(len(simpleSplit(str(v), "Barlow-Regular", 7.2, w - 8) or [""]) for v, (_t, w, _a) in zip(row, cols))
+            h = 13 + (lines - 1) * 9 + (13 if first else 0)
+            if y - h < 70:
+                d.cartouche("Suivi des déplacements", "sans échelle")
+                y = start(True)
+                y = d.section(x, y - 4, title + " (suite)")
+                first = True
+            y = d.table(x, y, cols, [row], size=7.2, row_h=13, head=first, zebra=i)
+            first = False
+        y -= 16
+    d.cartouche("Suivi des déplacements", "sans échelle")
+
+
 VIGILANCE = [
     "Positions et angles de vue issus de la carte Cockpit (orthophoto IGN) : implantation exacte, hauteur et orientation à relever sur site.",
     "Portées DORI « observer » des fiches techniques (63 px/m) : à confirmer par un essai de cadrage à la pose.",
     "Alimentation et réseau (PoE, fibre, 4G) à vérifier pour chaque emplacement avant commande.",
     "Mâts et ancrages : DT-DICT avant toute fouille ; massif selon la notice du mât et la prise au vent.",
     "Caméras remplacées : maintenir la couverture pendant les travaux, dépose et retour du matériel au stock.",
+    "Caméras déplacées : suivre l'ordre des enchaînements (planche Suivi des déplacements), vérifier que l'IP actuelle reste valable sur le réseau du nouvel emplacement, puis mettre à jour leur fiche Cockpit (position, angles de vue).",
     "Vues sur des espaces privés : dessiner les masques de vie privée à la mise en service.",
     "Après pose : déclarer chaque caméra dans Cockpit (page Caméras) avec ses canaux, usages et angles de vue.",
 ]
 
 
 def pages_recap(d, items):
-    cols = [("Rep.", 30, "left"), ("Emplacement", 168, "left"), ("Prio.", 30, "center"), ("Type", 78, "left"),
-            ("Statut", 56, "left"), ("Support", 82, "left"), ("Canaux", 120, "left"), ("Remplace / déplace", 196, "left")]
+    cols = [("Rep.", 30, "left"), ("Emplacement", 140, "left"), ("Prio.", 30, "center"), ("Type", 92, "left"),
+            ("Statut", 56, "left"), ("Support", 72, "left"), ("Canaux", 86, "left"), ("Déplacements (IP actuelles)", 254, "left")]
     rows = []
     for it in items:
         mount = MOUNT_LABELS.get(it["mount"], "à définir")
@@ -1070,19 +1210,22 @@ def pages_recap(d, items):
         mob = sum(1 for ch in it["channels"] if ch.get("optics") == "mobile")
         fix = sum(1 for ch in it["channels"] if ch.get("optics") == "fixe")
         chans = " + ".join(x for x in ["%d PTZ" % mob if mob else "", "%d fixe%s" % (fix, "s" if fix > 1 else "") if fix else ""] if x) or "%d" % len(it["channels"])
-        rel = ", ".join(r["name"] + (" (réemploi %s)" % (r["reused_by"]["rep"] or "hors dossier") if r.get("reused_by") else "")
-                        for r in it["replaces"])
+        rel = ["dépose %s (%s) vers %s" % (r["name"], r.get("ip") or "IP ?", (r["reused_by"]["rep"] or "hors dossier") if r.get("reused_by") else "le stock")
+               for r in it["replaces"]]
         if it["moves"]:
-            rb = it["moves"].get("removed_by")
-            rel = ("réemploi de %s, déposée en %s" % (it["moves"]["name"], rb["rep"] or "projet hors dossier") if rb
-                   else "déplace %s" % it["moves"]["name"])
-        rows.append((it["rep"], it["name"], it["priority"] or "–",
-                     {"nouvelle": "Nouvelle", "remplacement": "Remplacement", "deplacement": "Déplacement"}[it["kind"]],
+            mv, rb = it["moves"], it["moves"].get("removed_by")
+            rel.insert(0, "pose %s (%s) %s" % (mv["name"], mv.get("ip") or "IP ?",
+                                              "venant de %s" % (rb["rep"] or "hors dossier") if rb else "depuis sa position"))
+        rel = " ; ".join(rel)
+        kind = {"nouvelle": "Nouvelle", "remplacement": "Remplacement", "deplacement": "Déplacement"}[it["kind"]]
+        if it.get("chain"):
+            kind += " · %s-%d" % (it["chain"]["id"], it["chain"]["step"])
+        rows.append((it["rep"], it["name"], it["priority"] or "–", kind,
                      STATUS_LABELS.get(it["status"], it["status"]), mount, chans, rel or "–"))
     per_page = 16
     chunks = [rows[i:i + per_page] for i in range(0, len(rows), per_page)] or [[]]
     for n, chunk in enumerate(chunks):
-        d.new_page()
+        d.new_page("recap")
         d.frame("Récapitulatif & quantitatif")
         y = d.section(MARGIN + 6, PAGE_H - 84, "Récapitulatif des emplacements" + (" (suite)" if n else ""))
         y = d.table(MARGIN + 6, y, cols, chunk, size=7, row_h=12.5)
@@ -1146,7 +1289,7 @@ def annex_models(items):
 
 def page_annex(d, annexes, pages):
     """Intercalaire des annexes : liste des fiches techniques jointes."""
-    d.new_page()
+    d.new_page("annex")
     d.frame("Annexes – fiches techniques")
     x = MARGIN + 6
     y = d.section(x, PAGE_H - 84, "Fiches techniques des modèles")
@@ -1181,6 +1324,7 @@ def build_pdf(db, opts):
     items, existing = collect(db, opts.get("statuses"), opts.get("ids"))
     if not items:
         return None, 0
+    chains = build_chains(items)
     now = datetime.now(PARIS)
     o = {
         "statuses": opts.get("statuses") or list(STATUS_LABELS),
@@ -1204,6 +1348,7 @@ def build_pdf(db, opts):
                 annexes.append((m, path))
                 annex_pages.append(n)
     o["annex"] = {m["_id"]: "A%d" % i for i, (m, _p) in enumerate(annexes, 1)}
+    o["n_chains"] = len(chains)
     views = _views_for(items, existing)
     # Deux passes : la premiere compte les planches (le recapitulatif peut
     # deborder), la seconde numerote les cartouches "n/total"
@@ -1213,13 +1358,14 @@ def build_pdf(db, opts):
         d.total = total
         page_cover(d, items, views)
         page_overview(d, items, existing, views)
+        pages_chains(d, items, chains)
         for it in items:
             page_item(d, it, items, existing, views)
         pages_recap(d, items)
         if annexes:
-            o["annex_page"] = d.page_no + 1
             page_annex(d, annexes, annex_pages)
         total = d.page_no
+        o["marks"] = dict(d.marks)
     d.c.showPage()
     d.c.save()
     pdf = d.buf.getvalue()

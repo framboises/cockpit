@@ -1210,12 +1210,23 @@ def _planned_refs(docs):
                 "removed_by": removed.get(o), "reused_by": reused.get(o)} for o in ids}
 
 
-def _pub_planned(d, refs=None):
+def _planned_devices(d, models=None):
+    """Appareils comptes au dossier pour ce projet (meme regle que le PDF :
+    cameras_models.devices) ; un deplacement ne commande rien."""
+    if d.get("moves_camera_id"):
+        return []
+    models = cameras_models.catalogue(_db) if models is None else models
+    pm = next((m for m in models if m["_id"] == d.get("model_id")), None) if d.get("model_id") else None
+    return [lab for lab, _m in cameras_models.devices(cameras_models.resolve_channels(models, _planned_channels(d)), pm)]
+
+
+def _pub_planned(d, refs=None, models=None):
     refs = _planned_refs([d]) if refs is None else refs
     return {"_id": str(d["_id"]), "name": d.get("name", ""), "note": d.get("note", ""),
             "status": d.get("status", "souhaitee"), "lat": d.get("lat"), "lng": d.get("lng"),
             "priority": d.get("priority"), "mount": d.get("mount") or "", "mount_height": d.get("mount_height"),
             "model_id": str(d["model_id"]) if d.get("model_id") else "",
+            "devices": _planned_devices(d, models),
             "replaces": [refs[o] for o in d.get("replaces") or [] if o in refs],
             "moves": refs.get(d.get("moves_camera_id")) if d.get("moves_camera_id") else None,
             "channels": [{"no": c.get("no"), "optics": c.get("optics") or "", "model": c.get("model") or "",
@@ -1452,7 +1463,8 @@ def list_planned():
     _ensure_db()
     docs = list(_db["cameras_planned"].find().sort("name", 1))
     refs = _planned_refs(docs)
-    return jsonify([_pub_planned(d, refs) for d in docs])
+    models = cameras_models.catalogue(_db)
+    return jsonify([_pub_planned(d, refs, models) for d in docs])
 
 
 @cameras_bp.route("/api/cameras/planned", methods=["POST"])

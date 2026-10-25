@@ -442,6 +442,24 @@ cartouche bas droite "n/N PLANCHE" (rendu en DEUX passes pour connaitre N).
   multi-capteurs = UN appareil par disposition complete (1 + 4 : 5 canaux =
   1 appareil, 10 = 2) ; un deplacement ne commande rien ; camera deplacee :
   objectif deduit de SON modele, jamais d'objectif par defaut.
+- Comptage du materiel (`cameras_models.devices`, aussi rendu par l'API dans
+  `devices` et affiche dans la fiche projet "Compte au dossier") : modele
+  multi-capteurs de l'emplacement = 1 appareil par disposition ; objectifs
+  d'un multi-capteurs groupes ; un PTZ generique (ou sans objectif) avec des
+  fixes hors multi-capteurs = UNE "camera multi-capteurs 1 PTZ + n fixes
+  (modele a definir)" (saisie canal par canal) ; sinon un appareil par canal.
+- Suivi des deplacements (`build_chains`, planche apres le plan d'ensemble
+  s'il y a des deplacements) : enchainements D1, D2... dans l'ordre des
+  travaux (tete = nouvel appareil ou deplacement simple, puis chaque camera
+  deposee reposee a l'etape suivante), un tableau par enchainement : etape,
+  emplacement, pose (camera, IP ACTUELLE, modele, provenance), depose (IP
+  actuelle), devenir (etape suivante, stock). Permutation (A chez B, B chez
+  A) signalee : stockage provisoire. Chaque fiche rappelle "Enchainement Dn -
+  etape k sur N" et la planche du suivi ; l'identification porte la camera
+  reposee et son IP ; le recapitulatif liste les deplacements avec les IP.
+  Sommaire de la couverture : pages relevees a la premiere passe
+  (`Doc.new_page(mark)`). Pas de fleche dans les textes : Barlow n'a pas le
+  glyphe.
 - Reemploi : planche du projet qui remplace "a deposer, reemployee en Cn"
   (sinon "retour au stock") ; planche du projet qui reinstalle "Reemploi
   d'une camera existante deposee par Cn" ; projet hors du dossier cite par
