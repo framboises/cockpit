@@ -114,8 +114,9 @@
   .sans-photo .ms{font-size:4vw}
   .infos{flex:0 0 auto; padding:1vh 1.2vw; display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:1vw; align-items:center}
   .infos .cam-nom{font-size:var(--t-grand); font-weight:900; line-height:1.1}
-  .infos .sous{font-size:var(--t-moyen); color:var(--muted); font-weight:600; display:flex; gap:0.8vw; align-items:center; min-width:0}
-  .infos .depuis{grid-row:1 / span 2; grid-column:2; text-align:right}
+  .infos .sous{grid-column:1 / -1; font-size:var(--t-moyen); color:var(--muted); font-weight:600; display:flex; flex-wrap:wrap;
+    gap:0.4vh 0.8vw; align-items:center; min-width:0; margin-top:0.4vh}
+  .infos .depuis{grid-row:1; grid-column:2; text-align:right}
   .infos .depuis .val{font-size:var(--t-geant); font-weight:900; line-height:1}
   .type{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:99px; font-weight:800; color:#0b1220; white-space:nowrap}
   .type.faux{background:var(--muted-2); color:#f1f5f9}
@@ -281,7 +282,8 @@
   function noteCamera(e) {
     var n = e.nature;
     if (!n || !n.fausse) return null;
-    return el("span", "camnote", "caméra : " + (TYPES[e.type] || TYPES.other).mot.toLowerCase());
+    // Une seule note courte : la camera s'est trompee
+    return el("span", "camnote", "fausse alerte · caméra : " + (TYPES[e.type] || TYPES.other).mot.toLowerCase());
   }
 
   /* ---------------- carte ---------------- */
@@ -445,9 +447,7 @@
       var zz = el("span", "zone une-ligne"); var i = el("i"); i.style.background = z.couleur;
       zz.appendChild(i); zz.appendChild(document.createTextNode(z.nom)); sous.appendChild(zz);
     });
-    if (!enCours && e.nature && e.nature.fausse) {
-      sous.appendChild(el("span", "camnote", "fausse alerte"));
-    } else if (!enCours && e.statut === "new") {
+    if (!enCours && e.statut === "new" && !(e.nature && e.nature.fausse)) {
       sous.appendChild(el("span", "", "non traitée"));
     }
     inf.appendChild(sous);
