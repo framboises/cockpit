@@ -18,8 +18,10 @@
   "use strict";
 
   var PERIODE_MS = 60000;
-  var EVENT = document.body.dataset.event || "";
-  var YEAR = document.body.dataset.year || "";
+  // Edition : ?event=&year= de l'URL, poses par le gabarit (meme contrat que
+  // /terrains et /general_stat).
+  var EVENT = window.EVENT;
+  var YEAR = window.YEAR;
 
   var COUL = { entree: "#3b82f6", sortie: "#f97316", mixte: "#a78bfa", ferme: "#475569" };
   var NIVEAU_COUL = { saturation: "#ef4444", saturation_prevue: "#f97316", vigilance: "#eab308", normal: "#22c55e" };
@@ -74,7 +76,6 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         dernier = d;
-        if (!EVENT && d.event) { EVENT = d.event; YEAR = String(d.year); }
         $("edition").textContent = (d.event || "") + " " + (d.year || "");
         rendreEtat(d);
       })

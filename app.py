@@ -4281,11 +4281,14 @@ def api_terrains_mapping():
 def doors():
     """Analyse des portes (poste operateur) : toutes les portes actives par
     mode (entree / mixte / sortie) et l'analyse detaillee d'une porte. Direct,
-    rejeu d'un jour passe et bilan RETEX d'une edition : portes_etat.py."""
+    rejeu d'un jour passe et bilan RETEX d'une edition : portes_etat.py.
+    Meme contrat que /terrains et /general_stat : ?event=&year= obligatoires."""
+    event = request.args.get('event')
+    year = request.args.get('year')
+    if not event or not year:
+        return "Missing event or year parameter", 400
     payload = getattr(request, 'user_payload', {})
-    return render_template("doors.html",
-                           event=request.args.get('event') or "",
-                           year=request.args.get('year') or "",
+    return render_template("doors.html", event=event, year=year,
                            user_roles=payload.get("roles", []),
                            user_firstname=payload.get("firstname", ""),
                            user_lastname=payload.get("lastname", ""),
@@ -4298,47 +4301,35 @@ def portes_mur_page():
     """Mur TV des portes : vue generale et alertes, aucune interaction. Meme
     role que /meteo-mur ; consomme /api/portes/etat en vue tv.
 
-    ?event=&year= : edition affichee, posee par le portail TITAN sur l'URL de
-    l'afficheur (nom Cockpit ou sigle : 24H MOTOS ou 24HM). Sans parametre :
-    l'edition suivie par le live-controle, sinon l'epreuve active. ?jour= et
-    ?a=HH:MM rejouent un instant passe."""
-    event, year = _portes_event_year()
+    Meme contrat que /terrains et /general_stat : ?event=&year= obligatoires,
+    poses par le portail TITAN sur l'URL de l'afficheur pour choisir
+    l'edition. ?jour= et ?a=HH:MM rejouent un instant passe."""
+    event = request.args.get('event')
+    year = request.args.get('year')
+    if not event or not year:
+        return "Missing event or year parameter", 400
     return render_template("portes_mur.html", event=event, year=year)
 
 
-def _portes_nom_evenement(event):
-    """Nom Cockpit d'un evenement recu par son nom ou son sigle (le portail
-    peut envoyer l'un ou l'autre) ; inchange s'il est inconnu."""
-    try:
-        ev = db.evenement.find_one({"$or": [{"nom": event}, {"short": event}]}, {"nom": 1})
-    except Exception:
-        ev = None
-    return (ev or {}).get("nom") or event
-
-
 def _portes_event_year():
-    """(event, year) de la requete, sinon l'edition suivie par le
-    live-controle, sinon l'epreuve active (event_courant). Un evenement sans
-    annee prend l'annee en cours."""
+    """(event, year) de la requete : obligatoires, comme /api/terrains/fill.
+    (None, None) s'il en manque un."""
     event = (request.args.get('event') or "").strip()
     year = (request.args.get('year') or "").strip()
-    if event:
-        annee = year or str(presents_etat.to_tranche_label(datetime.now(timezone.utc)).year)
-        return _portes_nom_evenement(event), annee
-    g = presents_etat.read_global(db)
-    if g.get("evenement"):
-        return g["evenement"], str(presents_etat.to_tranche_label(datetime.now(timezone.utc)).year)
-    ev, yr = EC.current_event(db)
-    return ev, str(yr)
+    if not event or not year:
+        return None, None
+    return event, year
 
 
 @app.route('/api/portes/etat', methods=['GET'])
 @role_required("user")
 def api_portes_etat():
-    """Etat des portes a un instant. ?event&year (defaut : edition en direct),
+    """Etat des portes a un instant. ?event&year obligatoires,
     ?jour=AAAA-MM-JJ, ?a=HH:MM (rejeu), ?vue=tv (sans series ni fiches)."""
     import portes_etat
     event, year = _portes_event_year()
+    if not event:
+        return jsonify({"error": "Missing event or year parameter"}), 400
     try:
         year = int(year)
     except (TypeError, ValueError):
@@ -4363,6 +4354,8 @@ def api_portes_bilan():
     """Bilan RETEX des portes d'une edition (par jour et par porte)."""
     import portes_etat
     event, year = _portes_event_year()
+    if not event:
+        return jsonify({"error": "Missing event or year parameter"}), 400
     try:
         year = int(year)
     except (TypeError, ValueError):

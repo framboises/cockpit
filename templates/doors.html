@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/doors.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-<body data-event="{{ event }}" data-year="{{ year }}">
+<body>
 
   <header class="barre">
     <div class="titre">
@@ -77,6 +77,10 @@
     </section>
   </main>
 
+  <script>
+    var EVENT = {{ event|tojson }};
+    var YEAR  = {{ year|tojson }};
+  </script>
   <script src="{{ url_for('static', filename='js/doors.js') }}"></script>
 </body>
 </html>
