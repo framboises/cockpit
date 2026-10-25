@@ -1130,6 +1130,135 @@ def image(rel):
     return send_file(full, mimetype="image/jpeg", max_age=7 * 86400)
 
 
+# ---------------------------------------------------------------------------
+# Mur TV des intrusions (/intrusions-mur, routes dans app.py : role manager et
+# afficheurs, hors de ce blueprint reserve a la page Detection)
+# ---------------------------------------------------------------------------
+MUR_A_TRAITER_H = 12      # intrusions non traitees montrees sur le mur
+MUR_A_TRAITER_MAX = 8
+
+
+def _mur_photo(rel):
+    return "/api/intrusions/photo?p=" + rel if rel else None
+
+
+def _mur_episode(ep, zones, now):
+    """Intrusion vue du mur : photo de couverture (meilleure cible) et
+    derniere photo (la plus fraiche, pour une intrusion en cours)."""
+    last, start = _utc(ep.get("last_at")), _utc(ep.get("started_at"))
+    cover = ep.get("cover") or {}
+    der = (ep.get("photos") or [{}])[-1] or {}
+    ai = ep.get("ai") or {}
+    types = ep.get("target_types") or []
+    return {
+        "id": str(ep["_id"]),
+        "camera": ep.get("camera_name", ""), "canal": ep.get("channel_name", ""),
+        "camera_id": str(ep.get("camera_id") or ""),
+        "debut": _iso(start), "dernier": _iso(last),
+        "duree_s": int((last - start).total_seconds()) if last and start else 0,
+        "depuis_s": int((now - last).total_seconds()) if last else None,
+        "type": "human" if "human" in types else "vehicle" if "vehicle" in types else "other",
+        "photo": _mur_photo(cover.get("photo")), "rect": cover.get("rect"),
+        "photo_der": _mur_photo(der.get("photo")), "rect_der": der.get("rect"),
+        "zones": [{"id": str(z["_id"]), "nom": z.get("name", ""), "couleur": z.get("color", "#d97706")} for z in _zones_of(ep, zones)],
+        "statut": ep.get("status", "new"),
+        "ia": {"statut": ai.get("status"), "label": ai.get("label"), "conf": ai.get("real_conf")} if ai else None,
+    }
+
+
+def etat_mur(db, now=None):
+    """Tout ce que le mur affiche, en un appel (rafraichi toutes les 5 s).
+
+    Une intrusion du mur = dans le planning (armed) ET non filtree par l'IA
+    (aucune alerte n'est partie pour une filtree) : les autres ne sont que
+    comptees. En cours = message il y a moins de EPISODE_GAP_S."""
+    now = now or datetime.now(timezone.utc)
+    zones = _zones(db)
+    minuit = datetime.combine(now.astimezone(arming.PARIS).date(), datetime.min.time(),
+                              tzinfo=arming.PARIS).astimezone(timezone.utc)
+    depuis = min(minuit, now - timedelta(hours=MUR_A_TRAITER_H))
+    eps = list(db["hik_intrusions"].find(
+        {"started_at": {"$gte": depuis.replace(tzinfo=None)}},
+        {"photos": {"$slice": -1}, "targets": 0, "events": 0}).sort("started_at", DESCENDING).limit(3000))
+
+    tot = {"intrusions": 0, "human": 0, "vehicle": 0, "a_traiter": 0, "filtrees": 0, "hors_planning": 0}
+    par_heure = [0] * 24
+    en_cours, a_traiter, derniere = [], [], None
+    par_camera = {}
+    for ep in eps:
+        start, last = _utc(ep.get("started_at")), _utc(ep.get("last_at"))
+        du_jour = bool(start and start >= minuit)
+        if ep.get("armed") is False:
+            tot["hors_planning"] += du_jour
+            continue
+        if (ep.get("ai") or {}).get("status") == "filtered":
+            tot["filtrees"] += du_jour
+            continue
+        item = None
+        actif = bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
+        nouveau = ep.get("status", "new") == "new"
+        cam = par_camera.setdefault(str(ep.get("camera_id") or ""), {"actif": False, "a_traiter": 0, "jour": 0})
+        if du_jour:
+            types = ep.get("target_types") or []
+            tot["intrusions"] += 1
+            tot["human"] += "human" in types
+            tot["vehicle"] += "vehicle" in types and "human" not in types
+            tot["a_traiter"] += nouveau
+            par_heure[start.astimezone(arming.PARIS).hour] += 1
+            cam["jour"] += 1
+        if actif:
+            cam["actif"] = True
+            item = _mur_episode(ep, zones, now)
+            en_cours.append(item)
+        elif nouveau and start and start >= now - timedelta(hours=MUR_A_TRAITER_H):
+            cam["a_traiter"] += 1
+            if len(a_traiter) < MUR_A_TRAITER_MAX:
+                a_traiter.append(_mur_episode(ep, zones, now))
+        if derniere is None and not actif:
+            derniere = item or _mur_episode(ep, zones, now)
+
+    groups = list(db["detection_groups"].find().sort("name", 1))
+    etats = {str(g["_id"]): arming.group_state(g, now, db)[0] for g in groups}
+    cameras = {}
+    for ch in _detection_channels(db):
+        if "alerte" not in ch["modes"] or not ch["map"]:
+            continue
+        gs = arming.channel_groups(groups, ch["camera_id"], ch["channel"])
+        arme = ch["enabled"] and ((not gs) or any(etats.get(str(g["_id"])) for g in gs))
+        c = cameras.setdefault(ch["camera_id"], {
+            "id": ch["camera_id"], "nom": ch["camera_name"], "lat": ch["map"]["lat"], "lng": ch["map"]["lng"],
+            "canaux": 0, "arme": False})
+        c["canaux"] += 1
+        c["arme"] = c["arme"] or arme
+    for cid, c in cameras.items():
+        c.update(par_camera.get(cid) or {"actif": False, "a_traiter": 0, "jour": 0})
+
+    zones_actives = {zz["id"] for e in en_cours for zz in e["zones"]}
+    zs = [{"nom": z.get("name", ""), "couleur": z.get("color", "#d97706"), "polygone": z["polygon"],
+           "actif": str(z["_id"]) in zones_actives}
+          for z in zones if len(z.get("polygon") or []) >= 3]
+    return {
+        "maintenant": _iso(now),
+        "en_cours": en_cours, "a_traiter": a_traiter, "derniere": derniere,
+        "totaux": tot, "par_heure": par_heure,
+        "cameras": sorted(cameras.values(), key=lambda c: c["nom"]),
+        "zones": zs,
+        "groupes": [{"nom": g.get("name", ""), "couleur": g.get("color", "#2563eb"), "arme": etats[str(g["_id"])],
+                     "libelle": _pub_group(g, now, db=db)["state_label"]} for g in groups],
+    }
+
+
+def image_mur(rel):
+    """Photo d'intrusion pour le mur : meme garde que image(), intrusions/ seul."""
+    safe = os.path.normpath(rel or "")
+    if ".." in safe or os.path.isabs(safe) or not safe.replace("\\", "/").startswith("intrusions/"):
+        abort(400)
+    full = os.path.abspath(os.path.join(HIK_IMAGE_DIR, safe))
+    if not full.startswith(os.path.abspath(HIK_IMAGE_DIR) + os.sep) or not os.path.isfile(full):
+        abort(404)
+    return send_file(full, mimetype="image/jpeg", max_age=7 * 86400)
+
+
 # Capture IA (trafic) et galerie d'entrainement : routes dans ia_capture.py,
 # sur ce meme blueprint (memes droits que la page)
 import ia_capture  # noqa: E402,F401

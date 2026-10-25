@@ -447,6 +447,7 @@ SUPER_ADMIN_ROLE = "super_admin"
 PAGES_AFFICHEUR = frozenset({
     "/meteo-mur", "/api/meteo/mur",        # mur meteo (manager) et sa charge unique
     "/portes-mur", "/api/portes/etat",     # mur des portes (manager) et son etat
+    "/intrusions-mur", "/api/intrusions/mur", "/api/intrusions/photo",  # mur des intrusions (manager)
     "/circulation",                         # trafic (manager) ; /alerts et /trafic/all_routes sont en user
     "/", "/doors", "/terrains", "/general_stat",  # deja en user : listees pour le mode cadre
 })
@@ -622,6 +623,7 @@ PAGE_REGISTRY = [
     {"id": "circulation",  "label": "Circulation",        "icon": "moving",          "role": "manager", "paths": ["/circulation"]},
     {"id": "meteo_mur",    "label": "Mur meteo",          "icon": "radar",           "role": "manager", "paths": ["/meteo-mur"]},
     {"id": "portes_mur",   "label": "Mur portes",         "icon": "door_sliding",    "role": "manager", "paths": ["/portes-mur"]},
+    {"id": "intrusions_mur", "label": "Mur intrusions",   "icon": "shield_person",   "role": "manager", "paths": ["/intrusions-mur", "/api/intrusions"]},
     {"id": "pmv",          "label": "PMV",                "icon": "signpost",        "role": "manager", "paths": ["/pmv", "/api/pmv"]},
 ]
 ALL_PAGE_IDS = [p["id"] for p in PAGE_REGISTRY]
@@ -4293,6 +4295,30 @@ def doors():
                            user_firstname=payload.get("firstname", ""),
                            user_lastname=payload.get("lastname", ""),
                            user_email=payload.get("email", ""))
+
+
+@app.route('/intrusions-mur', methods=['GET'])
+@role_required("manager")
+def intrusions_mur_page():
+    """Mur TV des intrusions : carte des cameras de detection, intrusions en
+    cours avec leur photo, a traiter, totaux du jour. Aucune interaction ;
+    consomme /api/intrusions/mur toutes les 5 s (detection.etat_mur). Les
+    photos passent par /api/intrusions/photo?p= (chemin exact, afficheurs)."""
+    return render_template("intrusions_mur.html")
+
+
+@app.route('/api/intrusions/mur', methods=['GET'])
+@role_required("manager")
+def api_intrusions_mur():
+    import detection
+    return jsonify(detection.etat_mur(detection._ensure_db()))
+
+
+@app.route('/api/intrusions/photo', methods=['GET'])
+@role_required("manager")
+def api_intrusions_photo():
+    import detection
+    return detection.image_mur(request.args.get("p", ""))
 
 
 @app.route('/portes-mur', methods=['GET'])

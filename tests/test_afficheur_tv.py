@@ -103,6 +103,21 @@ class TestLectureAfficheur:
         assert rep.status_code == 200
         assert rep.get_json()["event"] == "24H MOTOS" and rep.get_json()["year"] == 2026
 
+    def test_mur_des_intrusions(self, env, client, monkeypatch):
+        import detection
+        monkeypatch.setattr(detection, "_db", env)
+        c = _avec(client, _jeton(env))
+        rep = c.get("/intrusions-mur")
+        assert rep.status_code == 200
+        assert rep.headers.get("Content-Security-Policy") == TestModeCadre.CSP
+        rep = c.get("/api/intrusions/mur")
+        assert rep.status_code == 200 and rep.get_json()["en_cours"] == []
+        # Photo : chemin exact (query string), garde de chemin
+        assert c.get("/api/intrusions/photo?p=../secret.jpg").status_code == 400
+        assert c.get("/api/intrusions/photo?p=captures/x.jpg").status_code == 400
+        for chemin in ("/intrusions-mur", "/api/intrusions/mur"):
+            _refuse(_avec(client, _jeton(env, borne=False)).get(chemin))
+
     def test_mur_des_portes_sans_edition_refuse(self, env, client):
         c = _avec(client, _jeton(env))
         assert c.get("/portes-mur").status_code == 400

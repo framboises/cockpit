@@ -113,6 +113,10 @@
             <span class="material-symbols-outlined">door_sliding</span>
             <span class="label">Mur portes</span>
         </a>{% endif %}
+        {% if _mgr and (page_allowed is not defined or page_allowed('intrusions_mur')) %}<a href="/intrusions-mur" class="nav-btn" target="_blank" rel="noopener" title="Mur des intrusions plein ecran (cameras de detection)" data-nav-item>
+            <span class="material-symbols-outlined">shield_person</span>
+            <span class="label">Mur intrusions</span>
+        </a>{% endif %}
         {% endset %}
         {{ nav_group('tv', 'tv', 'Ecrans TV', _g_tv) }}
 

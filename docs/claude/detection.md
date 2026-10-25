@@ -681,3 +681,35 @@ detecteur ou avis SigLIP, quelle que soit la decision ("l'IA voit surtout").
 Capture brute des messages d'un chemin : `PCA\SCRIPTS\raw_capture.json`
 (`{"paths": ["/portehoux"], "until": "<ISO>", "max_per_path": 400}`), relu a
 chaud, ecrit dans `PCA\SCRIPTS\logs\raw_capture\<chemin>\`.
+
+## Mur TV des intrusions (`/intrusions-mur`)
+
+Ecran de surveillance du PC (role manager, afficheurs du portail), sans clic,
+rafraichi toutes les 5 s. Menu : Ecrans TV > "Mur intrusions". Page
+`templates/intrusions_mur.html` (CSS / JS en ligne, comme les autres murs),
+calcul `detection.etat_mur(db, now)`, routes dans `app.py` (HORS du
+blueprint Detection, reserve aux admins et au groupe Detection) :
+`/api/intrusions/mur` et `/api/intrusions/photo?p=intrusions/...` (chemin
+EXACT pour `PAGES_AFFICHEUR`, la photo passe en query string ; `image_mur`
+n'accepte que `intrusions/`, jamais `captures/`).
+
+- Intrusion du mur = DANS LE PLANNING et NON FILTREE par l'IA (aucune alerte
+  n'est partie pour les autres) : filtrees et hors planning sont seulement
+  comptees dans le pied.
+- En cours (message < `EPISODE_GAP_S`) : en-tete et cadre de la carte rouges,
+  "INTRUSION EN COURS", DERNIERE photo de l'episode (la plus fraiche) avec le
+  cadre de la cible et un zoom sur elle, camera, zone, type, duree a la
+  seconde ; les autres en cours en vignettes ; le bandeau "a traiter" est
+  masque pour laisser la place a la photo.
+- Calme : "AUCUNE INTRUSION" en vert, derniere intrusion (photo de
+  couverture), puis les 4 dernieres non traitees (`status new`, 12 h).
+  Pastille "a jour HH:MM" / "DONNEES ARRETEES" : un ecran calme ne doit pas
+  ressembler a un ecran fige.
+- Carte : un point par appareil (`_detection_channels`, usage
+  fielddetection, position connue) ; rouge = en cours (etiquette), orange =
+  a traiter (nombre), vert = active (`arming`, canal sans groupe = actif),
+  gris = hors planning ou desactive. Zones dessinees, rouges quand une
+  intrusion en cours les concerne. Carte figee (cadree sur cameras + zones).
+- Pied : intrusions du jour (heure de Paris), pietons, vehicules, non
+  traitees, ecartees par l'IA, hors planning, histogramme par heure.
+- Le mur ne traite rien : le traitement reste dans `/detection`.

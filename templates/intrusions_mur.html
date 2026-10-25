@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intrusions - Poste de commandement</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+
+  <style>
+  /* ==========================================================================
+     MUR DES INTRUSIONS - TV du poste de commandement
+
+     Lu de 3 a 5 m, sans clic. Une seule question : quelqu'un est-il entre ?
+       - Intrusion en cours : tout l'ecran passe au rouge, la photo la plus
+         fraiche occupe le panneau, avec un zoom sur la cible, la camera, la
+         zone, le type (pieton / vehicule) et depuis combien de temps.
+       - Sinon : "AUCUNE INTRUSION EN COURS" en vert (un ecran calme et un
+         ecran en panne ne doivent pas se ressembler : l'heure du dernier
+         rafraichissement est toujours visible).
+     La carte place chaque camera de detection (un point par appareil) :
+     rouge = intrusion en cours, orange = a traiter, vert = surveillance
+     active, gris = hors planning. Les intrusions filtrees par l'IA et hors
+     planning ne sont que comptees (aucune alerte n'est partie).
+     Donnees : /api/intrusions/mur (detection.etat_mur), toutes les 5 s.
+     ========================================================================== */
+  :root{
+    --bg:#0b1220; --bg-2:#0f172a; --panel:#1e293b; --panel-2:#172132;
+    --line:rgba(148,163,184,0.16); --line-2:rgba(148,163,184,0.30);
+    --text:#f1f5f9; --muted:#94a3b8; --muted-2:#64748b;
+    --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444; --off:#64748b;
+    --pieton:#f97316; --vehicule:#38bdf8;
+    --t-verdict: clamp(1.6rem, min(2.7vw, 5vh), 5rem);
+    --t-geant:   clamp(1.8rem, min(3.4vw, 6vh), 5.4rem);
+    --t-grand:   clamp(1.3rem, min(2.2vw, 3.9vh), 3rem);
+    --t-moyen:   clamp(1rem, min(1.45vw, 2.6vh), 2rem);
+    --t-libelle: clamp(0.75rem, min(0.95vw, 1.7vh), 1.2rem);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  [hidden]{display:none !important}
+  html,body{height:100%}
+  body{background:var(--bg); color:var(--text); font-family:'Outfit',system-ui,sans-serif;
+    overflow:hidden; display:flex; flex-direction:column; font-variant-numeric:tabular-nums}
+  .ms{font-family:'Material Symbols Outlined'; font-weight:normal; font-style:normal; line-height:1;
+    display:inline-block; font-variation-settings:'FILL' 1; vertical-align:-0.12em}
+  .libelle{font-size:var(--t-libelle); font-weight:700; text-transform:uppercase; letter-spacing:0.09em; color:var(--muted)}
+  .une-ligne{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+
+  /* En-tete */
+  .tete{display:flex; align-items:center; gap:clamp(12px,1.6vw,32px); padding:0.8vh 1.4vw;
+    background:var(--bg-2); border-bottom:1px solid var(--line); flex:0 0 auto; transition:background .3s}
+  .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted)}
+  .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
+  .groupes{display:flex; gap:0.6vw; min-width:0; overflow:hidden}
+  .groupe{display:flex; align-items:center; gap:0.4vw; font-size:var(--t-libelle); font-weight:700; white-space:nowrap;
+    padding:0.35vh 0.7vw; border-radius:99px; background:var(--panel); border:1px solid var(--line)}
+  .groupe.off{color:var(--muted-2)}
+  .flux{margin-left:auto; font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center; white-space:nowrap}
+  .puce{width:0.8vw; height:0.8vw; min-width:12px; min-height:12px; border-radius:50%; display:inline-block; margin-right:0.5vw; flex:0 0 auto}
+  body.alerte .tete{background:#7f1d1d}
+  body.alerte .marque{color:#fecaca}
+
+  /* Corps : carte | panneau */
+  .corps{flex:1 1 0; min-height:0; display:grid; grid-template-columns:minmax(0,56fr) minmax(0,44fr); gap:1vw; padding:1vh 1.4vw}
+  .carte{position:relative; border-radius:1vw; overflow:hidden; border:1px solid var(--line); background:var(--panel-2)}
+  #carte{position:absolute; inset:0; background:#0b1220}
+  .leaflet-tile-pane{filter:brightness(0.62) saturate(0.7)}
+  .leaflet-control-attribution{display:none}
+  .legende{position:absolute; left:1vw; bottom:1vh; z-index:500; display:flex; gap:1vw; padding:0.6vh 1vw;
+    background:rgba(11,18,32,0.82); border-radius:0.6vw; font-size:var(--t-libelle); font-weight:700; color:var(--muted)}
+  .legende span{display:flex; align-items:center}
+  body.alerte .carte{border:0.35vw solid var(--crit)}
+
+  /* Points cameras */
+  .cam{position:relative; width:100%; height:100%}
+  .cam i{position:absolute; inset:0; border-radius:50%; border:3px solid #0b1220; box-shadow:0 0 0 2px rgba(255,255,255,0.65)}
+  .cam b{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:13px; font-weight:900; color:#0b1220}
+  .cam.actif i{background:var(--crit); box-shadow:0 0 0 3px #fff}
+  .cam.actif::before{content:""; position:absolute; inset:-60%; border-radius:50%; border:4px solid var(--crit); animation:onde 1.4s ease-out infinite}
+  .cam.traiter i{background:var(--warn)}
+  .cam.arme i{background:var(--ok)}
+  .cam.off i{background:var(--off)}
+  @keyframes onde{0%{transform:scale(0.4); opacity:1}100%{transform:scale(1.5); opacity:0}}
+  .leaflet-tooltip.etiq{background:var(--crit); color:#fff; border:0; border-radius:6px; font:800 16px 'Outfit',sans-serif;
+    padding:3px 9px; box-shadow:0 4px 14px rgba(0,0,0,0.5)}
+  .leaflet-tooltip.etiq::before{border-top-color:var(--crit)}
+
+  /* Panneau */
+  .panneau{display:flex; flex-direction:column; gap:1vh; min-height:0}
+  .verdict{border-radius:1vw; padding:1.2vh 1.4vw; border-left:0.7vw solid var(--ok); background:rgba(34,197,94,0.08); flex:0 0 auto}
+  .verdict .titre{font-size:var(--t-verdict); font-weight:900; line-height:1.05; color:var(--ok); letter-spacing:-0.01em; white-space:nowrap; overflow:hidden}
+  .verdict .detail{font-size:var(--t-moyen); color:var(--muted); margin-top:0.3vh}
+  .verdict.crit{border-left-color:var(--crit); background:var(--crit)}
+  .verdict.crit .titre{color:#fff}
+  .verdict.crit .detail{color:#fee2e2; font-weight:600}
+
+  /* Intrusion principale */
+  .une{flex:1 1 0; min-height:0; display:flex; flex-direction:column; background:var(--panel); border-radius:1vw; overflow:hidden; border:1px solid var(--line)}
+  .une.crit{border:0.3vw solid var(--crit)}
+  .photos{flex:1 1 0; min-height:0; display:grid; grid-template-columns:minmax(0,1.75fr) minmax(0,1fr); gap:0.4vw; background:#000}
+  .scene,.zoom{position:relative; overflow:hidden; background:#000}
+  .scene img{position:absolute; inset:0; width:100%; height:100%; object-fit:contain}
+  .zoom img{position:absolute; max-width:none}
+  .cadre{position:absolute; border:3px solid var(--crit); box-shadow:0 0 0 2px rgba(0,0,0,0.6); border-radius:3px}
+  .zoom .cadre{border-width:4px}
+  .zoom .tag{position:absolute; left:0.5vw; top:0.5vh; font-size:var(--t-libelle); font-weight:800; background:rgba(0,0,0,0.65); padding:0.2vh 0.5vw; border-radius:4px}
+  .sans-photo{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:1vh; color:var(--muted-2); font-size:var(--t-moyen)}
+  .sans-photo .ms{font-size:4vw}
+  .infos{flex:0 0 auto; padding:1vh 1.2vw; display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:1vw; align-items:center}
+  .infos .cam-nom{font-size:var(--t-grand); font-weight:900; line-height:1.1}
+  .infos .sous{font-size:var(--t-moyen); color:var(--muted); font-weight:600; display:flex; gap:0.8vw; align-items:center; min-width:0}
+  .infos .depuis{grid-row:1 / span 2; grid-column:2; text-align:right}
+  .infos .depuis .val{font-size:var(--t-geant); font-weight:900; line-height:1}
+  .type{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:99px; font-weight:800; color:#0b1220; white-space:nowrap}
+  .type.human{background:var(--pieton)} .type.vehicle{background:var(--vehicule)} .type.other{background:var(--muted)}
+  .zone{display:inline-flex; align-items:center; gap:0.3vw; white-space:nowrap; flex:0 0 auto}
+  .infos .ia{color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+  .zone i{width:0.8vw; height:0.8vw; min-width:10px; min-height:10px; border-radius:3px; display:inline-block}
+  .une.calme{opacity:0.78}
+  .une.calme .cadre{border-color:var(--warn)}
+
+  /* Autres intrusions en cours */
+  .autres{flex:0 0 auto; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0.6vw; height:22vh}
+  .autre .vig{flex:1 1 0; min-height:0}
+  .autre{background:var(--crit); border-radius:0.8vw; overflow:hidden; display:flex; flex-direction:column}
+  .autre .vig{position:relative; background:#000}
+  .autre .vig img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
+  .autre .t{font-size:var(--t-libelle); font-weight:800; padding:0.4vh 0.6vw}
+
+  /* A traiter */
+  .traiter{flex:0 0 auto}
+  .traiter .entete{display:flex; align-items:baseline; gap:0.8vw; margin-bottom:0.6vh}
+  .traiter .entete .nb{font-size:var(--t-moyen); font-weight:900; color:var(--warn)}
+  .vignettes{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0.6vw}
+  .vignette{background:var(--panel); border-radius:0.7vw; overflow:hidden; border-top:0.35vh solid var(--warn)}
+  .vignette .vig{position:relative; aspect-ratio:4/3; background:#000}
+  .vignette .vig img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
+  .vignette .vig > .ms{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:2.4vw; color:var(--muted-2)}
+  .vignette .vig .type{position:absolute; left:0.4vw; top:0.4vh; font-size:var(--t-libelle); padding:0.1vh 0.4vw}
+  .vignette .t{padding:0.4vh 0.6vw; display:flex; gap:0.5vw; align-items:baseline; min-width:0}
+  .vignette .t .h{font-size:var(--t-moyen); font-weight:900}
+  .vignette .t .c{font-size:var(--t-libelle); color:var(--muted); font-weight:600}
+  .aucune{font-size:var(--t-moyen); color:var(--muted-2)}
+
+  /* Pied : chiffres du jour + rythme horaire */
+  .pied{flex:0 0 auto; display:flex; gap:1vw; padding:0 1.4vw 1vh; align-items:stretch}
+  .chiffre{background:var(--panel); border:1px solid var(--line); border-radius:0.9vw; padding:0.6vh 1.1vw; min-width:0; flex:0 0 auto}
+  .chiffre .val{font-size:var(--t-grand); font-weight:900; line-height:1.05}
+  .chiffre.warn .val{color:var(--warn)}
+  .chiffre.discret .val{color:var(--muted)}
+  .rythme{flex:1 1 auto; background:var(--panel); border:1px solid var(--line); border-radius:0.9vw; padding:0.6vh 1.1vw; display:flex; flex-direction:column; min-width:0}
+  .barres{flex:1 1 auto; display:flex; align-items:flex-end; gap:3px; min-height:3vh; margin-top:0.4vh}
+  .barres span{flex:1 1 0; background:var(--muted-2); border-radius:2px 2px 0 0; min-height:2px}
+  .barres span.n{background:var(--crit)}
+  .barres span.now{outline:2px solid var(--text)}
+  .heures{display:flex; justify-content:space-between; font-size:var(--t-libelle); color:var(--muted-2)}
+  .clign{animation:clign 1.2s ease-in-out infinite}
+  @keyframes clign{0%,100%{opacity:1}50%{opacity:0.45}}
+  </style>
+</head>
+<body>
+
+  <header class="tete">
+    <span class="marque">INTRUSIONS</span>
+    <span class="horloge" id="horloge">--:--</span>
+    <div class="groupes" id="groupes"></div>
+    <span class="flux" id="flux"><span class="puce" style="background:var(--muted-2)"></span>chargement</span>
+  </header>
+
+  <main class="corps">
+    <section class="carte">
+      <div id="carte"></div>
+      <div class="legende">
+        <span><span class="puce" style="background:var(--crit)"></span>En cours</span>
+        <span><span class="puce" style="background:var(--warn)"></span>À traiter</span>
+        <span><span class="puce" style="background:var(--ok)"></span>Surveillance active</span>
+        <span><span class="puce" style="background:var(--off)"></span>Hors planning</span>
+      </div>
+    </section>
+
+    <section class="panneau">
+      <div class="verdict" id="verdict"><div class="titre">CHARGEMENT</div></div>
+      <div class="une" id="une" hidden></div>
+      <div class="autres" id="autres" hidden></div>
+      <div class="traiter" id="traiter"></div>
+    </section>
+  </main>
+
+  <footer class="pied" id="pied"></footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(function () {
+  "use strict";
+  var RAFRAICHIR_MS = 5000;
+  var CENTRE = [47.938561, 0.224318];
+  var TYPES = {
+    human: { mot: "Piéton", ico: "directions_walk" },
+    vehicle: { mot: "Véhicule", ico: "directions_car" },
+    other: { mot: "Cible", ico: "help" }
+  };
+
+  var S = { data: null, decalage: 0, recu: 0, signature: "", cadre: false, erreur: null };
+  var carte, coucheCams, coucheZones;
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, txt) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (txt != null) e.textContent = txt;
+    return e;
+  }
+  function ico(nom, cls) { return el("span", "ms" + (cls ? " " + cls : ""), nom); }
+  function maintenant() { return Date.now() + S.decalage; }
+  function hm(iso) {
+    var d = new Date(iso);
+    return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+  }
+  function duree(s) {
+    s = Math.max(0, Math.round(s));
+    if (s < 60) return s + " s";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + " min " + ("0" + (s % 60)).slice(-2);
+    return Math.floor(m / 60) + " h " + ("0" + (m % 60)).slice(-2);
+  }
+  function pastilleType(t) {
+    var T = TYPES[t] || TYPES.other;
+    var p = el("span", "type " + (TYPES[t] ? t : "other"));
+    p.appendChild(ico(T.ico)); p.appendChild(document.createTextNode(T.mot));
+    return p;
+  }
+
+  /* ---------------- carte ---------------- */
+  function initCarte() {
+    carte = L.map("carte", { center: CENTRE, zoom: 15, maxZoom: 20, zoomControl: false,
+      attributionControl: true, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
+      boxZoom: false, keyboard: false, touchZoom: false });
+    L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      { attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 20 }).addTo(carte);
+    coucheZones = L.layerGroup().addTo(carte);
+    coucheCams = L.layerGroup().addTo(carte);
+    if (window.ResizeObserver) new ResizeObserver(function () { carte.invalidateSize(); cadrer(true); }).observe($("carte"));
+  }
+
+  function cadrer(force) {
+    var d = S.data;
+    if (!d || (S.cadre && !force)) return;
+    var pts = d.cameras.map(function (c) { return [c.lat, c.lng]; });
+    d.zones.forEach(function (z) { pts = pts.concat(z.polygone); });
+    if (!pts.length) return;
+    carte.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: 18 });
+    S.cadre = true;
+  }
+
+  function dessinerCarte(d) {
+    coucheZones.clearLayers();
+    coucheCams.clearLayers();
+    d.zones.forEach(function (z) {
+      L.polygon(z.polygone, {
+        color: z.actif ? "#ef4444" : z.couleur, weight: z.actif ? 5 : 2,
+        fillColor: z.actif ? "#ef4444" : z.couleur, fillOpacity: z.actif ? 0.4 : 0.12,
+        className: z.actif ? "clign" : ""
+      }).addTo(coucheZones);
+    });
+    // Les cameras en cours au-dessus des autres
+    var ordre = { actif: 3, traiter: 2, arme: 1, off: 0 };
+    d.cameras.map(function (c) {
+      return { c: c, etat: c.actif ? "actif" : c.a_traiter ? "traiter" : c.arme ? "arme" : "off" };
+    }).sort(function (a, b) { return ordre[a.etat] - ordre[b.etat]; }).forEach(function (o) {
+      var c = o.c, taille = o.etat === "actif" ? 34 : o.etat === "traiter" ? 26 : 18;
+      var html = '<div class="cam ' + o.etat + '"><i></i>' +
+        (o.etat === "traiter" ? "<b>" + Math.min(c.a_traiter, 99) + "</b>" : "") + "</div>";
+      var m = L.marker([c.lat, c.lng], {
+        icon: L.divIcon({ className: "", html: html, iconSize: [taille, taille], iconAnchor: [taille / 2, taille / 2] }),
+        zIndexOffset: ordre[o.etat] * 1000, keyboard: false, interactive: false
+      }).addTo(coucheCams);
+      if (o.etat === "actif") {
+        // Texte en noeud : Leaflet interprete une chaine comme du HTML
+        m.bindTooltip(el("span", "", c.nom), { permanent: true, direction: "top", offset: [0, -20], className: "etiq" });
+      }
+    });
+    cadrer(false);
+  }
+
+  /* ---------------- photo + zoom ---------------- */
+  function zoneZoom(rect, imgRatio, frameRatio) {
+    var rw = Math.max(rect.w * 2.6, rect.h * 2.6 * frameRatio / imgRatio, 0.06);
+    var rh = rw * imgRatio / frameRatio;
+    if (rh > 1) { rh = 1; rw = frameRatio / imgRatio; }
+    rw = Math.min(rw, 1);
+    var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    return { x: Math.min(Math.max(0, cx - rw / 2), 1 - rw), y: Math.min(Math.max(0, cy - rh / 2), 1 - rh), w: rw, h: rh };
+  }
+
+  function placerCadre(box, rect, r) {
+    box.style.left = ((rect.x - r.x) / r.w * 100) + "%";
+    box.style.top = ((rect.y - r.y) / r.h * 100) + "%";
+    box.style.width = (rect.w / r.w * 100) + "%";
+    box.style.height = (rect.h / r.h * 100) + "%";
+  }
+
+  function scene(url, rect) {
+    var s = el("div", "scene");
+    if (!url) {
+      var v = el("div", "sans-photo"); v.appendChild(ico("no_photography")); v.appendChild(el("span", "", "Pas de photo"));
+      s.appendChild(v); return s;
+    }
+    var im = new Image(); im.alt = "";
+    im.onload = function () {
+      if (!rect) return;
+      // object-fit: contain -> zone reelle de l'image dans le cadre
+      var W = s.clientWidth, H = s.clientHeight, ir = im.naturalWidth / im.naturalHeight;
+      var w = Math.min(W, H * ir), h = w / ir, ox = (W - w) / 2, oy = (H - h) / 2;
+      var b = el("div", "cadre");
+      b.style.left = (ox + rect.x * w) + "px"; b.style.top = (oy + rect.y * h) + "px";
+      b.style.width = (rect.w * w) + "px"; b.style.height = (rect.h * h) + "px";
+      s.appendChild(b);
+    };
+    im.onerror = function () { s.textContent = ""; s.appendChild(scene(null)); };
+    im.src = url;
+    s.appendChild(im);
+    return s;
+  }
+
+  function zoom(url, rect, type) {
+    var z = el("div", "zoom");
+    if (!url || !rect) return z;
+    var im = new Image(); im.alt = "";
+    im.onload = function () {
+      var r = zoneZoom(rect, im.naturalWidth / im.naturalHeight || 16 / 9, (z.clientWidth / z.clientHeight) || 0.8);
+      im.style.width = (100 / r.w) + "%";
+      im.style.left = (-r.x / r.w * 100) + "%";
+      im.style.top = (-r.y / r.h * 100) + "%";
+      var b = el("div", "cadre"); placerCadre(b, rect, r); z.appendChild(b);
+      var t = el("div", "tag"); t.appendChild(ico("zoom_in")); t.appendChild(document.createTextNode(" " + (TYPES[type] || TYPES.other).mot));
+      z.appendChild(t);
+    };
+    im.src = url;
+    z.appendChild(im);
+    return z;
+  }
+
+  /* ---------------- panneau ---------------- */
+  function carteIntrusion(e, enCours) {
+    var une = $("une");
+    une.textContent = "";
+    une.className = "une " + (enCours ? "crit" : "calme");
+    var url = enCours ? (e.photo_der || e.photo) : (e.photo || e.photo_der);
+    var rect = enCours && e.photo_der ? e.rect_der : e.rect;
+    var ph = el("div", "photos");
+    ph.appendChild(scene(url, rect));
+    ph.appendChild(zoom(url, rect, e.type));
+    if (!rect) ph.style.gridTemplateColumns = "1fr";
+    une.appendChild(ph);
+
+    var inf = el("div", "infos");
+    inf.appendChild(el("div", "cam-nom une-ligne", e.camera + (e.canal && e.canal !== e.camera ? " · " + e.canal : "")));
+    var dep = el("div", "depuis");
+    dep.appendChild(el("div", "libelle", enCours ? "depuis" : "dernière intrusion"));
+    var val = el("div", "val", enCours ? duree(e.duree_s) : hm(e.debut));
+    if (enCours) { val.setAttribute("data-debut", e.debut); val.setAttribute("data-dernier", e.dernier); }
+    dep.appendChild(val);
+    inf.appendChild(dep);
+    var sous = el("div", "sous");
+    sous.appendChild(pastilleType(e.type));
+    e.zones.forEach(function (z) {
+      var zz = el("span", "zone une-ligne"); var i = el("i"); i.style.background = z.couleur;
+      zz.appendChild(i); zz.appendChild(document.createTextNode(z.nom)); sous.appendChild(zz);
+    });
+    if (e.ia && e.ia.statut === "confirmed" && e.ia.label) {
+      var ia = el("span", "ia"); ia.title = e.ia.label + (e.ia.conf != null ? " " + Math.round(e.ia.conf * 100) + " %" : "");
+      ia.appendChild(ico("verified")); ia.appendChild(document.createTextNode(" IA"));
+      sous.appendChild(ia);
+    } else if (!enCours && e.statut === "new") {
+      sous.appendChild(el("span", "", "non traitée"));
+    }
+    inf.appendChild(sous);
+    une.appendChild(inf);
+    une.hidden = false;
+  }
+
+  function vignette(e, cls) {
+    var v = el("div", cls);
+    var vig = el("div", "vig");
+    if (e.photo || e.photo_der) {
+      var im = new Image(); im.alt = ""; im.src = e.photo || e.photo_der; vig.appendChild(im);
+    } else {
+      vig.appendChild(ico("no_photography"));
+    }
+    if (cls === "vignette") vig.appendChild(pastilleType(e.type));
+    v.appendChild(vig);
+    var t = el("div", "t");
+    if (cls === "vignette") {
+      t.appendChild(el("span", "h", hm(e.debut)));
+      t.appendChild(el("span", "c une-ligne", e.camera));
+    } else {
+      t.className = "t une-ligne";
+      t.textContent = (TYPES[e.type] || TYPES.other).mot + " · " + e.camera;
+    }
+    v.appendChild(t);
+    return v;
+  }
+
+  function rendrePanneau(d) {
+    var enCours = d.en_cours.slice().sort(function (a, b) { return a.depuis_s - b.depuis_s; });
+    var verdict = $("verdict");
+    verdict.textContent = "";
+    document.body.classList.toggle("alerte", enCours.length > 0);
+    if (enCours.length) {
+      verdict.className = "verdict crit";
+      var titre = el("div", "titre clign");
+      titre.appendChild(ico("warning"));
+      titre.appendChild(document.createTextNode(enCours.length > 1
+        ? " " + enCours.length + " INTRUSIONS EN COURS" : " INTRUSION EN COURS"));
+      verdict.appendChild(titre);
+      verdict.appendChild(el("div", "detail une-ligne", enCours.map(function (e) { return e.camera; }).join(" · ")));
+      carteIntrusion(enCours[0], true);
+    } else {
+      verdict.className = "verdict";
+      verdict.appendChild(el("div", "titre", "AUCUNE INTRUSION"));
+      var actives = d.cameras.filter(function (c) { return c.arme; }).length;
+      verdict.appendChild(el("div", "detail une-ligne",
+        actives + " caméra" + (actives > 1 ? "s" : "") + " sur " + d.cameras.length + " sous surveillance, rien en cours"));
+      if (d.derniere) carteIntrusion(d.derniere, false); else $("une").hidden = true;
+    }
+
+    var autres = $("autres");
+    autres.textContent = "";
+    enCours.slice(1, 4).forEach(function (e) { autres.appendChild(vignette(e, "autre")); });
+    autres.hidden = enCours.length < 2;
+
+    var tr = $("traiter");
+    tr.textContent = "";
+    tr.hidden = enCours.length > 0;
+    var ent = el("div", "entete");
+    ent.appendChild(el("span", "libelle", "À traiter · 12 dernières heures"));
+    var nbTraiter = d.cameras.reduce(function (s, c) { return s + (c.a_traiter || 0); }, 0);
+    if (nbTraiter) ent.appendChild(el("span", "nb", String(nbTraiter)));
+    tr.appendChild(ent);
+    if (!d.a_traiter.length) {
+      tr.appendChild(el("div", "aucune", "Toutes les intrusions ont été prises en compte."));
+    } else {
+      var g = el("div", "vignettes");
+      d.a_traiter.slice(0, 4).forEach(function (e) { g.appendChild(vignette(e, "vignette")); });
+      tr.appendChild(g);
+    }
+  }
+
+  function rendreGroupes(d) {
+    var g = $("groupes");
+    g.textContent = "";
+    d.groupes.forEach(function (gr) {
+      var p = el("span", "groupe" + (gr.arme ? "" : " off"));
+      p.title = gr.libelle;
+      var pu = el("span", "puce"); pu.style.background = gr.arme ? gr.couleur : "var(--off)";
+      p.appendChild(pu);
+      p.appendChild(document.createTextNode(gr.nom + (gr.arme ? "" : " · pause")));
+      g.appendChild(p);
+    });
+  }
+
+  function chiffre(val, lib, cls) {
+    var c = el("div", "chiffre" + (cls ? " " + cls : ""));
+    c.appendChild(el("div", "libelle", lib));
+    c.appendChild(el("div", "val", String(val)));
+    return c;
+  }
+
+  function rendrePied(d) {
+    var t = d.totaux, p = $("pied");
+    p.textContent = "";
+    p.appendChild(chiffre(t.intrusions, "Intrusions du jour"));
+    p.appendChild(chiffre(t.human, "Piétons"));
+    p.appendChild(chiffre(t.vehicle, "Véhicules"));
+    p.appendChild(chiffre(t.a_traiter, "Non traitées", t.a_traiter ? "warn" : ""));
+    p.appendChild(chiffre(t.filtrees, "Écartées par l'IA", "discret"));
+    p.appendChild(chiffre(t.hors_planning, "Hors planning", "discret"));
+    var r = el("div", "rythme");
+    r.appendChild(el("div", "libelle", "Intrusions par heure aujourd'hui"));
+    var b = el("div", "barres"), max = Math.max.apply(null, d.par_heure.concat([1]));
+    var h = new Date(maintenant()).getHours();
+    d.par_heure.forEach(function (n, i) {
+      var s = el("span", (n ? "n" : "") + (i === h ? " now" : ""));
+      s.style.height = (n ? Math.max(10, n / max * 100) : 4) + "%";
+      s.title = i + " h : " + n;
+      b.appendChild(s);
+    });
+    r.appendChild(b);
+    var hs = el("div", "heures");
+    ["0 h", "6 h", "12 h", "18 h", "24 h"].forEach(function (x) { hs.appendChild(el("span", "", x)); });
+    r.appendChild(hs);
+    p.appendChild(r);
+  }
+
+  /* ---------------- boucle ---------------- */
+  function signature(d) {
+    // Reconstruit le panneau seulement si ce qu'il montre a change (sinon
+    // les photos clignoteraient toutes les 5 s)
+    return JSON.stringify([
+      d.en_cours.map(function (e) { return [e.id, e.photo_der, e.zones.length]; }),
+      d.a_traiter.map(function (e) { return e.id; }),
+      d.derniere && d.derniere.id, d.cameras.filter(function (c) { return c.arme; }).length
+    ]);
+  }
+
+  function rendre(d) {
+    rendreGroupes(d);
+    rendrePied(d);
+    var sigCarte = JSON.stringify([d.cameras, d.zones.map(function (z) { return z.actif; })]);
+    if (sigCarte !== S.sigCarte) { S.sigCarte = sigCarte; dessinerCarte(d); }
+    var sig = signature(d);
+    if (sig !== S.signature) { S.signature = sig; rendrePanneau(d); }
+  }
+
+  function tic() {
+    var n = new Date(maintenant());
+    $("horloge").textContent = ("0" + n.getHours()).slice(-2) + ":" + ("0" + n.getMinutes()).slice(-2) +
+      ":" + ("0" + n.getSeconds()).slice(-2);
+    // Duree de l'intrusion en cours, a la seconde (bornee au dernier message + 30 s)
+    document.querySelectorAll("[data-debut]").forEach(function (v) {
+      var fin = Math.min(maintenant(), new Date(v.getAttribute("data-dernier")).getTime() + 30000);
+      v.textContent = duree((fin - new Date(v.getAttribute("data-debut")).getTime()) / 1000);
+    });
+    var f = $("flux"), age = (Date.now() - S.recu) / 1000;
+    f.textContent = "";
+    var pu = el("span", "puce");
+    var ok = S.recu && age < 30 && !S.erreur;
+    pu.style.background = ok ? "var(--ok)" : "var(--crit)";
+    if (!ok) pu.className = "puce clign";
+    f.appendChild(pu);
+    f.appendChild(document.createTextNode(!S.recu ? "chargement" : ok
+      ? "à jour " + hm(new Date(S.recu - 0).toISOString())
+      : "DONNÉES ARRÊTÉES depuis " + duree(age)));
+  }
+
+  function charger() {
+    fetch("/api/intrusions/mur", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) {
+        S.decalage = new Date(d.maintenant).getTime() - Date.now();
+        S.data = d; S.recu = Date.now(); S.erreur = null;
+        rendre(d);
+      })
+      .catch(function (e) { S.erreur = e; })
+      .then(function () { setTimeout(charger, RAFRAICHIR_MS); });
+  }
+
+  initCarte();
+  charger();
+  setInterval(tic, 1000);
+  tic();
+})();
+</script>
+</body>
+</html>
