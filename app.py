@@ -1012,6 +1012,10 @@ def _enforce_page_access():
     page = _page_for_path(request.path)
     if not page or _page_allowed_for_request(page["id"]):
         return None
+    # Afficheur TV : PAGES_AFFICHEUR fait foi (une page TV ajoutee au registre
+    # n'est cochee dans aucun groupe existant, l'ecran tomberait en 403)
+    if request.path in PAGES_AFFICHEUR and est_afficheur(_request_payload_peek()):
+        return None
     if request.path.startswith("/api/"):
         return jsonify({"ok": False, "error": "page_non_autorisee"}), 403
     allowed = g._allowed_pages or []

@@ -118,6 +118,18 @@ class TestLectureAfficheur:
         for chemin in ("/intrusions-mur", "/api/intrusions/mur"):
             _refuse(_avec(client, _jeton(env, borne=False)).get(chemin))
 
+    def test_pages_du_groupe_ne_bloquent_pas_l_afficheur(self, env, client, monkeypatch):
+        # Groupe par defaut restreint, sans les murs : l'afficheur passe sur
+        # PAGES_AFFICHEUR, un humain du meme groupe reste bloque
+        import detection
+        monkeypatch.setattr(detection, "_db", env)
+        A.COL_GROUPS.insert_one({"name": A.DEFAULT_GROUP_NAME, "allowed_pages": ["cockpit"]})
+        c = _avec(client, _jeton(env))
+        assert c.get("/intrusions-mur").status_code == 200
+        assert c.get("/api/intrusions/mur").status_code == 200
+        rep = _avec(client, _jeton(env, role="manager", borne=False)).get("/api/intrusions/mur")
+        assert rep.status_code == 403 and rep.get_json()["error"] == "page_non_autorisee"
+
     def test_mur_des_portes_sans_edition_refuse(self, env, client):
         c = _avec(client, _jeton(env))
         assert c.get("/portes-mur").status_code == 400
