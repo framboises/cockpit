@@ -911,6 +911,8 @@ def page_cover(d, items, views):
         toc.append(("Suivi des déplacements (%d enchaînement%s)" % (d.o["n_chains"], "s" if d.o["n_chains"] > 1 else ""), mk["chains"]))
     toc.append(("Fiches emplacements C1 à C%d" % len(items), mk.get("items", 3)))
     toc.append(("Récapitulatif & quantitatif", mk.get("recap", 3 + len(items))))
+    if mk.get("purchase"):
+        toc.append(("Caméras neuves à acheter", mk["purchase"]))
     if mk.get("annex"):
         toc.append(("Annexes – fiches techniques", mk["annex"]))
     for i, (t, pg) in enumerate(toc, 1):
@@ -1301,6 +1303,59 @@ def _quantitatif(d, items, y):
     d.text(qx, qy - 9, "Quantités indicatives pour chiffrage, à recaler après relevé.", "Barlow-Regular", 5.6, MUTED)
 
 
+def purchase_rows(items, annex=None):
+    """Liste d'achat : une ligne par appareil neuf identique -> [(n, marque,
+    reference, configuration, quantite, emplacements, fiche)]. Un deplacement
+    ou un reemploi n'achete rien ; multi-capteurs = 1 camera."""
+    annex = annex or {}
+    groups = {}
+    for it in items:
+        for lab, m in _device_rows(it):
+            g = groups.setdefault(lab, {"m": m, "n": 0, "reps": []})
+            g["n"] += 1
+            if it["rep"] not in g["reps"]:
+                g["reps"].append(it["rep"])
+    rows = []
+    for i, (lab, g) in enumerate(sorted(groups.items(), key=lambda x: (x[1]["m"] is None, x[0].lower())), 1):
+        m = g["m"]
+        if m is not None:
+            base = cameras_models.name(m)
+            conf = lab[len(base):].strip(" –()") if lab.startswith(base) else lab
+            if not conf:
+                conf = ", ".join(x.get("label", "") for x in m.get("lenses") or []) if len(m.get("lenses") or []) == 1 else "–"
+            fiche = "annexe %s" % annex[m["_id"]] if m["_id"] in annex else ("disponible" if m.get("datasheet") else "–")
+            rows.append((i, m.get("brand") or "–", m.get("ref") or "à définir", conf, g["n"], ", ".join(g["reps"]), fiche))
+        else:
+            rows.append((i, "–", "à définir", lab, g["n"], ", ".join(g["reps"]), "–"))
+    return rows
+
+
+def pages_purchase(d, items):
+    """Tableau final des cameras neuves a acheter, par modele."""
+    rows = purchase_rows(items, d.o.get("annex"))
+    x = MARGIN + 6
+    W = PAGE_W - 2 * MARGIN - 12
+    cols = [("N°", 26, "center"), ("Marque", 80, "left"), ("Référence", 130, "left"), ("Configuration", W - 26 - 80 - 130 - 50 - 220 - 90, "left"),
+            ("Qté", 50, "right"), ("Emplacements", 220, "left"), ("Fiche technique", 90, "left")]
+    per_page = 18
+    chunks = [rows[i:i + per_page] for i in range(0, len(rows), per_page)] or [[]]
+    total = sum(r[4] for r in rows)
+    for n, chunk in enumerate(chunks):
+        d.new_page("purchase")
+        d.frame("Caméras neuves à acheter")
+        y = d.section(x, PAGE_H - 84, "Caméras neuves à acheter" + (" (suite)" if n else ""))
+        if not rows:
+            d.text(x, y - 4, "Aucune caméra neuve : le dossier ne comporte que des déplacements de caméras existantes.", "Barlow-Regular", 8)
+        else:
+            y = d.table(x, y, cols, [r[:4] + ("%d u" % r[4],) + r[5:] for r in chunk], size=7.4, row_h=14)
+            if n == len(chunks) - 1:
+                y = d.table(x, y, [("", W - 50 - 220 - 90, "right"), ("", 50, "right"), ("", 310, "left")],
+                            [("Total caméras neuves", "%d u" % total, "")], size=7.8, row_h=15, head=False, bold_last=False, zebra=1)
+                d.text(x, y - 12, "Multi-capteurs (1 PTZ + 4 fixes...) = 1 caméra. Caméras déplacées ou réemployées : rien à acheter. "
+                       "Supports, alimentation, réseau et accessoires : voir le quantitatif.", "Barlow-Regular", 6.5, MUTED)
+        d.cartouche("Caméras neuves à acheter", "sans échelle")
+
+
 def annex_models(items):
     """Modeles des emplacements dont la fiche technique est enregistree, dans
     l'ordre d'apparition -> [(modele, chemin du PDF)]."""
@@ -1389,6 +1444,7 @@ def build_pdf(db, opts):
         for it in items:
             page_item(d, it, items, existing, views)
         pages_recap(d, items)
+        pages_purchase(d, items)
         if annexes:
             page_annex(d, annexes, annex_pages)
         total = d.page_no

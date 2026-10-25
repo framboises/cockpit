@@ -470,6 +470,11 @@ cartouche bas droite "n/N PLANCHE" (rendu en DEUX passes pour connaitre N).
   d'une camera existante deposee par Cn" ; projet hors du dossier cite par
   son nom. Quantitatif : deplacements "dont n reemploi(s)", deposes = retour
   au stock seulement (une camera reemployee n'est pas comptee deux fois).
+- Derniere planche avant les annexes : "Cameras neuves a acheter"
+  (`purchase_rows` / `pages_purchase`) : une ligne par appareil identique
+  (marque, reference, configuration, quantite, emplacements Cn, fiche
+  technique), total ; meme comptage que le quantitatif (multi-capteurs = 1
+  camera, deplacement / reemploi = rien a acheter).
 - `datasheets=1` (case "Joindre en annexe les fiches techniques") : planche
   intercalaire "Annexes" (A1, A2... par ordre d'apparition, pages) puis les
   PDF du constructeur joints tels quels (pypdf, requirements.txt) ; renvoi

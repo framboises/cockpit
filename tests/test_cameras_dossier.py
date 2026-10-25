@@ -181,8 +181,8 @@ def test_pdf(db, monkeypatch, tmp_path):
     monkeypatch.setattr(D, "_tile", lambda z, x, y: Image.new("RGB", (256, 256), (120, 140, 110)))
     pdf, n = D.build_pdf(db, {"statuses": ["souhaitee", "validee"], "author": "L. Arnault", "indice": "b"})
     assert n == 3 and pdf.startswith(b"%PDF")
-    # couverture + plan d'ensemble + suivi des deplacements + 3 fiches + recapitulatif
-    assert b"/Count 7" in pdf
+    # couverture + plan d'ensemble + suivi des deplacements + 3 fiches + recapitulatif + achats
+    assert b"/Count 8" in pdf
     # Fiche technique du modele en annexe : intercalaire + ses pages
     import cameras_models
     from reportlab.pdfgen import canvas as rl
@@ -194,7 +194,7 @@ def test_pdf(db, monkeypatch, tmp_path):
     pdf, _n = D.build_pdf(db, {"statuses": ["souhaitee", "validee"], "datasheets": True})
     from pypdf import PdfReader
     import io
-    assert len(PdfReader(io.BytesIO(pdf)).pages) == 7 + 1 + 2
+    assert len(PdfReader(io.BytesIO(pdf)).pages) == 8 + 1 + 2
     assert D.build_pdf(db, {"statuses": ["commandee"], "ids": [ObjectId()]})[0] is None
 
 
@@ -293,3 +293,13 @@ def test_planches_groupees_par_enchainement(db):
     assert items[1]["moves"]["removed_by"]["rep"] == "C1"
     chains = D.build_chains(items)
     assert [it["rep"] for it in chains[0]["steps"]] == ["C1", "C2"]
+
+
+def test_liste_d_achat(db):
+    _planned(db)
+    items, _e = D.collect(db, statuses=["souhaitee", "validee"])
+    rows = D.purchase_rows(items)
+    assert [(r[1], r[2], r[3], r[4], r[5]) for r in rows] == [
+        ("Hikvision", "DS-2DP7D836", "1 PTZ + 4 objectifs fixes", 1, "C1"),
+        ("Hikvision", "iDS-2CD7A87G0", "fixe 2,8 mm", 1, "C3"),
+    ]  # le deplacement (C2) n'achete rien
