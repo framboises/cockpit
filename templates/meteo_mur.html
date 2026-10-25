@@ -15,15 +15,14 @@
 
      Personne ne s'en approche, personne ne clique, personne ne fait defiler.
      On le lit de trois a cinq metres, en passant, entre deux autres choses.
-     Trois regles en decoulent, et elles priment sur toute considerration
+     Quatre regles en decoulent, et elles priment sur toute consideration
      d'esthetique ou de densite :
 
        1. TAILLE. A quatre metres, un caractere doit faire environ 2 cm de haut
           pour se lire sans effort. Sur un 75 pouces en 1920 px de large, cela
           fait a peu pres 24 px de hauteur de capitale, donc 32 px de corps.
           Aucune donnee n'est ecrite plus petit. Les libelles peuvent l'etre,
-          la valeur jamais. Les tailles sont exprimees en vw : le panneau suit
-          la dalle sans qu'on ait a le rerelger.
+          la valeur jamais.
 
        2. REPONDRE, PAS AFFICHER. La question du PC n'est pas "quelle
           temperature fait-il" mais "est-ce que quelque chose arrive, quand, et
@@ -36,6 +35,15 @@
           Ce qu'elle apportait -- quand la pluie arrive, combien, combien de
           temps -- est desormais dit en toutes lettres et sur la frise horaire.
           Le radar reste sur la carte du cockpit, ou l'operateur est a 60 cm.
+
+       4. UN PICTO AVANT UN CHIFFRE. De loin, on reconnait un nuage d'orage
+          bien avant de lire "3,2 mm". Chaque heure porte son ciel (soleil,
+          lune, nuages, pluie, orage), deduit des memes donnees que les
+          chiffres : rien n'est affirme que la prevision ne dise pas.
+          Le detail technique (horodatage du bulletin, modele, sante des flux)
+          vit dans le pied de page : il sert a qui s'approche, pas a qui passe.
+          Le bandeau ne garde que ce qui se lit d'un coup d'oeil, et tout texte
+          qui deborderait est reduit plutot que rogne (ajuster()).
      ========================================================================== */
   :root{
     --bg:#0b1220; --bg-2:#0f172a; --panel:#1e293b; --panel-2:#172132;
@@ -43,17 +51,13 @@
     --text:#f1f5f9; --muted:#94a3b8; --muted-2:#64748b;
     --sev-normal:#22c55e; --sev-vigilance:#eab308;
     --sev-danger:#f97316; --sev-critique:#ef4444;
-    --vig-vert:#008300; --vig-jaune:#e0b400; --vig-orange:#f59628; --vig-rouge:#dc3232;
+    --pluie:#7dd3fc;
 
     /* Echelle typographique, pilotee par la HAUTEUR et non la largeur.
        C'est la hauteur qui contraint : le panneau doit tenir en un ecran, sans
-       defilement ni rognage. Une echelle en vw seuls gonflait le texte sur une
-       dalle large et coupait le bas des blocs. Le min(vw, vh) garde une borne
-       laterale pour les formats etroits, et les valeurs sont calees sur une
-       dalle 1920 x 1080 :
-         verdict 81 px   geant 97 px   grand 48 px   moyen 32 px   libelle 20 px
-       Le corps le plus petit reste a 32 px : aucune DONNEE n'est ecrite en
-       dessous, seuls les libelles le sont. */
+       defilement ni rognage. Le min(vw, vh) garde une borne laterale pour les
+       formats etroits, et les valeurs sont calees sur une dalle 1920 x 1080 :
+         verdict 81 px   geant 97 px   grand 48 px   moyen 32 px   libelle 20 px */
     --t-verdict: clamp(2rem, min(4.4vw, 7.5vh), 7rem);
     --t-geant:   clamp(2.6rem, min(5.6vw, 9vh), 8rem);
     --t-grand:   clamp(1.5rem, min(2.7vw, 4.4vh), 3.4rem);
@@ -72,121 +76,143 @@
     font-size:var(--t-libelle); font-weight:700; text-transform:uppercase;
     letter-spacing:0.09em; color:var(--muted);
   }
+  /* Tout ce qui risque de deborder tient sur une ligne et sera reduit par
+     ajuster() : jamais de texte qui sort de la dalle. */
+  .une-ligne{white-space:nowrap; overflow:hidden; min-width:0}
+  svg.ic{display:block; flex:0 0 auto}
 
-  /* --- Bandeau : identite, heure, vigilance, sante des flux --------------- */
+  /* --- Bandeau : heure a gauche, vigilance a droite, rien d'autre ---------- */
   .tete{
     display:flex; align-items:center; gap:clamp(12px,1.6vw,32px);
-    padding:0.7vw 1.4vw; background:var(--bg-2);
-    border-bottom:1px solid var(--line); flex:0 0 auto;
+    padding:0.8vh 1.4vw; background:var(--bg-2);
+    border-bottom:1px solid var(--line); flex:0 0 auto; min-width:0;
   }
   .tete .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted)}
   .tete .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
-  .tete .jour{font-size:var(--t-moyen); color:var(--muted); text-transform:capitalize;
-    white-space:nowrap}
-  .tete .vig, .tete .flux, .tete .vig-horodatage{white-space:nowrap}
-  .tete .droite{margin-left:auto; display:flex; align-items:center; gap:clamp(12px,1.6vw,32px)}
-  .puce{width:0.8vw; height:0.8vw; min-width:10px; min-height:10px;
-        border-radius:50%; display:inline-block; margin-right:0.5vw}
-  .flux{font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center}
+  .tete .jour{font-size:var(--t-moyen); color:var(--muted); text-transform:capitalize; white-space:nowrap}
+  .tete .droite{margin-left:auto; display:flex; align-items:center; gap:clamp(10px,1.2vw,24px);
+    min-width:0; flex:0 1 auto}
 
   /* Vigilance : pastille pleine, pas un simple texte colore. Elle doit se
-     reperer avant meme d'etre lue. */
+     reperer avant meme d'etre lue. Phenomenes en noms courts ; la liste
+     complete et l'horodatage du bulletin sont dans le pied. */
   .vig{
-    display:flex; align-items:center; gap:0.8vw;
-    padding:0.35vw 1.1vw; border-radius:99px; font-size:var(--t-moyen); font-weight:800;
-    border:2px solid transparent;
+    display:flex; align-items:center; gap:0.7vw; min-width:0;
+    padding:0.45vh 1.1vw; border-radius:99px; font-size:var(--t-moyen); font-weight:800;
+    border:2px solid transparent; white-space:nowrap; overflow:hidden;
   }
-  .vig .phen{font-weight:600; opacity:0.92}
-  .vig-horodatage{font-size:var(--t-libelle); color:var(--muted); font-weight:500}
+  .vig .phen{font-weight:600; opacity:0.95}
+  .vig .avenir{font-weight:700; padding-left:0.7vw; border-left:2px solid var(--line-2)}
+  .vig .alerte-bulletin{color:#fecaca; background:rgba(239,68,68,0.35); border-radius:99px;
+    padding:0 0.6vw; font-size:0.8em}
+  .flux{font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center; white-space:nowrap}
+  .puce{width:0.8vw; height:0.8vw; min-width:12px; min-height:12px;
+        border-radius:50%; display:inline-block; margin-right:0.5vw; flex:0 0 auto}
 
   /* --- Verdict : la ligne que l'on lit du fond de la salle ---------------- */
   .verdict{
-    flex:0 0 auto; padding:1.1vw 1.4vw;
-    display:flex; align-items:baseline; gap:1.6vw; flex-wrap:wrap;
-    border-bottom:1px solid var(--line);
+    flex:0 0 auto; padding:1.2vh 1.4vw;
+    display:flex; align-items:center; gap:1.4vw;
+    border-bottom:1px solid var(--line); border-left:0.7vw solid transparent;
   }
+  .verdict-ic{width:min(5.6vw, 9vh); height:min(5.6vw, 9vh)}
+  .verdict-texte{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:0.4vh}
   .verdict-titre{font-size:var(--t-verdict); font-weight:900; line-height:1; letter-spacing:-0.02em}
   .verdict-detail{font-size:var(--t-moyen); color:var(--muted); font-weight:500}
   .verdict-echeance{
-    margin-left:auto; font-size:var(--t-grand); font-weight:800; line-height:1;
+    flex:0 0 auto; text-align:center; font-size:var(--t-grand); font-weight:800; line-height:1;
+    padding:0.8vh 1.2vw; border-radius:0.8vw; border:2px solid currentColor;
   }
-  .verdict-echeance small{display:block; font-size:var(--t-libelle); color:var(--muted); font-weight:700}
+  .verdict-echeance small{display:block; font-size:var(--t-libelle); color:var(--muted);
+    font-weight:700; letter-spacing:0.09em; margin-bottom:0.4vh}
 
   /* --- Corps : conditions du moment + les quatre contraintes -------------- */
   .corps{
-    flex:1 1 0; display:grid; gap:0.9vw; padding:0.9vw 1.4vw;
+    flex:1 1 0; display:grid; gap:0.9vw; padding:1.2vh 1.4vw;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
     min-height:0; overflow:hidden;
   }
   .bloc{
     background:var(--panel); border:1px solid var(--line);
-    border-radius:1vw; padding:1vh 1.2vw;
+    border-radius:1vw; padding:1.2vh 1.2vw;
     display:flex; flex-direction:column;
     min-height:0; overflow:hidden;
   }
-
+  .ciel-actuel{display:flex; align-items:center; gap:1.2vw; margin-top:0.6vh}
+  .ciel-actuel svg.ic{width:min(7vw, 12vh); height:min(7vw, 12vh)}
   .temp-geante{font-size:var(--t-geant); font-weight:900; line-height:0.95; letter-spacing:-0.04em}
   .temp-geante .deg{font-size:0.45em; font-weight:800; vertical-align:0.42em}
   .ressenti{font-size:var(--t-moyen); color:var(--muted); margin-top:0.4vh}
-  /* Le bloc laissait un grand vide sous la temperature. Il porte desormais
-     l'amplitude a venir : c'est ce qui se decide la nuit -- releve, couvertures,
-     fermeture des zones exposees. */
-  .tendance{font-size:var(--t-moyen); font-weight:700; margin-top:1.2vh; line-height:1.5}
+  /* L'amplitude a venir : c'est ce qui se decide la nuit -- releve,
+     couvertures, fermeture des zones exposees. */
+  .tendance{font-size:var(--t-moyen); font-weight:700; margin-top:0.6vh}
   .tendance b{font-size:1.35em; font-weight:900}
   .mesures{display:grid; grid-template-columns:repeat(2, 1fr); gap:0.6vw;
-    margin-top:auto; padding-top:0.8vw; min-height:0}
-  .mesure{background:var(--panel-2); border-radius:0.6vw; padding:0.6vh 0.9vw}
+    margin-top:auto; padding-top:0.8vh; min-height:0}
+  .mesure{background:var(--panel-2); border-radius:0.6vw; padding:0.7vh 0.9vw}
   .mesure .val{font-size:var(--t-grand); font-weight:800; line-height:1.05}
   .mesure .val .u{font-size:0.42em; font-weight:700; color:var(--muted); margin-left:0.2em}
-  .mesure .note{font-size:var(--t-libelle); color:var(--muted); font-weight:600; margin-top:0.15vw}
+  .mesure .note{font-size:var(--t-libelle); color:var(--muted); font-weight:600; margin-top:0.15vh}
   .fleche{display:inline-block; font-size:0.7em; margin-right:0.2em}
 
-  /* Quatre tuiles : orage, vent, chaleur, sol. Le liseré epais porte la
-     gravite, doublee par le mot -- jamais la couleur seule. */
+  /* Quatre tuiles : orage, vent, chaleur, sol. Le libere epais porte la
+     gravite, doublee par le mot -- jamais la couleur seule. Une tuile calme
+     s'efface pour que l'oeil aille droit a celle qui compte. */
   .tuiles{display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr;
     gap:0.9vw; min-height:0; overflow:hidden}
   .tuile{
     background:var(--panel); border:1px solid var(--line);
     border-left:0.55vw solid var(--muted-2);
-    border-radius:1vw; padding:0.9vh 1.2vw;
+    border-radius:1vw; padding:1vh 1.2vw;
     display:flex; flex-direction:column; min-height:0; overflow:hidden;
   }
-  .tuile-tete{display:flex; align-items:baseline; gap:0.8vw}
-  .tuile-etat{margin-left:auto; font-size:var(--t-moyen); font-weight:800; letter-spacing:0.04em}
-  .tuile-valeur{font-size:var(--t-grand); font-weight:900; line-height:1.05; margin-top:0.3vw}
-  .tuile-valeur .u{font-size:0.4em; font-weight:700; color:var(--muted); margin-left:0.25em}
+  .tuile.calme .tuile-valeur, .tuile.calme .tuile-ic{opacity:0.6}
+  .tuile-tete{display:flex; align-items:center; gap:0.7vw}
+  .tuile-ic{width:min(2.6vw, 4.6vh); height:min(2.6vw, 4.6vh)}
+  .tuile-tete .libelle{font-size:var(--t-moyen); color:var(--text); letter-spacing:0.05em}
+  .tuile-etat{margin-left:auto; font-size:var(--t-libelle); font-weight:900; letter-spacing:0.08em;
+    padding:0.3vh 0.8vw; border-radius:99px}
+  .tuile-mesure{display:flex; align-items:baseline; gap:0.8vw; margin-top:0.5vh; min-width:0;
+    white-space:nowrap; overflow:hidden}
+  .tuile-valeur{font-size:var(--t-grand); font-weight:900; line-height:1.05; white-space:nowrap}
+  .tuile-valeur .u{font-size:0.45em; font-weight:700; color:var(--muted); margin-left:0.25em}
   .tuile-detail{font-size:var(--t-moyen); color:var(--muted); font-weight:500}
+  .tuile-pic{font-size:var(--t-libelle); color:var(--muted); font-weight:600; margin-top:0.3vh}
   .tuile-consigne{
-    margin-top:auto; padding-top:0.6vw; font-size:var(--t-moyen);
-    font-weight:700; line-height:1.25;
+    margin-top:auto; padding-top:0.6vh; font-size:var(--t-moyen);
+    font-weight:700; line-height:1.2;
   }
-  .tuile-pic{font-size:var(--t-libelle); color:var(--muted); font-weight:600; margin-top:0.3vw}
 
   /* --- Frise des douze prochaines heures ---------------------------------- */
-  .frise{
-    flex:0 0 auto; padding:0 1.4vw 1vw; display:flex; flex-direction:column; gap:0.5vw;
-  }
-  .frise-rail{display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:0.5vw}
+  .frise{flex:0 0 auto; padding:0 1.4vw 0.8vh; display:flex; flex-direction:column; gap:0.6vh}
+  .frise-legende{display:flex; gap:1.6vw; align-items:baseline}
+  .frise-legende .cle{font-size:var(--t-libelle); color:var(--muted-2); font-weight:600}
+  .frise-rail{display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:0.5vw}
   .heure{
-    background:var(--panel); border-radius:0.7vw; padding:0.7vh 0.4vw 0.8vh;
-    text-align:center; border-top:0.42vw solid var(--muted-2);
-    display:flex; flex-direction:column; align-items:center; gap:0.25vw;
+    background:var(--panel); border-radius:0.7vw; padding:0.7vh 0.3vw 0.8vh;
+    text-align:center; border-top:0.42vw solid var(--muted-2); position:relative;
+    display:flex; flex-direction:column; align-items:center; gap:0.3vh; min-width:0;
   }
-  .heure.maintenant{background:var(--panel-2); outline:2px solid var(--line-2)}
-  .heure .h{font-size:var(--t-moyen); font-weight:800; letter-spacing:0.02em}
+  .heure.maintenant{background:#24334a; outline:2px solid var(--line-2)}
+  .heure.nouveau-jour{margin-left:0.6vw}
+  .heure.nouveau-jour::before{
+    content:""; position:absolute; left:-0.85vw; top:0.4vh; bottom:0.4vh;
+    width:0; border-left:2px dashed var(--line-2);
+  }
+  .heure .h{font-size:var(--t-moyen); font-weight:800}
+  .heure .h small{font-size:0.62em; font-weight:700; color:var(--muted); margin-left:0.15em}
+  .heure svg.ic{width:min(4.2vw, 7.2vh); height:min(4.2vw, 7.2vh)}
   .heure .t{font-size:var(--t-grand); font-weight:900; line-height:1}
-  /* Jauge de pluie : une hauteur, pas une couleur seule. Une barre vide se
-     distingue d'une barre pleine meme sans percevoir la teinte. */
-  .jauge{width:60%; height:3.4vh; min-height:18px; background:rgba(148,163,184,0.14);
-         border-radius:0.3vw; display:flex; align-items:flex-end; overflow:hidden}
-  .jauge span{display:block; width:100%; background:#38bdf8; border-radius:0.3vw 0.3vw 0 0}
-  .heure .mm{font-size:var(--t-libelle); font-weight:800; color:#7dd3fc; min-height:1.2em}
-  .heure .raf{font-size:var(--t-libelle); font-weight:700; color:var(--muted)}
+  .heure .mm{font-size:var(--t-libelle); font-weight:800; color:var(--pluie); min-height:1.25em}
+  .heure .raf{font-size:var(--t-libelle); font-weight:700; color:var(--muted);
+    display:flex; align-items:center; gap:0.25vw}
+  .heure .raf svg.ic{width:1.1em; height:1.1em}
 
   .pied{
-    flex:0 0 auto; padding:0.35vw 1.4vw 0.7vw;
+    flex:0 0 auto; padding:0.4vh 1.4vw 0.8vh;
     font-size:var(--t-libelle); color:var(--muted-2); display:flex; gap:1.6vw;
   }
+  .pied .une-ligne{flex:1 1 auto}
 
   .clign{animation:clign 1.6s ease-in-out infinite}
   @keyframes clign{0%,100%{opacity:1}50%{opacity:0.42}}
@@ -200,27 +226,32 @@
     <span class="jour" id="jour"></span>
     <div class="droite">
       <div class="vig" id="vig"><span id="vig-niveau">--</span></div>
-      <span class="vig-horodatage" id="vig-horodatage"></span>
       <span class="flux" id="flux"><span class="puce" style="background:var(--muted-2)"></span>chargement</span>
     </div>
   </header>
 
   <section class="verdict" id="verdict">
-    <span class="verdict-titre" id="verdict-titre">CHARGEMENT</span>
-    <span class="verdict-detail" id="verdict-detail"></span>
+    <span id="verdict-ic"></span>
+    <div class="verdict-texte">
+      <span class="verdict-titre une-ligne" id="verdict-titre">CHARGEMENT</span>
+      <span class="verdict-detail une-ligne" id="verdict-detail"></span>
+    </div>
     <span class="verdict-echeance" id="verdict-echeance" hidden></span>
   </section>
 
   <main class="corps">
     <section class="bloc">
-      <div class="libelle">Maintenant</div>
-      <div class="temp-geante" id="temp">--<span class="deg">°</span></div>
-      <div class="ressenti" id="ressenti"></div>
-      <div class="tendance" id="tendance"></div>
+      <div class="libelle une-ligne" id="maintenant-titre">Maintenant</div>
+      <div class="ciel-actuel">
+        <span id="ciel-actuel"></span>
+        <div class="temp-geante" id="temp">--<span class="deg">°</span></div>
+      </div>
+      <div class="ressenti une-ligne" id="ressenti"></div>
+      <div class="tendance une-ligne" id="tendance"></div>
       <div class="mesures">
         <div class="mesure">
           <div class="val"><span class="fleche" id="vent-fleche">→</span><span id="vent">--</span><span class="u">km/h</span></div>
-          <div class="note" id="vent-note">vent moyen</div>
+          <div class="note une-ligne" id="vent-note">vent moyen</div>
         </div>
         <div class="mesure">
           <div class="val"><span id="rafale">--</span><span class="u">km/h</span></div>
@@ -228,11 +259,11 @@
         </div>
         <div class="mesure">
           <div class="val"><span id="humidite">--</span><span class="u">%</span></div>
-          <div class="note" id="nebulosite">humidite</div>
+          <div class="note">humidité</div>
         </div>
         <div class="mesure">
           <div class="val"><span id="pluie-h">--</span><span class="u">mm/h</span></div>
-          <div class="note">precipitations</div>
+          <div class="note">précipitations</div>
         </div>
       </div>
     </section>
@@ -241,14 +272,16 @@
   </main>
 
   <section class="frise">
-    <div class="libelle" id="frise-titre">Les 12 prochaines heures</div>
+    <div class="frise-legende">
+      <span class="libelle" id="frise-titre">Les 12 prochaines heures</span>
+      <span class="cle">température  ·  pluie en mm  ·  rafales en km/h</span>
+    </div>
     <div class="frise-rail" id="rail"></div>
   </section>
 
   <footer class="pied">
-    <span id="pied-source">Source : Meteo-France</span>
-    <span id="pied-modele"></span>
-    <span id="pied-maj" style="margin-left:auto"></span>
+    <span class="une-ligne" id="pied-infos">Source : Météo-France</span>
+    <span id="pied-maj"></span>
   </footer>
 
 <script>
@@ -263,22 +296,187 @@
     normal: "var(--sev-normal)", vigilance: "var(--sev-vigilance)",
     danger: "var(--sev-danger)", critique: "var(--sev-critique)"
   };
+  var TEINTE = {
+    normal: "rgba(34,197,94,0.07)", vigilance: "rgba(234,179,8,0.12)",
+    danger: "rgba(249,115,22,0.14)", critique: "rgba(239,68,68,0.18)"
+  };
   var MOT = {
     normal: "RAS", vigilance: "VIGILANCE", danger: "DANGER", critique: "CRITIQUE"
   };
+  var ORDRE_VIG = ["vert", "jaune", "orange", "rouge"];
   var VIG = {
-    vert:   { fond: "rgba(0,131,0,0.22)",    trait: "#3ac93a" },
-    jaune:  { fond: "rgba(224,180,0,0.22)",  trait: "#f5d24a" },
-    orange: { fond: "rgba(245,150,40,0.26)", trait: "#ffa94d" },
-    rouge:  { fond: "rgba(220,50,50,0.30)",  trait: "#ff6b6b" }
+    vert:   { fond: "rgba(0,131,0,0.22)",    trait: "#3ac93a", mot: "VERTE" },
+    jaune:  { fond: "rgba(224,180,0,0.22)",  trait: "#f5d24a", mot: "JAUNE" },
+    orange: { fond: "rgba(245,150,40,0.26)", trait: "#ffa94d", mot: "ORANGE" },
+    rouge:  { fond: "rgba(220,50,50,0.30)",  trait: "#ff6b6b", mot: "ROUGE" }
+  };
+  // Noms courts pour le bandeau ; le nom officiel reste dans le pied.
+  var PHEN_COURT = {
+    "Vent violent": "Vent", "Pluie-inondation": "Pluie", "Orages": "Orages",
+    "Inondation": "Crues", "Neige-verglas": "Neige", "Canicule": "Canicule",
+    "Grand froid": "Froid", "Avalanches": "Avalanches", "Vagues-submersion": "Vagues"
   };
 
-  // Pluie horaire au-dela de laquelle la jauge est pleine. 8 mm en une heure
-  // est deja une forte averse : plafonner plus haut ecraserait toutes les
-  // pluies ordinaires en une barre invisible.
-  var JAUGE_PLEINE_MM = 8;
+  // Seuils du picto, alignes sur ceux du serveur (titan_shared.meteo.seuils) :
+  // une heure dessinee "forte pluie" est une heure qui declenche la consigne.
+  var PLUIE_FORTE_MM = 5;      // PLUIE_VIGILANCE_MM
+  var PLUIE_VISIBLE_MM = 0.2;  // en dessous, rien ne mouille vraiment
+  var RAFALE_VIGILANCE = 40, RAFALE_DANGER = 60;
+
+  // Circuit des 24 Heures : sert au lever / coucher du soleil (lune la nuit).
+  var LAT = 47.956, LON = 0.207;
 
   function vider(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
+  // Reduit la police d'un element tant qu'il deborde, sans descendre sous
+  // 55 % de sa taille de depart. Mieux vaut un texte plus petit qu'un texte
+  // coupe ou qui sort de la dalle.
+  function ajuster(el) {
+    if (!el) return;
+    el.style.fontSize = "";
+    var base = parseFloat(getComputedStyle(el).fontSize), t = base;
+    while (el.scrollWidth > el.clientWidth + 1 && t > base * 0.55) {
+      t *= 0.94;
+      el.style.fontSize = t + "px";
+    }
+  }
+  function ajusterTout() {
+    document.querySelectorAll(".une-ligne, .vig, .tuile-mesure").forEach(ajuster);
+  }
+
+  // ------------------------------------------------------------------------
+  // Pictos. Dessines ici plutot qu'en emoji : les navigateurs des TV n'ont
+  // pas tous une police emoji, et un carre vide a 4 m ne dit rien.
+  // Chaines constantes : aucune donnee ne passe par innerHTML.
+
+  var NUAGE = "M18 48h28a11 11 0 0 0 1-22 15 15 0 0 0-28.5-4A12.5 12.5 0 0 0 18 48z";
+  function soleil(cx, cy, r) {
+    var s = "", i, a;
+    for (i = 0; i < 8; i++) {
+      a = i * Math.PI / 4;
+      s += '<line x1="' + (cx + Math.cos(a) * (r + 4)).toFixed(1) + '" y1="' + (cy + Math.sin(a) * (r + 4)).toFixed(1) +
+           '" x2="' + (cx + Math.cos(a) * (r + 9)).toFixed(1) + '" y2="' + (cy + Math.sin(a) * (r + 9)).toFixed(1) + '"/>';
+    }
+    return '<g stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round">' + s + '</g>' +
+           '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#fbbf24"/>';
+  }
+  function lune(cx, cy, r) {
+    return '<path fill="#e2e8f0" d="M' + (cx + r * 0.35) + ' ' + (cy - r) +
+           'A' + r + ' ' + r + ' 0 1 0 ' + (cx + r) + ' ' + (cy + r * 0.35) +
+           'A' + (r * 0.8) + ' ' + (r * 0.8) + ' 0 0 1 ' + (cx + r * 0.35) + ' ' + (cy - r) + 'z"/>';
+  }
+  function nuage(couleur, dy) {
+    return '<path fill="' + couleur + '" transform="translate(0 ' + (dy || 0) + ')" d="' + NUAGE + '"/>';
+  }
+  function gouttes(n, couleur) {
+    var xs = n >= 3 ? [22, 32, 42] : [26, 38], s = "";
+    xs.forEach(function (x) { s += '<line x1="' + x + '" y1="46" x2="' + (x - 4) + '" y2="57"/>'; });
+    return '<g stroke="' + couleur + '" stroke-width="4" stroke-linecap="round">' + s + '</g>';
+  }
+  var ECLAIR = '<path fill="#facc15" stroke="#0b1220" stroke-width="1.5" d="M35 38 25 52h7l-4 11 13-16h-7l5-9z"/>';
+
+  var PICTOS = {
+    clair_jour:   function () { return soleil(32, 32, 12); },
+    clair_nuit:   function () { return lune(30, 32, 16); },
+    voile_jour:   function () { return soleil(22, 22, 9) + nuage("#cbd5e1", 4); },
+    voile_nuit:   function () { return lune(22, 20, 11) + nuage("#cbd5e1", 4); },
+    couvert:      function () { return nuage("#94a3b8", -4) + '<path fill="#cbd5e1" transform="translate(6 6) scale(.85)" d="' + NUAGE + '"/>'; },
+    averse_jour:  function () { return soleil(22, 16, 8) + nuage("#cbd5e1", -6) + gouttes(2, "#38bdf8"); },
+    averse_nuit:  function () { return lune(22, 14, 10) + nuage("#cbd5e1", -6) + gouttes(2, "#38bdf8"); },
+    pluie:        function () { return nuage("#94a3b8", -8) + gouttes(2, "#38bdf8"); },
+    forte_pluie:  function () { return nuage("#64748b", -8) + gouttes(3, "#3b82f6"); },
+    orage:        function () { return nuage("#475569", -10) + ECLAIR; },
+    vent:         function () {
+      return '<g fill="none" stroke="#cbd5e1" stroke-width="4" stroke-linecap="round">' +
+             '<path d="M8 24h30a7 7 0 1 0-7-7"/><path d="M8 34h42a7 7 0 1 1-7 7"/><path d="M8 44h20"/></g>';
+    },
+    thermometre:  function () {
+      return '<path fill="none" stroke="#cbd5e1" stroke-width="4" d="M27 38V12a5 5 0 0 1 10 0v26a10 10 0 1 1-10 0z"/>' +
+             '<circle cx="32" cy="46" r="6" fill="#f97316"/><rect x="30" y="24" width="4" height="20" fill="#f97316"/>';
+    },
+    sol:          function () {
+      return '<path fill="#38bdf8" d="M32 8c6 9 10 14 10 19a10 10 0 0 1-20 0c0-5 4-10 10-19z"/>' +
+             '<g stroke="#a3a37a" stroke-width="4" stroke-linecap="round"><line x1="8" y1="48" x2="56" y2="48"/>' +
+             '<line x1="14" y1="56" x2="50" y2="56"/></g>';
+    },
+    ok:           function () {
+      return '<circle cx="32" cy="32" r="24" fill="none" stroke="#22c55e" stroke-width="5"/>' +
+             '<path d="M21 33l8 8 15-17" fill="none" stroke="#22c55e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>';
+    },
+    attention:    function (c) {
+      return '<path d="M32 7 59 55H5z" fill="none" stroke="' + c + '" stroke-width="5" stroke-linejoin="round"/>' +
+             '<line x1="32" y1="24" x2="32" y2="38" stroke="' + c + '" stroke-width="5" stroke-linecap="round"/>' +
+             '<circle cx="32" cy="46" r="3.2" fill="' + c + '"/>';
+    }
+  };
+
+  function picto(nom, classe, couleur) {
+    var span = document.createElement("span");
+    span.innerHTML = '<svg class="ic ' + (classe || "") + '" viewBox="0 0 64 64" aria-hidden="true">' +
+                     PICTOS[nom](couleur) + '</svg>';
+    return span.firstChild;
+  }
+  function poser(hote, el) { vider(hote); hote.appendChild(el); }
+
+  // Lever / coucher du soleil (approximation a quelques minutes, largement
+  // suffisante pour choisir entre soleil et lune).
+  function soleilDuJour(date) {
+    var debut = Date.UTC(date.getFullYear(), 0, 0);
+    var n = Math.floor((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - debut) / 86400000);
+    var rad = Math.PI / 180;
+    var decl = -23.44 * Math.cos(rad * 360 / 365 * (n + 10));
+    var cosw = (Math.sin(-0.83 * rad) - Math.sin(LAT * rad) * Math.sin(decl * rad)) /
+               (Math.cos(LAT * rad) * Math.cos(decl * rad));
+    var w = Math.acos(Math.max(-1, Math.min(1, cosw))) / rad;
+    var b = rad * 360 / 365 * (n - 81);
+    var eot = 9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b);
+    var midi = 720 - 4 * LON - eot;   // minutes UTC
+    var minuit = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+    return { lever: minuit + (midi - 4 * w) * 60000, coucher: minuit + (midi + 4 * w) * 60000 };
+  }
+  function estNuit(date) {
+    var s = soleilDuJour(date), t = date.getTime();
+    return t < s.lever || t > s.coucher;
+  }
+
+  // Le ciel d'une heure, deduit des seules donnees de la prevision.
+  // Priorite a ce qui impose une action : orage, puis pluie, puis nuages.
+  function ciel(h, date) {
+    var nuit = estNuit(date);
+    var orage = (h.orage || {}).niveau;
+    var mm = h.pluie_mm || 0, neb = h.nebulosite_pct;
+    if (orage === "avere" || orage === "possible") return "orage";
+    if (mm >= PLUIE_FORTE_MM) return "forte_pluie";
+    if (mm >= PLUIE_VISIBLE_MM) {
+      if (neb !== null && neb !== undefined && neb < 70) return nuit ? "averse_nuit" : "averse_jour";
+      return "pluie";
+    }
+    if (neb === null || neb === undefined) return nuit ? "voile_nuit" : "voile_jour";
+    if (neb < 25) return nuit ? "clair_nuit" : "clair_jour";
+    if (neb < 75) return nuit ? "voile_nuit" : "voile_jour";
+    return "couvert";
+  }
+
+  // "14:00" -> Date du jour (ou du lendemain si l'heure est deja passee :
+  // l'horizon traverse minuit).
+  function dateHeure(texte, ref) {
+    var p = String(texte || "0:0").split(":");
+    var d = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate(), +p[0] || 0, 30);
+    if (d.getTime() < ref.getTime() - 3600000) d.setDate(d.getDate() + 1);
+    return d;
+  }
+
+  // Horodatage producteur -> "25/10 08:00" en heure locale. Sans fuseau
+  // explicite, la chaine est en UTC (convention de la collecte).
+  function heureLocale(iso, avecJour) {
+    if (!iso) return "?";
+    var s = String(iso);
+    if (!/[zZ]|[+-]\d\d:?\d\d$/.test(s)) s += "Z";
+    var d = new Date(s);
+    if (isNaN(d)) return String(iso).slice(0, 16).replace("T", " ");
+    var hm = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    return avecJour ? (d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + hm) : hm;
+  }
 
   function horloge() {
     var d = new Date();
@@ -290,65 +488,107 @@
 
   // ------------------------------------------------------------------------
 
+  var infosPied = { vigilance: "", modele: "", flux: "" };
+  function majPied() {
+    var bouts = ["Source : Météo-France"];
+    if (infosPied.modele) bouts.push(infosPied.modele);
+    if (infosPied.vigilance) bouts.push(infosPied.vigilance);
+    if (infosPied.flux) bouts.push(infosPied.flux);
+    $("pied-infos").textContent = bouts.join("   ·   ");
+  }
+
   function majVigilance(v) {
-    var boite = $("vig"), niveau = $("vig-niveau"), horo = $("vig-horodatage");
+    var boite = $("vig"), niveau = $("vig-niveau");
+    vider(niveau);
     if (!v) {
       boite.style.background = "rgba(148,163,184,0.12)";
       boite.style.borderColor = "var(--line-2)";
-      vider(niveau);
       niveau.textContent = "VIGILANCE INDISPONIBLE";
       niveau.style.color = "var(--muted)";
-      horo.textContent = "aucun bulletin en base";
+      infosPied.vigilance = "vigilance : aucun bulletin en base";
       return;
     }
-    var couleur = "vert", ordre = ["vert", "jaune", "orange", "rouge"], phen = [];
+
+    // Couleur de MAINTENANT en tete ; le pire a venir, s'il est plus grave,
+    // est annonce a part ("puis ORANGE") -- on ne qualifie pas l'instant
+    // present avec l'echeance de demain (meteo.niveau_vigilance).
+    var maxi = "vert", phenMax = [];
     (v.periodes || []).forEach(function (p) {
-      if (ordre.indexOf(p.couleur_max) > ordre.indexOf(couleur)) couleur = p.couleur_max;
+      if (ORDRE_VIG.indexOf(p.couleur_max) > ORDRE_VIG.indexOf(maxi)) maxi = p.couleur_max;
       (p.phenomenes || []).forEach(function (x) {
-        if (phen.indexOf(x.nom) === -1) phen.push(x.nom);
+        if (phenMax.indexOf(x.nom) === -1) phenMax.push(x.nom);
       });
     });
-    var style = VIG[couleur] || VIG.vert;
+    maxi = v.couleur_max || maxi;
+    phenMax = v.phenomenes_max || phenMax;
+    var jour = v.couleur_jour || maxi;
+    var phenJour = v.phenomenes_jour || phenMax;
+
+    var style = VIG[jour] || VIG.vert;
     boite.style.background = style.fond;
     boite.style.borderColor = style.trait;
-
-    vider(niveau);
     niveau.style.color = style.trait;
-    niveau.appendChild(document.createTextNode("VIGILANCE " + couleur.toUpperCase()));
-    if (phen.length) {
+    niveau.style.display = "flex";
+    niveau.style.alignItems = "center";
+    niveau.style.gap = "0.7vw";
+
+    niveau.appendChild(document.createTextNode("VIGILANCE " + style.mot));
+    if (phenJour.length) {
       var s = document.createElement("span");
       s.className = "phen";
-      s.textContent = phen.join(", ");
-      niveau.appendChild(document.createTextNode("  "));
+      s.textContent = phenJour.map(function (n) { return PHEN_COURT[n] || n; }).join(" · ");
       niveau.appendChild(s);
     }
+    if (ORDRE_VIG.indexOf(maxi) > ORDRE_VIG.indexOf(jour)) {
+      var av = document.createElement("span");
+      av.className = "avenir";
+      av.style.color = (VIG[maxi] || VIG.vert).trait;
+      var nouveaux = phenMax.filter(function (n) { return phenJour.indexOf(n) === -1; });
+      av.textContent = "puis " + (VIG[maxi] || VIG.vert).mot +
+        (nouveaux.length ? " " + nouveaux.map(function (n) { return PHEN_COURT[n] || n; }).join(" · ") : "");
+      niveau.appendChild(av);
+    }
+    // Un bulletin perime se dit dans le bandeau : c'est la seule chose qui
+    // change la valeur de la pastille.
+    if (v.perime === true || v.retard_collecte === true) {
+      var al = document.createElement("span");
+      al.className = "alerte-bulletin clign";
+      al.textContent = v.perime ? "PÉRIMÉ" : "NON RAFRAÎCHI";
+      niveau.appendChild(al);
+    }
 
-    // La peremption vient du serveur (meteo.etat_vigilance), etablie sur la
-    // validite que Meteo-France publie lui-meme.
-    var texte = "bulletin du " + String(v.update_time || "?").slice(0, 16).replace("T", " ") + " UTC";
-    if (v.perime) texte += "  —  PERIME";
-    else if (v.retard_collecte) texte += "  —  NON RAFRAICHIE";
-    else if (v.valide_jusqua) texte += "  ·  valide jusqu a " + String(v.valide_jusqua).slice(11, 16);
-    horo.textContent = texte;
-    horo.classList.toggle("clign", v.perime === true || v.retard_collecte === true);
+    // Detail complet pour qui s'approche. La peremption vient du serveur
+    // (meteo.etat_vigilance), etablie sur la validite publiee par Meteo-France.
+    var txt = "vigilance " + jour;
+    if (phenJour.length) txt += " (" + phenJour.join(", ") + ")";
+    if (maxi !== jour) txt += ", puis " + maxi + (phenMax.length ? " (" + phenMax.join(", ") + ")" : "");
+    txt += " — bulletin du " + heureLocale(v.update_time, true);
+    if (v.perime) txt += ", PÉRIMÉ";
+    else if (v.retard_collecte) txt += ", NON RAFRAÎCHI";
+    else if (v.valide_jusqua) txt += ", valide jusqu'à " + heureLocale(v.valide_jusqua, false);
+    infosPied.vigilance = txt;
   }
 
   function majVerdict(v) {
     if (!v) return;
     var couleur = COULEUR[v.niveau] || "var(--text)";
-    $("verdict").style.background =
-      v.niveau === "normal" ? "transparent" : "rgba(255,255,255,0.04)";
+    var bande = $("verdict");
+    bande.style.background = TEINTE[v.niveau] || "transparent";
+    bande.style.borderLeftColor = couleur;
+    poser($("verdict-ic"), v.niveau === "normal"
+      ? picto("ok", "verdict-ic")
+      : picto("attention", "verdict-ic", couleur));
     $("verdict-titre").textContent = v.titre || "";
-    $("verdict-titre").style.color = v.niveau === "normal" ? "var(--sev-normal)" : couleur;
+    $("verdict-titre").style.color = couleur;
     $("verdict-titre").classList.toggle("clign", v.niveau === "critique");
     $("verdict-detail").textContent = v.detail || "";
     var ech = $("verdict-echeance");
     if (v.echeance) {
       vider(ech);
-      ech.appendChild(document.createTextNode(v.echeance));
       var s = document.createElement("small");
-      s.textContent = "echeance";
+      s.textContent = "ÉCHÉANCE";
       ech.appendChild(s);
+      ech.appendChild(document.createTextNode(String(v.echeance).slice(0, 5)));
       ech.style.color = couleur;
       ech.hidden = false;
     } else {
@@ -358,16 +598,19 @@
 
   function majActuel(a) {
     if (!a) return;
-    vider($("temp"));
-    $("temp").appendChild(document.createTextNode(F(a.temperature_c, 0)));
+    var temp = $("temp");
+    vider(temp);
+    temp.appendChild(document.createTextNode(F(a.temperature_c, 0)));
     var deg = document.createElement("span");
     deg.className = "deg"; deg.textContent = "°";
-    $("temp").appendChild(deg);
+    temp.appendChild(deg);
+
+    poser($("ciel-actuel"), picto(ciel(a, new Date())));
+    $("maintenant-titre").textContent = "Maintenant" + (a.heure ? "  ·  prévision de " + String(a.heure).slice(0, 5) : "");
 
     var bouts = [];
     if (a.humidex !== null && a.humidex !== undefined) bouts.push("humidex " + F(a.humidex, 0));
-    if (a.heure) bouts.push("releve de " + a.heure);
-    if (a.source) bouts.push(a.source);
+    if (a.nebulosite_pct !== null && a.nebulosite_pct !== undefined) bouts.push("nuages " + F(a.nebulosite_pct, 0) + " %");
     $("ressenti").textContent = bouts.join("  ·  ");
 
     $("vent").textContent = F(a.vent_moyen_kmh, 0);
@@ -375,17 +618,13 @@
     $("humidite").textContent = F(a.humidite_pct, 0);
     $("pluie-h").textContent = F(a.pluie_mm, 1);
     $("vent-note").textContent = "vent moyen" + (a.vent_direction ? " de " + a.vent_direction : "");
-    $("nebulosite").textContent = a.nebulosite_pct !== null && a.nebulosite_pct !== undefined
-      ? ("humidite  ·  nuages " + F(a.nebulosite_pct, 0) + " %") : "humidite";
 
     // La fleche pointe la ou VA le vent : c'est ce qui se lit d'un coup d'oeil
     // quand on cherche d'ou arrive une cellule.
     //
     // Le glyphe de base est une fleche vers la DROITE, soit un cap de 90 deg.
     // Un vent DE D souffle VERS D+180. La rotation vaut donc (D + 180) - 90,
-    // c'est-a-dire D + 90. Le +180 pose ici au depart donnait une fleche a
-    // 90 deg de la realite : un vent de nord etait montre soufflant vers
-    // l'ouest, ce qui trompe precisement quand on cherche d'ou vient la pluie.
+    // c'est-a-dire D + 90.
     if (a.vent_direction_deg !== null && a.vent_direction_deg !== undefined) {
       $("vent-fleche").style.transform = "rotate(" + (a.vent_direction_deg + 90) + "deg)";
       $("vent-fleche").style.display = "inline-block";
@@ -394,24 +633,40 @@
     }
   }
 
+  var PICTO_TUILE = { orage: "orage", vent: "vent", chaleur: "thermometre", sol: "sol" };
+
   function tuile(c) {
+    var couleur = COULEUR[c.niveau] || "var(--muted-2)";
+    var calme = !c.niveau || c.niveau === "normal";
     var el = document.createElement("div");
-    el.className = "tuile";
-    el.style.borderLeftColor = COULEUR[c.niveau] || "var(--muted-2)";
+    el.className = "tuile" + (calme ? " calme" : "");
+    el.style.borderLeftColor = couleur;
+    if (!calme) el.style.background = "linear-gradient(90deg, " + (TEINTE[c.niveau] || "transparent") + ", var(--panel) 70%)";
 
     var tete = document.createElement("div");
     tete.className = "tuile-tete";
+    if (PICTO_TUILE[c.cle]) tete.appendChild(picto(PICTO_TUILE[c.cle], "tuile-ic"));
     var lib = document.createElement("span");
     lib.className = "libelle"; lib.textContent = c.libelle;
+    tete.appendChild(lib);
+    // Etat en pastille pleine quand il compte, en simple mot quand tout va bien.
     var etat = document.createElement("span");
     etat.className = "tuile-etat";
     etat.textContent = MOT[c.niveau] || "";
-    etat.style.color = COULEUR[c.niveau] || "var(--muted)";
-    tete.appendChild(lib); tete.appendChild(etat);
+    if (calme) {
+      etat.style.color = "var(--sev-normal)";
+      etat.style.border = "2px solid rgba(34,197,94,0.4)";
+    } else {
+      etat.style.background = couleur;
+      etat.style.color = "#0b1220";
+    }
+    tete.appendChild(etat);
     el.appendChild(tete);
 
+    var ligne = document.createElement("div");
+    ligne.className = "tuile-mesure";
     if (c.valeur !== null && c.valeur !== undefined) {
-      var val = document.createElement("div");
+      var val = document.createElement("span");
       val.className = "tuile-valeur";
       val.appendChild(document.createTextNode(c.valeur));
       if (c.unite) {
@@ -419,28 +674,33 @@
         u.className = "u"; u.textContent = c.unite;
         val.appendChild(u);
       }
-      el.appendChild(val);
+      ligne.appendChild(val);
     }
-
-    var det = document.createElement("div");
+    var det = document.createElement("span");
     det.className = "tuile-detail";
     det.textContent = c.detail || "";
-    el.appendChild(det);
+    ligne.appendChild(det);
+    el.appendChild(ligne);
 
     // Le pic n'est affiche que s'il depasse la valeur courante : sinon il
     // repete l'information et occupe une place qui vaut cher.
     if (c.pic_heure && c.pic !== null && c.pic !== undefined && c.pic > (c.valeur || 0)) {
       var pic = document.createElement("div");
-      pic.className = "tuile-pic";
-      pic.textContent = "jusqu a " + c.pic + " vers " + c.pic_heure;
+      pic.className = "tuile-pic une-ligne";
+      pic.textContent = "jusqu'à " + c.pic + (c.unite ? " " + c.unite : "") + " vers " + String(c.pic_heure).slice(0, 5);
       el.appendChild(pic);
+    } else if (c.pic_heure && !calme) {
+      var des = document.createElement("div");
+      des.className = "tuile-pic une-ligne";
+      des.textContent = "à partir de " + String(c.pic_heure).slice(0, 5);
+      el.appendChild(des);
     }
 
     if (c.consigne) {
       var cons = document.createElement("div");
       cons.className = "tuile-consigne";
       cons.textContent = c.consigne;
-      cons.style.color = COULEUR[c.niveau] || "var(--text)";
+      cons.style.color = calme ? "var(--text)" : couleur;
       el.appendChild(cons);
     }
     return el;
@@ -463,8 +723,7 @@
     var cible = (maxi.temperature_c - temps[0].temperature_c) >=
                 (temps[0].temperature_c - mini.temperature_c) ? maxi : mini;
     if (Math.abs(cible.temperature_c - temps[0].temperature_c) < 2) return;
-    var mot = cible === maxi ? "jusqu a " : "descend a ";
-    el.appendChild(document.createTextNode(mot));
+    el.appendChild(document.createTextNode(cible === maxi ? "monte à " : "descend à "));
     var b = document.createElement("b");
     b.textContent = F(cible.temperature_c, 0) + "°";
     el.appendChild(b);
@@ -483,47 +742,55 @@
     liste = liste || [];
     $("frise-titre").textContent = liste.length
       ? ("Les " + liste.length + " prochaines heures")
-      : "Prevision horaire indisponible";
+      : "Prévision horaire indisponible";
 
     // Une consigne se lit a l'heure ou elle tombe, pas dans une liste a part :
     // c'est le "quand" qui declenche l'action.
     var parHeure = {};
     (consignes || []).forEach(function (c) { parHeure[c.heure] = c; });
 
+    var ref = new Date(), jourPrec = null;
     liste.forEach(function (h, i) {
       if (!h) return;
+      var date = dateHeure(h.heure, ref);
       var col = document.createElement("div");
       col.className = "heure" + (i === 0 ? " maintenant" : "");
+      if (jourPrec !== null && date.getDate() !== jourPrec) col.className += " nouveau-jour";
+      jourPrec = date.getDate();
       var c = parHeure[h.heure];
       col.style.borderTopColor = c ? (COULEUR[c.niveau] || "var(--muted-2)") : "var(--muted-2)";
 
       var heure = document.createElement("div");
-      heure.className = "h"; heure.textContent = String(h.heure || "").slice(0, 5);
+      heure.className = "h";
+      heure.textContent = String(date.getHours()).padStart(2, "0") + "h";
+      if (/nouveau-jour/.test(col.className)) {
+        var j = document.createElement("small");
+        j.textContent = date.toLocaleDateString("fr-FR", { weekday: "short" }).replace(".", "");
+        heure.appendChild(j);
+      }
       col.appendChild(heure);
+
+      col.appendChild(picto(ciel(h, date)));
 
       var temp = document.createElement("div");
       temp.className = "t"; temp.textContent = F(h.temperature_c, 0) + "°";
       col.appendChild(temp);
 
+      // Pluie : le picto dit "il pleut", le chiffre dit combien. Rien quand
+      // il ne pleut pas, pour que les heures humides ressortent.
       var mm = h.pluie_mm || 0;
-      var jauge = document.createElement("div");
-      jauge.className = "jauge";
-      var barre = document.createElement("span");
-      barre.style.height = Math.max(0, Math.min(1, mm / JAUGE_PLEINE_MM)) * 100 + "%";
-      if (mm >= 5) barre.style.background = "#2563eb";
-      jauge.appendChild(barre);
-      col.appendChild(jauge);
-
       var lib = document.createElement("div");
       lib.className = "mm";
       lib.textContent = mm > 0 ? F(mm, 1) + " mm" : "";
+      if (mm >= PLUIE_FORTE_MM) lib.style.color = "#60a5fa";
       col.appendChild(lib);
 
       var raf = document.createElement("div");
       raf.className = "raf";
-      raf.textContent = F(h.vent_rafale_kmh, 0) + " km/h";
-      if ((h.vent_rafale_kmh || 0) >= 60) raf.style.color = "var(--sev-danger)";
-      else if ((h.vent_rafale_kmh || 0) >= 40) raf.style.color = "var(--sev-vigilance)";
+      raf.appendChild(picto("vent"));
+      raf.appendChild(document.createTextNode(F(h.vent_rafale_kmh, 0)));
+      if ((h.vent_rafale_kmh || 0) >= RAFALE_DANGER) raf.style.color = "var(--sev-danger)";
+      else if ((h.vent_rafale_kmh || 0) >= RAFALE_VIGILANCE) raf.style.color = "var(--sev-vigilance)";
       col.appendChild(raf);
 
       rail.appendChild(col);
@@ -534,26 +801,32 @@
     var el = $("flux");
     vider(el);
     // La sante des flux vient du serveur, qui sait lesquels alimentent
-    // reellement cet ecran. Un libelle court : le bandeau ne doit pas se
-    // replier sur deux lignes et pousser tout le reste vers le bas.
-    var f = d.fraicheur || { ok: false, en_retard: [] };
+    // reellement cet ecran. Libelle court dans le bandeau, detail au pied.
+    var f = d.fraicheur || { ok: false, en_retard: [], flux: [] };
     var p = document.createElement("span");
     p.className = "puce";
     p.style.background = f.ok ? "var(--sev-normal)" : "var(--sev-vigilance)";
     el.appendChild(p);
-    var texte = "flux a jour";
+    var texte = "flux OK";
     if (!f.ok && (f.en_retard || []).length) {
       var pire = f.en_retard[0];
       texte = pire.age_min === null
         ? (pire.libelle + " absente")
         : (pire.libelle + " " + Math.round(pire.age_min / 60) + " h");
       if ((f.en_retard || []).length > 1) texte += " +" + (f.en_retard.length - 1);
+      el.style.color = "var(--sev-vigilance)";
+    } else {
+      el.style.color = "";
     }
     el.appendChild(document.createTextNode(texte));
 
-    $("pied-modele").textContent = d.actuel && d.actuel.source
-      ? ("modele " + d.actuel.source + "  ·  WBGT " + (d.actuel.methode || "")) : "";
-    $("pied-maj").textContent = "mis a jour a " +
+    infosPied.flux = "flux : " + (f.flux || []).map(function (x) {
+      if (x.ok) return x.libelle + " OK";
+      return x.libelle + (x.age_min === null ? " absente" : " en retard (" + Math.round(x.age_min) + " min)");
+    }).join(", ");
+    infosPied.modele = d.actuel && d.actuel.source
+      ? ("modèle " + d.actuel.source + (d.actuel.methode ? "  ·  WBGT " + d.actuel.methode : "")) : "";
+    $("pied-maj").textContent = "mis à jour à " +
       new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
   }
 
@@ -568,27 +841,34 @@
         majContraintes(d.contraintes);
         majFrise(d.prochaines, d.consignes);
         majFlux(d);
+        majPied();
+        ajusterTout();
       })
       .catch(function (e) {
         console.error("[Mur meteo]", e);
         // Un mur qui n'a plus de donnees doit le dire en grand : sinon il
         // continue d'afficher la derniere situation connue comme si elle etait
         // la situation courante.
-        $("verdict-titre").textContent = "DONNEES INDISPONIBLES";
+        $("verdict-titre").textContent = "DONNÉES INDISPONIBLES";
         $("verdict-titre").style.color = "var(--sev-critique)";
         $("verdict-titre").classList.add("clign");
-        $("verdict-detail").textContent = "le mur n est plus alimente — verifier Cockpit";
+        $("verdict-detail").textContent = "le mur n'est plus alimenté — vérifier Cockpit";
+        $("verdict").style.borderLeftColor = "var(--sev-critique)";
+        poser($("verdict-ic"), picto("attention", "verdict-ic", "var(--sev-critique)"));
         var el = $("flux");
         vider(el);
         var p = document.createElement("span");
         p.className = "puce"; p.style.background = "var(--sev-critique)";
         el.appendChild(p);
         el.appendChild(document.createTextNode("liaison perdue"));
+        ajusterTout();
       });
   }
 
   horloge();
   setInterval(horloge, 1000);
+  window.addEventListener("resize", ajusterTout);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(ajusterTout);
   charger();
   setInterval(charger, PERIODE_MS);
 })();
