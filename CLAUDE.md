@@ -127,6 +127,7 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 - Décorateur `@role_required("user"|"manager"|"admin")` sur les routes protégées
 - L'app vérifie `cockpit` dans les apps autorisées du token JWT
 - En prod, les clés par défaut provoquent une erreur au démarrage
+- Afficheurs TV du portail (compte `type_compte == "borne"` + `afficheur_id`, guide home 05 §10) : admis en lecture au-dessus de user sur les seuls chemins exacts de `PAGES_AFFICHEUR` (`app.py`) ; un compte borne est plafonné à user partout et n'écrit jamais (`_refuser_ecriture_borne`, toutes routes) ; `/api/active-alerts` lui rend `[]`. Mode cadre : CSP `frame-ancestors 'self' https://safe.lemans.org` sur ces pages (accueil seulement avec `?tv=1`). Une nouvelle page TV = l'ajouter à `PAGES_AFFICHEUR` avec ses API de lecture
 
 ### Patterns frontend
 

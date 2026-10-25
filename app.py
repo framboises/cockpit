@@ -439,6 +439,29 @@ ROLE_ORDER = ["user", "manager", "admin"]
 APP_KEY = "cockpit"
 SUPER_ADMIN_ROLE = "super_admin"
 
+# Afficheurs TV du portail (guide 05 §10) : compte borne (type_compte "borne")
+# portant afficheur_id, role cockpit "user" au plus. Chemins EXACTS ou un
+# afficheur est admis en lecture meme si la page exige plus que user : le role
+# exige des humains ne change pas. Ailleurs un compte borne reste user, et
+# n'ecrit jamais (_refuser_ecriture_borne).
+PAGES_AFFICHEUR = frozenset({
+    "/meteo-mur", "/api/meteo/mur",        # mur meteo (manager) et sa charge unique
+    "/circulation",                         # trafic (manager) ; /alerts et /trafic/all_routes sont en user
+    "/", "/doors", "/terrains", "/general_stat",  # deja en user : listees pour le mode cadre
+})
+METHODES_LECTURE = frozenset({"GET", "HEAD", "OPTIONS"})
+# Seule origine autorisee a encadrer les pages TV (mode cadre, §10.3)
+PORTAIL_ORIGINE_CADRE = "https://safe.lemans.org"
+
+
+def est_jeton_borne(payload):
+    return (payload or {}).get("type_compte") == "borne"
+
+
+def est_afficheur(payload):
+    return est_jeton_borne(payload) and bool(payload.get("afficheur_id"))
+
+
 def role_required(required_role):
     def decorator(f):
         @wraps(f)
@@ -493,6 +516,11 @@ def role_required(required_role):
             if not isinstance(roles_by_app, dict):
                 roles_by_app = {}
             app_role = roles_by_app.get(APP_KEY)
+            borne = est_jeton_borne(payload)
+            if borne:
+                # Compte borne : jamais plus que user, quel que soit le jeton
+                is_super_admin = False
+                app_role = "user" if app_role else None
 
             if not is_super_admin and not app_role:
                 logger.warning("Accès refusé à Cockpit pour cet utilisateur.")
@@ -505,9 +533,15 @@ def role_required(required_role):
             # Page d'administration accordee par un groupe (ADMIN_PAGE_REGISTRY)
             granted = (max_user_role_level < ROLE_HIERARCHY.get(required_role, 0)
                        and required_role == "admin"
+                       and not borne
                        and request_admin_grant(dict(payload, app_role=effective_role,
                                                     is_super_admin=is_super_admin)))
-            if max_user_role_level < ROLE_HIERARCHY.get(required_role, 0) and not granted:
+            # Afficheur TV : lecture des seules pages de PAGES_AFFICHEUR
+            afficheur_admis = (est_afficheur(payload)
+                               and request.method in METHODES_LECTURE
+                               and request.path in PAGES_AFFICHEUR)
+            if (max_user_role_level < ROLE_HIERARCHY.get(required_role, 0)
+                    and not granted and not afficheur_admis):
                 flash(f"Accès interdit : cette fonctionnalité requiert un rôle '{required_role}'.", "error")
                 return redirect(request.referrer or "/")
 
@@ -915,6 +949,10 @@ def _request_payload_peek():
                 is_sa = SUPER_ADMIN_ROLE in (p.get("global_roles") or [])
                 p["is_super_admin"] = is_sa
                 p["app_role"] = "admin" if is_sa else (p.get("roles_by_app") or {}).get(APP_KEY)
+                if est_jeton_borne(p):
+                    # Meme plafond que role_required : une borne n'est jamais plus que user
+                    p["is_super_admin"] = False
+                    p["app_role"] = "user" if p["app_role"] else None
                 payload = p
             except Exception:
                 payload = None
@@ -933,6 +971,33 @@ def _page_allowed_for_request(page_id):
             g._allowed_pages = None
     allowed = g._allowed_pages
     return allowed is None or page_id in allowed
+
+
+@app.before_request
+def _refuser_ecriture_borne():
+    """Un compte borne (afficheur TV, lecture_seule) n'ecrit jamais, sur
+    aucune route : y compris les blueprints qui ont leur propre garde."""
+    if request.method in METHODES_LECTURE:
+        return None
+    if est_jeton_borne(_request_payload_peek()):
+        return jsonify({"ok": False, "error": "lecture_seule"}), 403
+    return None
+
+
+def _cadre_portail_autorise():
+    """Pages TV que le portail peut encadrer (mode cadre, guide 05 §10.3).
+    L'accueil seulement en mode TV (/?tv=1), jamais les API."""
+    if request.path not in PAGES_AFFICHEUR or request.path.startswith("/api/"):
+        return False
+    return request.path != "/" or request.args.get("tv") == "1"
+
+
+@app.after_request
+def _autoriser_cadre_portail(reponse):
+    if _cadre_portail_autorise():
+        reponse.headers["Content-Security-Policy"] = f"frame-ancestors 'self' {PORTAIL_ORIGINE_CADRE}"
+        reponse.headers.pop("X-Frame-Options", None)
+    return reponse
 
 
 @app.before_request
@@ -5345,6 +5410,10 @@ def my_alert_definitions():
 @role_required("user")
 def get_active_alerts():
     payload = getattr(request, 'user_payload', {})
+    if est_afficheur(payload):
+        # Un afficheur TV ne prend jamais d'alerte : sans cela, alert_poller
+        # ouvrirait en plein ecran une alerte attendant un clic (/?tv=1)
+        return jsonify([])
     allowed_slugs = _get_user_alert_slugs(payload)
     query = {"expiresAt": {"$gt": datetime.now(timezone.utc)}}
     if allowed_slugs is not None:
