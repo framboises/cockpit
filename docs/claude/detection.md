@@ -191,6 +191,14 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   compte : les vehicules gares vus par l'IA autour ne sont que du decor.
 - "A verifier" (badge orange, `aiDoubt`) : filtree alors que SigLIP voit une
   personne / un vehicule >= 0,5. Jamais "fausse alerte probable" dans ce cas.
+- ECARTEE PAR L'IA (25/10/2026, `detection.portee`) : filtree sans doute
+  (oiseau, grillage, reflet...) ou avis operateur "down" = `ecartee` : JAMAIS
+  "en cours", "a traiter", pastille de la carte ni zone rouge (avant, elles
+  restaient `new` et allumaient les cameras alors qu'aucune alerte n'etait
+  partie). Filtree mais SigLIP voit personne / vehicule >= 0,5 = `doute` : a
+  traiter, jamais en cours. Avis "up" = `alerte`. `overview.totals.ecartees` /
+  `doutes` (KPI "ecartees par l'IA", "dont N a verifier"). Elles restent
+  listees (filtre IA) pour l'entrainement. Meme regle sur le mur TV.
 - Hors planning (`armed: false`) : JAMAIS compte "en cours" ni "a traiter"
   (`overview` : totals, by_channel, by_zone ; badges des cartes). Une
   intrusion au sens propre n'existe que pendant le planning.
@@ -693,9 +701,9 @@ blueprint Detection, reserve aux admins et au groupe Detection) :
 EXACT pour `PAGES_AFFICHEUR`, la photo passe en query string ; `image_mur`
 n'accepte que `intrusions/`, jamais `captures/`).
 
-- Intrusion du mur = DANS LE PLANNING et NON FILTREE par l'IA (aucune alerte
-  n'est partie pour les autres) : filtrees et hors planning sont seulement
-  comptees dans le pied.
+- Intrusion du mur = DANS LE PLANNING et non `ecartee` (`portee`) : les
+  ecartees et hors planning sont seulement comptees dans le pied ; une
+  douteuse est a traiter, jamais en cours.
 - En cours (message < `EPISODE_GAP_S`) : en-tete et cadre de la carte rouges,
   "INTRUSION EN COURS", DERNIERE photo de l'episode (la plus fraiche) avec le
   cadre de la cible et un zoom sur elle, camera, zone, type, duree a la

@@ -746,6 +746,25 @@ def delete_zone(zid):
 # ---------------------------------------------------------------------------
 # Vue d'ensemble et intrusions
 # ---------------------------------------------------------------------------
+def portee(ep):
+    """Ce que vaut une intrusion pour les compteurs et les indicateurs :
+    "alerte" (une alerte est partie, ou l'operateur l'a confirmee), "doute"
+    (filtree par l'IA alors que SigLIP voit une personne / un vehicule >= 0,5 :
+    a verifier, badge "A verifier" de la page) ou "ecartee" (filtree : oiseau,
+    grillage, reflet..., ou fausse alerte selon l'operateur). Une ecartee
+    n'allume jamais "en cours", "a traiter" ni une pastille de la carte : elle
+    reste listee (filtre IA) pour l'entrainement."""
+    vote = (ep.get("ai_vote") or {}).get("vote")
+    if vote == "down":
+        return "ecartee"
+    ai = ep.get("ai") or {}
+    if vote == "up" or ai.get("status") != "filtered":
+        return "alerte"
+    if any(g.get("label") in _REAL_CATS and (g.get("p") or 0) >= 0.5 for g in ai.get("guess") or []):
+        return "doute"
+    return "ecartee"
+
+
 @detection_bp.route("/api/detection/overview")
 def overview():
     db = _ensure_db()
@@ -753,7 +772,8 @@ def overview():
     q, (code, start, end, step, bars) = _episode_query(request.args, zones)
     now = datetime.now(timezone.utc)
     eps = list(db["hik_intrusions"].find(q, {"photos": 0, "targets": 0}).sort("started_at", DESCENDING).limit(5000))
-    totals = {"episodes": len(eps), "human": 0, "vehicle": 0, "other": 0, "active": 0, "new": 0, "seen": 0, "closed": 0}
+    totals = {"episodes": len(eps), "human": 0, "vehicle": 0, "other": 0, "active": 0, "new": 0, "seen": 0, "closed": 0,
+              "ecartees": 0, "doutes": 0}
     flow = {"human": [0] * bars, "vehicle": [0] * bars, "other": [0] * bars}
     by_zone, by_channel = {}, {}
     for ep in eps:
@@ -765,10 +785,16 @@ def overview():
         # compteurs ; l'episode reste listable pour l'entrainement
         armed = ep.get("armed") is not False
         status = ep.get("status", "new")
-        if armed or status != "new":
+        # Ecartee par l'IA (oiseau, grillage...) : aucune alerte n'est partie,
+        # ni "en cours" ni "a traiter" ; douteuse : a traiter, jamais en cours
+        pt = portee(ep)
+        totals["ecartees"] += armed and pt == "ecartee"
+        totals["doutes"] += armed and pt == "doute" and status == "new"
+        a_traiter = armed and status == "new" and pt != "ecartee"
+        if (armed and pt != "ecartee") or status != "new":
             totals[status] = totals.get(status, 0) + 1
         last = _utc(ep.get("last_at"))
-        active = armed and bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
+        active = armed and pt == "alerte" and bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
         totals["active"] += active
         i = min(bars - 1, max(0, int((_utc(ep["started_at"]) - start) // step)))
         flow[kind][i] += 1
@@ -776,13 +802,13 @@ def overview():
         c = by_channel.setdefault(key, {"n": 0, "active": False, "new": 0, "last": None})
         c["n"] += 1
         c["active"] = c["active"] or active
-        c["new"] += armed and status == "new"
+        c["new"] += a_traiter
         c["last"] = max(filter(None, [c["last"], _iso(last)]), default=None)
         for z in _zones_of(ep, zones):
             zz = by_zone.setdefault(str(z["_id"]), {"n": 0, "active": False, "new": 0, "human": 0, "vehicle": 0})
             zz["n"] += 1
             zz["active"] = zz["active"] or active
-            zz["new"] += armed and status == "new"
+            zz["new"] += a_traiter
             if kind in ("human", "vehicle"):
                 zz[kind] += 1
     return jsonify({
@@ -1191,11 +1217,13 @@ def etat_mur(db, now=None):
         if ep.get("armed") is False:
             tot["hors_planning"] += du_jour
             continue
-        if (ep.get("ai") or {}).get("status") == "filtered":
+        pt = portee(ep)
+        if pt == "ecartee":
             tot["filtrees"] += du_jour
             continue
         item = None
-        actif = bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
+        # Douteuse (filtree, mais SigLIP voit une personne) : a traiter seulement
+        actif = pt == "alerte" and bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
         nouveau = ep.get("status", "new") == "new"
         cam = par_camera.setdefault(str(ep.get("camera_id") or ""), {"actif": False, "a_traiter": 0, "jour": 0})
         if du_jour:

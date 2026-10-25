@@ -92,3 +92,43 @@ def test_planning_et_zones(db):
     assert cams["Porte Houx"]["arme"] and not cams["Village"]["arme"]
     assert "Sans position" not in cams
     assert d["groupes"] == [{"nom": "Village", "couleur": "#2563eb", "arme": False, "libelle": "En pause"}]
+
+
+def test_portee_des_intrusions():
+    assert D.portee({}) == "alerte"
+    assert D.portee({"ai": {"status": "confirmed"}}) == "alerte"
+    assert D.portee({"ai": {"status": "unverified"}}) == "alerte"
+    oiseau = {"ai": {"status": "filtered", "guess": [{"label": "oiseau", "p": 0.8}, {"label": "personne", "p": 0.2}]}}
+    assert D.portee(oiseau) == "ecartee"
+    assert D.portee({"ai": {"status": "filtered", "guess": [{"label": "personne", "p": 0.6}]}}) == "doute"
+    # L'avis de l'operateur l'emporte
+    assert D.portee(dict(oiseau, ai_vote={"vote": "up"})) == "alerte"
+    assert D.portee({"ai": {"status": "confirmed"}, "ai_vote": {"vote": "down"}}) == "ecartee"
+
+
+def test_douteuse_a_traiter_jamais_en_cours(db):
+    cam = _camera(db, "Porte Houx")
+    _intrusion(db, cam, "Porte Houx", 1, 2, ai={"status": "filtered", "guess": [{"label": "personne", "p": 0.7}]})
+    d = D.etat_mur(db, MAINTENANT)
+    assert d["en_cours"] == [] and [e["camera"] for e in d["a_traiter"]] == ["Porte Houx"]
+    assert d["totaux"]["filtrees"] == 0 and d["totaux"]["a_traiter"] == 1
+
+
+def test_overview_sans_les_ecartees(db, monkeypatch):
+    # Compteurs et pastilles de la page Detection : un oiseau n'allume rien
+    import app as A
+    monkeypatch.setattr(D, "_db", db)
+    monkeypatch.setattr(A, "CODING", True)
+    cam = _camera(db, "Porte Houx")
+    maintenant = datetime.now(timezone.utc)
+    for ai in ({"status": "filtered", "guess": [{"label": "oiseau", "p": 0.9}]},
+               {"status": "filtered", "guess": [{"label": "personne", "p": 0.7}]},
+               {"status": "confirmed"}):
+        db.hik_intrusions.insert_one({"camera_id": cam, "channel": 1, "camera_name": "Porte Houx",
+                                      "started_at": _naif(maintenant - timedelta(seconds=20)),
+                                      "last_at": _naif(maintenant - timedelta(seconds=5)),
+                                      "target_types": ["human"], "status": "new", "ai": ai})
+    rep = A.app.test_client().get("/api/detection/overview?period=today")
+    t, c = rep.get_json()["totals"], rep.get_json()["by_channel"]["%s:1" % cam]
+    assert (t["active"], t["new"], t["ecartees"], t["doutes"]) == (1, 2, 1, 1)
+    assert c["new"] == 2 and c["n"] == 3

@@ -349,10 +349,12 @@
         box.textContent = "";
         var t = ov.totals;
         box.appendChild(kpi("emergency", "#dc2626", t.active, "en cours", t.active > 0));
-        box.appendChild(kpi("mark_email_unread", "#b45309", t["new"], "a traiter", t["new"] > 0));
+        box.appendChild(kpi("mark_email_unread", "#b45309", t["new"], t.doutes ? "a traiter (dont " + t.doutes + " a verifier)" : "a traiter", t["new"] > 0));
         box.appendChild(kpi("directions_walk", "#f97316", t.human, "pietons"));
         box.appendChild(kpi("directions_car", "#3b82f6", t.vehicle, "vehicules"));
         box.appendChild(kpi("shield", "#64748b", t.episodes, "intrusions"));
+        // Oiseaux, grillage, reflets... : aucune alerte, hors "en cours" / "a traiter" et pastilles
+        if (t.ecartees) box.appendChild(kpi("filter_alt_off", "#94a3b8", t.ecartees, "ecartees par l'IA"));
         var sp = el("div", "dt-kpi dt-kpi-spark");
         sp.appendChild(el("div", "dt-kpi-l", "Activite " + (S.period === "day" ? "de la journee" : PERIOD_LABEL[S.period]) + (ov.period.step_min < 60 ? " (par " + ov.period.step_min + " min)" : " (par " + ov.period.step_min / 60 + " h)")));
         var n = ov.period.bars, max = 1;
