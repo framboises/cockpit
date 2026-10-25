@@ -53,14 +53,18 @@
     if (!window.selectedYear && c.annee) window.selectedYear = c.annee;
   }
 
-  function ouvrirPage(chemin) {
+  // memeOnglet : page operateur (Portes) ouverte a la place de la page
+  // courante ; les autres restent dans un nouvel onglet
+  function ouvrirPage(chemin, memeOnglet) {
     var c = contexte();
     if (!c.evenement || !c.annee) {
       message("error", "Veuillez selectionner un evenement et une annee");
       return;
     }
-    window.open(chemin + "?event=" + encodeURIComponent(c.evenement) +
-                "&year=" + encodeURIComponent(c.annee), "_blank");
+    var url = chemin + "?event=" + encodeURIComponent(c.evenement) +
+              "&year=" + encodeURIComponent(c.annee);
+    if (memeOnglet) window.location.href = url;
+    else window.open(url, "_blank");
   }
 
   // ------------------------------------------------------------------
@@ -213,7 +217,7 @@
     };
     Object.keys(cibles).forEach(function (id) {
       var el = document.getElementById(id);
-      if (el) el.addEventListener("click", function () { ouvrirPage(cibles[id]); });
+      if (el) el.addEventListener("click", function () { ouvrirPage(cibles[id], id === "doors-page-button"); });
     });
   }
 

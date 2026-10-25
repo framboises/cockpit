@@ -12,6 +12,13 @@ Un seul calcul, `portes_etat.py` (pur, `db` en argument, comme `presents_etat.py
 | Mur TV (manager, afficheur) | `/portes-mur?event=&year=` (obligatoires ; + `jour`, `a` pour rejouer) | vue generale + alertes, aucune interaction ; dans `PAGES_AFFICHEUR` avec `/api/portes/etat`. **Meme contrat que `/terrains` et `/general_stat`** : `event` / `year` poses par le portail TITAN sur l'URL de l'afficheur, 400 s'il en manque un, passes tels quels au gabarit (`var EVENT` / `var YEAR`) puis a chaque appel d'API |
 | API | `GET /api/portes/etat` (`vue=tv` : sans series ni fiches), `/api/portes/bilan`, `/api/portes/editions` | `etat` et `bilan` : `event` et `year` obligatoires (400 sinon), comme `/api/terrains/fill` |
 
+### Page operateur : navigation et analyse complete (25/10/2026)
+
+- Menu « Portes » : ouvre la page dans l'ONGLET COURANT (`sidebar.js` `ouvrirPage(chemin, memeOnglet)`), les autres raccourcis restent en nouvel onglet.
+- Selecteur d'edition dans l'en-tete (`/api/portes/editions` + celle de l'URL, marquee « sans controle live »), commun a Direct / Rejeu / Bilan ; changer recharge `/doors?event=&year=` (+ `vue`). Edition sans archive : carte « Aucune donnee... » avec les editions disponibles en liens.
+- Legende des couleurs (modes et charge) en bas de page, toutes vues. « N-1 tous sens » masque par defaut dans le graphe (clic sur la legende).
+- ANALYSE COMPLETE d'une porte (`#vue-porte`, `?porte=&focus=1`) : bouton « Analyse complete » du detail (Direct / Rejeu) ou nom de la porte dans le Bilan. Choix de la porte, d'un jour ou de toute l'edition. Contenu : l'etat a l'instant (jour du Direct / Rejeu) + `GET /api/portes/porte?event&year&porte[&jour[&a]]` (`portes_dossier.dossier`) : passages (enfants, accredites, vehicules), familles de statuts HSH (`FAMILLES` : doubles scans 111-124, entrees sans sortie 133, titres refuses, ouvertures manuelles 51/61-66/175 dont forces 63, liberations annulees 134, checkpoint hors ligne 107), motifs exacts par sens, series horaires, tableau par appareil, billets (`utid`) refuses 3 fois ou plus, refus par support (`coding_label`) et profil (`type_scan`), validations hors ligne (`validated=1`). Taux de refus = (doubles + titres) / tous les scans ; 133 et 107 sont des passages. ~0,1-0,3 s (edition entiere).
+
 Sources : `live_frequentation.find_sources` (archive `hsh_archive_tx_*` ou direct `hsh_transactions_agg`, fenetre course −10 j / +3 j), structure HSH (`live_scan_units.structure_maps` / `classify_gate` : porte = gate de l'Area enceinte), refus (`hsh_erreurs` / `hsh_archive_erreurs_*`), `door_security` (bible + planning), `timetable` (vignettes), `pcorg` (fiches).
 
 ### Mesure (archives 2026, 24H MOTOS / GPF / SUPERBIKE)

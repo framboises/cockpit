@@ -189,3 +189,78 @@
   .pt-page .etat-grille { grid-template-columns: 1fr; }
   .pt-page .d-deux { grid-template-columns: 1fr; }
 }
+
+/* --- Selecteur d'edition (en-tete, commun aux trois vues) ------------------ */
+.pt-edition-lab { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.pt-edition-lab .material-symbols-outlined { font-size: 18px; }
+.pt-edition-lab select {
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text);
+  font: inherit; font-size: .84rem; font-weight: 600; padding: 4px 8px; max-width: 260px;
+}
+
+/* --- Edition sans archive live -------------------------------------------- */
+.pt-page .pt-vide-edition {
+  display: flex; gap: 18px; align-items: flex-start; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: 24px 28px; box-shadow: var(--shadow-sm);
+}
+.pt-page .pt-vide-edition > .material-symbols-outlined { font-size: 40px; color: var(--muted); }
+.pt-page .pt-vide-edition h2 { margin: 0 0 6px; font-size: 1.1rem; }
+.pt-page .pt-vide-edition p { margin: 0 0 14px; color: var(--muted); font-size: .88rem; line-height: 1.5; max-width: 720px; }
+.pt-page .vide-editions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pt-page .vide-editions a {
+  border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: .82rem; font-weight: 600;
+  color: var(--text); text-decoration: none; background: var(--bg);
+}
+.pt-page .vide-editions a:hover { border-color: var(--brand); background: var(--brand-light); }
+
+/* --- Legende (bas de page) ------------------------------------------------ */
+.pt-page .pt-legende {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px 28px; padding: 8px 16px; margin: 0 16px 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); font-size: .76rem; color: var(--text);
+}
+.pt-page .lg-bloc { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.pt-page .lg-aide { color: var(--muted); }
+.pt-page .lg { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pt-page .lg i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+/* --- Analyse complete d'une porte (vue-porte) ----------------------------- */
+.pt-page #vue-porte { overflow: auto; }
+.pt-page .pf-barre { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 0 0 auto; }
+.pt-page .pf-retour {
+  display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); background: var(--card);
+  border-radius: 8px; padding: 5px 10px; font: inherit; font-size: .84rem; font-weight: 600; color: var(--text); cursor: pointer;
+}
+.pt-page .pf-retour .material-symbols-outlined { font-size: 18px; }
+.pt-page #pf-porte {
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text);
+  font: inherit; font-size: 1rem; font-weight: 700; padding: 4px 8px;
+}
+.pt-page .pf-periodes { display: flex; gap: 4px; flex-wrap: wrap; }
+.pt-page .pf-periodes button {
+  border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 11px;
+  font: inherit; font-size: .78rem; font-weight: 600; color: var(--muted); cursor: pointer; text-transform: capitalize;
+}
+.pt-page .pf-periodes button.actif { border-color: var(--brand); background: var(--brand-light); color: var(--text); }
+.pt-page .pf-carte {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 14px 16px; box-shadow: var(--shadow-sm); margin-top: 12px;
+}
+.pt-page .pf-carte .detail { border: none; box-shadow: none; padding: 0; overflow: visible; }
+.pt-page .pf-grille { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pt-page .pf-grille .pf-carte { margin-top: 12px; }
+.pt-page .pf-fam { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+.pt-page .pf-fam .f { background: var(--bg); border-radius: var(--radius-md); padding: 8px 12px; border-left: 4px solid var(--muted); }
+.pt-page .pf-fam .f b { font-size: 1.15rem; }
+.pt-page .pf-fam .f .l { font-weight: 700; font-size: .82rem; }
+.pt-page .pf-fam .f .a { font-size: .72rem; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+.pt-page .graphe.petit { height: 230px; }
+.pt-page table.mini td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem; }
+.pt-page .porte-lien { color: var(--brand); cursor: pointer; text-decoration: underline; text-decoration-color: transparent; }
+.pt-page .porte-lien:hover { text-decoration-color: currentColor; }
+.pt-page .d-ouvrir {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border: 1px solid var(--brand);
+  color: var(--brand); background: var(--card); border-radius: 8px; padding: 4px 10px; font: inherit;
+  font-size: .8rem; font-weight: 700; cursor: pointer;
+}
+.pt-page .d-ouvrir .material-symbols-outlined { font-size: 18px; }
+@media (max-width: 1100px) { .pt-page .pf-grille { grid-template-columns: 1fr; } }

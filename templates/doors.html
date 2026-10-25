@@ -34,7 +34,12 @@
       </button>
       <span class="material-symbols-outlined pt-header-ico">door_front</span>
       <span class="header-event-name">Portes</span>
-      <span class="pt-edition" id="edition">{{ event }} {{ year }}</span>
+      <label class="pt-edition-lab" title="Édition analysée (événements suivis par le contrôle d'accès live)">
+        <span class="material-symbols-outlined">event</span>
+        <select id="edition-select" aria-label="Événement et année">
+          <option value="{{ event }}|{{ year }}">{{ event }} {{ year }}</option>
+        </select>
+      </label>
 
       <nav class="pt-vues" role="tablist" aria-label="Vue">
         <button type="button" class="vue actif" data-vue="direct">
@@ -50,9 +55,6 @@
         <input type="range" id="rejeu-heure" min="0" max="95" step="1" value="40" aria-label="Heure">
         <span class="rejeu-h" id="rejeu-h">10:00</span>
       </div>
-      <div class="pt-ctrl" id="bilan-ctrl" hidden>
-        <select id="bilan-edition" aria-label="Edition"></select>
-      </div>
 
       <div class="header-spacer"></div>
       <span class="fraicheur" id="fraicheur" title="Actualisation automatique chaque minute en direct">
@@ -63,6 +65,14 @@
     <!-- ===================== Vue Direct / Rejeu ===================== -->
     <main class="pt-main" id="vue-etat">
       <section class="kpis" id="kpis"></section>
+      <section class="pt-vide-edition" id="vide-edition" hidden>
+        <span class="material-symbols-outlined">sensors_off</span>
+        <div>
+          <h2 id="vide-titre">Aucune donnée de contrôle d'accès live pour cette édition</h2>
+          <p id="vide-texte"></p>
+          <div class="vide-editions" id="vide-editions"></div>
+        </div>
+      </section>
 
       <div class="etat-grille">
         <section class="liste">
@@ -87,6 +97,17 @@
       </div>
     </main>
 
+    <!-- ===================== Analyse complete d'une porte ===================== -->
+    <main class="pt-main" id="vue-porte" hidden>
+      <div class="pf-barre">
+        <button type="button" class="pf-retour" id="pf-retour">
+          <span class="material-symbols-outlined">arrow_back</span>Toutes les portes</button>
+        <select id="pf-porte" aria-label="Porte"></select>
+        <div class="pf-periodes" id="pf-periodes"></div>
+      </div>
+      <div id="pf-contenu"></div>
+    </main>
+
     <!-- ===================== Vue Bilan RETEX ===================== -->
     <main class="pt-main" id="vue-bilan" hidden>
       <section class="bilan-jours" id="bilan-jours"></section>
@@ -95,6 +116,24 @@
         <p class="note" id="bilan-note"></p>
       </section>
     </main>
+
+    <!-- Legende des couleurs, commune aux trois vues -->
+    <section class="pt-legende" aria-label="Légende">
+      <div class="lg-bloc">
+        <b>Mode de la porte</b> <span class="lg-aide">(part des sorties sur les 15 dernières minutes)</span>
+        <span class="lg"><i style="background:#2563eb"></i>Entrée : moins de 20 % de sorties</span>
+        <span class="lg"><i style="background:#7c3aed"></i>Mixte : entre 20 et 80 %</span>
+        <span class="lg"><i style="background:#ea580c"></i>Sortie : plus de 80 % de sorties</span>
+        <span class="lg"><i style="background:#94a3b8"></i>Fermée : aucun passage depuis 30 min</span>
+      </div>
+      <div class="lg-bloc">
+        <b>Charge</b> <span class="lg-aide">(liseré à gauche de chaque porte, jauges)</span>
+        <span class="lg"><i style="background:#16a34a"></i>Normale</span>
+        <span class="lg"><i style="background:#d97706"></i>Vigilance : 80 % de la capacité</span>
+        <span class="lg"><i style="background:#ea580c"></i>Saturation prévue dans l'heure</span>
+        <span class="lg"><i style="background:#dc2626"></i>Saturation : 100 %</span>
+      </div>
+    </section>
 
     <footer class="app-footer">
       <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>

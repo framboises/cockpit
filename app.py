@@ -4393,6 +4393,29 @@ def api_portes_bilan():
     return jsonify(portes_etat.bilan(db, event, year))
 
 
+@app.route('/api/portes/porte', methods=['GET'])
+@role_required("user")
+def api_portes_porte():
+    """Analyse complete d'UNE porte (portes_dossier.py) : ?event&year&porte
+    obligatoires ; ?jour=AAAA-MM-JJ (+ ?a=HH:MM) pour un jour, sinon toute
+    l'edition."""
+    import portes_dossier
+    event, year = _portes_event_year()
+    porte = (request.args.get('porte') or "").strip()
+    if not event or not porte:
+        return jsonify({"error": "Missing event, year or porte parameter"}), 400
+    try:
+        year = int(year)
+        jour = datetime.strptime(request.args['jour'], "%Y-%m-%d").date() if request.args.get('jour') else None
+        at = None
+        if jour and request.args.get('a'):
+            hm = datetime.strptime(request.args['a'], "%H:%M")
+            at = datetime(jour.year, jour.month, jour.day, hm.hour, hm.minute)
+    except ValueError:
+        return jsonify({"error": "annee, jour ou heure invalide"}), 400
+    return jsonify(portes_dossier.dossier(db, event, year, porte, jour=jour, at=at))
+
+
 @app.route('/api/portes/editions', methods=['GET'])
 @role_required("user")
 def api_portes_editions():
