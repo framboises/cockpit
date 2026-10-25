@@ -100,7 +100,7 @@
   @keyframes clign{0%,100%{opacity:1}50%{opacity:0.42}}
   </style>
 </head>
-<body>
+<body data-event="{{ event }}" data-year="{{ year }}">
 
   <header class="tete">
     <span class="marque">PORTES</span>
@@ -295,8 +295,12 @@
   }
 
   function charger() {
+    // Edition : celle que le serveur a resolue depuis ?event=&year= (pose par
+    // le portail TITAN sur l'URL de l'afficheur), sinon l'edition en direct.
     var q = new URLSearchParams({ vue: "tv" });
-    ["event", "year", "jour", "a"].forEach(function (k) { if (params.get(k)) q.set(k, params.get(k)); });
+    if (document.body.dataset.event) q.set("event", document.body.dataset.event);
+    if (document.body.dataset.year) q.set("year", document.body.dataset.year);
+    ["jour", "a"].forEach(function (k) { if (params.get(k)) q.set(k, params.get(k)); });
     fetch("/api/portes/etat?" + q.toString(), { credentials: "same-origin" })
       .then(function (r) { return r.json(); })
       .then(function (d) {

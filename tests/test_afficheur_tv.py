@@ -92,6 +92,18 @@ class TestLectureAfficheur:
     def test_afficheur_accepte_sur_circulation(self, env, client):
         assert _avec(client, _jeton(env)).get("/circulation").status_code == 200
 
+    def test_mur_des_portes_sur_l_edition_demandee_par_le_portail(self, env, client):
+        env["evenement"].insert_one({"nom": "24H MOTOS", "short": "24HM"})
+        c = _avec(client, _jeton(env))
+        rep = c.get("/portes-mur?event=24HM&year=2026")
+        assert rep.status_code == 200
+        # Le sigle envoye par le portail est resolu en nom Cockpit
+        assert b'data-event="24H MOTOS"' in rep.data and b'data-year="2026"' in rep.data
+        assert rep.headers.get("Content-Security-Policy") == TestModeCadre.CSP
+        rep = c.get("/api/portes/etat?event=24H%20MOTOS&year=2026&vue=tv")
+        assert rep.status_code == 200
+        assert rep.get_json()["event"] == "24H MOTOS" and rep.get_json()["year"] == 2026
+
     def test_humain_user_toujours_refuse(self, env, client):
         for chemin in ("/meteo-mur", "/api/meteo/mur", "/circulation"):
             _refuse(_avec(client, _jeton(env, borne=False)).get(chemin))

@@ -2,12 +2,14 @@
 
 ## Portes : page operateur `/doors`, mur TV `/portes-mur` (`portes_etat.py`)
 
+Menu : « Portes » est dans **Surveillance** (outil operateur), « Mur portes » dans **Ecrans TV**.
+
 Un seul calcul, `portes_etat.py` (pur, `db` en argument, comme `presents_etat.py`), trois usages :
 
 | Usage | Route | Contenu |
 |---|---|---|
 | Page operateur (user) | `/doors?event&year` (+ `porte`, `jour`, `a`, `vue=bilan` en lien direct) | Direct (60 s), Rejeu (jour + quart d'heure), Bilan RETEX ; analyse detaillee d'UNE porte |
-| Mur TV (manager, afficheur) | `/portes-mur` (+ `event`, `year`, `jour`, `a`) | vue generale + alertes, aucune interaction ; dans `PAGES_AFFICHEUR` avec `/api/portes/etat` |
+| Mur TV (manager, afficheur) | `/portes-mur?event=&year=` (+ `jour`, `a` pour rejouer) | vue generale + alertes, aucune interaction ; dans `PAGES_AFFICHEUR` avec `/api/portes/etat`. **`event` / `year` sont poses par le portail TITAN** sur l'URL de l'afficheur pour choisir l'edition : nom Cockpit ou sigle (`24HM` → `24H MOTOS`, `_portes_nom_evenement`), annee en cours si absente, edition du live-controle sans parametre. Resolus cote serveur et injectes dans la page (`data-event`, `data-year`) |
 | API | `GET /api/portes/etat` (`vue=tv` : sans series ni fiches), `/api/portes/bilan`, `/api/portes/editions` | sans event/year : edition du live-controle (`___GLOBAL___.evenement`), sinon `event_courant` |
 
 Sources : `live_frequentation.find_sources` (archive `hsh_archive_tx_*` ou direct `hsh_transactions_agg`, fenetre course −10 j / +3 j), structure HSH (`live_scan_units.structure_maps` / `classify_gate` : porte = gate de l'Area enceinte), refus (`hsh_erreurs` / `hsh_archive_erreurs_*`), `door_security` (bible + planning), `timetable` (vignettes), `pcorg` (fiches).

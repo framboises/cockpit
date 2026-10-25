@@ -4296,17 +4296,35 @@ def doors():
 @role_required("manager")
 def portes_mur_page():
     """Mur TV des portes : vue generale et alertes, aucune interaction. Meme
-    role que /meteo-mur ; consomme /api/portes/etat en vue tv."""
-    return render_template("portes_mur.html")
+    role que /meteo-mur ; consomme /api/portes/etat en vue tv.
+
+    ?event=&year= : edition affichee, posee par le portail TITAN sur l'URL de
+    l'afficheur (nom Cockpit ou sigle : 24H MOTOS ou 24HM). Sans parametre :
+    l'edition suivie par le live-controle, sinon l'epreuve active. ?jour= et
+    ?a=HH:MM rejouent un instant passe."""
+    event, year = _portes_event_year()
+    return render_template("portes_mur.html", event=event, year=year)
+
+
+def _portes_nom_evenement(event):
+    """Nom Cockpit d'un evenement recu par son nom ou son sigle (le portail
+    peut envoyer l'un ou l'autre) ; inchange s'il est inconnu."""
+    try:
+        ev = db.evenement.find_one({"$or": [{"nom": event}, {"short": event}]}, {"nom": 1})
+    except Exception:
+        ev = None
+    return (ev or {}).get("nom") or event
 
 
 def _portes_event_year():
     """(event, year) de la requete, sinon l'edition suivie par le
-    live-controle, sinon l'epreuve active (event_courant)."""
+    live-controle, sinon l'epreuve active (event_courant). Un evenement sans
+    annee prend l'annee en cours."""
     event = (request.args.get('event') or "").strip()
     year = (request.args.get('year') or "").strip()
-    if event and year:
-        return event, year
+    if event:
+        annee = year or str(presents_etat.to_tranche_label(datetime.now(timezone.utc)).year)
+        return _portes_nom_evenement(event), annee
     g = presents_etat.read_global(db)
     if g.get("evenement"):
         return g["evenement"], str(presents_etat.to_tranche_label(datetime.now(timezone.utc)).year)
