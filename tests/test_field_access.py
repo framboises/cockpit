@@ -90,8 +90,8 @@ class _Db(dict):
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     fake_app = types.ModuleType("app")
-    fake_app.JWT_SECRET = SECRET
-    fake_app.JWT_ALGORITHM = "HS256"
+    # Vrai decodage PyJWT, sans la revocation (testee dans test_jeton_portail.py)
+    fake_app.decoder_jeton_portail = lambda t: pyjwt.decode(t, SECRET, algorithms=["HS256"])
     fake_app.CODING = False
     fake_app.APP_KEY = "cockpit"
     fake_app.SUPER_ADMIN_ROLE = "super_admin"

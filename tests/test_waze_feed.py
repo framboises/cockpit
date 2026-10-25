@@ -139,7 +139,7 @@ class TestCycleDeVie:
 def env(monkeypatch):
     fake_app = types.ModuleType("app")
     fake_app.CODING = True
-    for k, v in (("JWT_SECRET", "s"), ("JWT_ALGORITHM", "HS256"), ("APP_KEY", "cockpit"),
+    for k, v in (("decoder_jeton_portail", lambda t: pytest.fail("CODING : jeton non decode")), ("APP_KEY", "cockpit"),
                  ("SUPER_ADMIN_ROLE", "super_admin"), ("ROLE_HIERARCHY", {})):
         setattr(fake_app, k, v)
     monkeypatch.setitem(sys.modules, "app", fake_app)

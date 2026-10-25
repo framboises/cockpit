@@ -27,6 +27,7 @@ from pymongo import MongoClient, ReturnDocument
 from werkzeug.utils import safe_join
 from bson.objectid import ObjectId
 from waitress import serve
+from titan_shared.revocation import est_revoque
 
 # Local application imports
 from traffic import traffic_bp
@@ -130,6 +131,48 @@ client = MongoClient(MONGO_URI)
 # Sélection dynamique de la base de données
 db_name = 'titan_dev' if DEV_MODE else 'titan'
 db = client[db_name]
+
+################################################################################
+# Jeton du portail TITAN Home v2 (guide 05 §2, §3, §4.2)
+################################################################################
+
+# JWKS EdDSA du portail (meme serveur). PyJWKClient garde le jeu de cles 1 h et
+# le recharge sur un kid inconnu (rotation sans coordination, §4.4).
+TITAN_JWKS_URL = os.getenv('TITAN_JWKS_URL', 'http://127.0.0.1:8080/.well-known/jwks.json')
+TITAN_JWT_ISSUER = 'titan-home'
+_jwks_client = jwt.PyJWKClient(TITAN_JWKS_URL, cache_keys=True, lifespan=3600, timeout=5)
+
+
+class JetonRevoque(jwt.InvalidTokenError):
+    """Jeton signe et non expire, mais revoque par le portail (Q26)."""
+
+
+def decoder_jeton_portail(token):
+    """Decode le jeton `access_token` du portail puis applique la revocation partagee.
+
+    L'algorithme est choisi par l'en-tete, et une branche n'accepte jamais celui
+    de l'autre (pas de confusion d'algorithme) : EdDSA -> cle du JWKS + iss
+    obligatoire ; HS256 -> JWT_SECRET (transitoire) ; tout autre alg -> refus.
+    JWKS injoignable : le jeton EdDSA est refuse, sans repli sur HS256.
+    Toute erreur est une jwt.InvalidTokenError (JetonRevoque compris), donc
+    traitee comme un jeton invalide par les appelants existants.
+    """
+    alg = jwt.get_unverified_header(token).get('alg')
+    if alg == 'EdDSA':
+        try:
+            cle = _jwks_client.get_signing_key_from_jwt(token).key
+        except jwt.PyJWKClientError as e:
+            # PyJWKClientError n'herite pas d'InvalidTokenError : sans cette
+            # conversion, un JWKS injoignable donnerait une erreur 500.
+            raise jwt.InvalidTokenError(f"cle EdDSA introuvable : {e}") from e
+        payload = jwt.decode(token, cle, algorithms=['EdDSA'], issuer=TITAN_JWT_ISSUER)
+    elif alg == JWT_ALGORITHM:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    else:
+        raise jwt.InvalidAlgorithmError(f"algorithme refuse : {alg!r}")
+    if est_revoque(payload, db):
+        raise JetonRevoque("jeton revoque")
+    return payload
 
 CORS(app)  # Activer CORS pour toutes les routes
 
@@ -433,9 +476,12 @@ def role_required(required_role):
                 return redirect(redirect_url)
 
             try:
-                payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                payload = decoder_jeton_portail(token)
             except jwt.ExpiredSignatureError:
                 redirect_url = f"{BASE_URL}/home?message=Votre session a expiré. Veuillez vous reconnecter.&category=warning"
+                return redirect(redirect_url)
+            except JetonRevoque:
+                redirect_url = f"{BASE_URL}/home?message=Votre session a été fermée. Veuillez vous reconnecter.&category=warning"
                 return redirect(redirect_url)
             except jwt.InvalidTokenError:
                 redirect_url = f"{BASE_URL}/home?message=Authentification invalide. Veuillez vous reconnecter.&category=error"
@@ -865,7 +911,7 @@ def _request_payload_peek():
         token = request.cookies.get("access_token")
         if token:
             try:
-                p = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                p = decoder_jeton_portail(token)
                 is_sa = SUPER_ADMIN_ROLE in (p.get("global_roles") or [])
                 p["is_super_admin"] = is_sa
                 p["app_role"] = "admin" if is_sa else (p.get("roles_by_app") or {}).get(APP_KEY)

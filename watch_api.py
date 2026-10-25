@@ -252,7 +252,7 @@ def validate_config(payload):
 def _admin_guard():
     """Renvoie une reponse d'erreur si l'appelant n'est pas admin, sinon None."""
     import jwt as pyjwt
-    from app import (CODING, JWT_SECRET, JWT_ALGORITHM, APP_KEY,
+    from app import (CODING, decoder_jeton_portail, APP_KEY,
                      SUPER_ADMIN_ROLE)
 
     if CODING:
@@ -262,7 +262,7 @@ def _admin_guard():
     if not token:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     try:
-        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = decoder_jeton_portail(token)
     except pyjwt.InvalidTokenError:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
@@ -287,10 +287,10 @@ def _admin_identity():
     if CODING:
         return "dev"
     import jwt as pyjwt
-    from app import JWT_SECRET, JWT_ALGORITHM
+    from app import decoder_jeton_portail
     token = request.cookies.get("access_token") or ""
     try:
-        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = decoder_jeton_portail(token)
     except pyjwt.InvalidTokenError:
         return "inconnu"
     return payload.get("email") or "inconnu"

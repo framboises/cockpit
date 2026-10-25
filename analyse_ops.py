@@ -268,7 +268,7 @@ def _cache_set(event, year, module, data):
 # Auth helper (import from app at request time to avoid circular import)
 # ---------------------------------------------------------------------------
 def _check_admin():
-    from app import role_required, CODING, JWT_SECRET, JWT_ALGORITHM, ROLE_HIERARCHY, ROLE_ORDER, APP_KEY, SUPER_ADMIN_ROLE, BASE_URL
+    from app import role_required, CODING, decoder_jeton_portail, ROLE_HIERARCHY, ROLE_ORDER, APP_KEY, SUPER_ADMIN_ROLE, BASE_URL
     import jwt as pyjwt
     if CODING:
         sim_role = request.args.get("as", "admin")
@@ -292,7 +292,7 @@ def _check_admin():
     if not token:
         return jsonify({"error": "Not authenticated"}), 401
     try:
-        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = decoder_jeton_portail(token)
     except Exception:
         return jsonify({"error": "Invalid token"}), 401
     roles = payload.get("roles_by_app", {}).get(APP_KEY, "")

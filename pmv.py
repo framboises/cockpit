@@ -104,7 +104,7 @@ def _err(code, status=400, **extra):
 def _identifier():
     """Pose request.user_payload ; rend une reponse d'erreur ou None."""
     import jwt as pyjwt
-    from app import (APP_KEY, CODING, JWT_ALGORITHM, JWT_SECRET, ROLE_HIERARCHY,
+    from app import (APP_KEY, CODING, decoder_jeton_portail, ROLE_HIERARCHY,
                      ROLE_ORDER, SUPER_ADMIN_ROLE)
     if CODING:
         role = request.args.get("as", "admin")
@@ -120,7 +120,7 @@ def _identifier():
     if not token:
         return _err("non_authentifie", 401)
     try:
-        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = decoder_jeton_portail(token)
     except Exception:
         return _err("session_invalide", 401)
     super_admin = SUPER_ADMIN_ROLE in (payload.get("global_roles") or [])

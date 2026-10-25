@@ -209,6 +209,24 @@ venv\Scripts\activate    # Windows
 pip install -r requirements.txt
 ```
 
+Le module partagé `titan-shared` (révocation des jetons du portail TITAN Home v2) vit dans le
+dépôt `home`, dossier `partage/` :
+
+- **Production (Windows)** : `requirements.txt` l'installe depuis
+  `E:\TITAN\production\homev2\partage`. Si pip refuse la ligne, l'installer à la main :
+  ```bat
+  pip install E:\TITAN\production\homev2\partage
+  ```
+  Après une mise à jour de ce dossier : `pip install --force-reinstall E:\TITAN\production\homev2\partage`,
+  puis redémarrer le service cockpit.
+- **Développement** (dépôts `home` et `cockpit` côte à côte) :
+  ```bash
+  pip install -e ../home/partage
+  ```
+
+Variable `TITAN_JWKS_URL` : JWKS EdDSA du portail (défaut `http://127.0.0.1:8080/.well-known/jwks.json`,
+le portail tournant sur le même serveur).
+
 ### 5. Lancer MongoDB
 Assure-toi que ton service MongoDB est démarré :
 ```bash

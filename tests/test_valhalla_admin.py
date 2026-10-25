@@ -83,8 +83,7 @@ class _Resp:
 def relay(monkeypatch):
     fake_app = types.ModuleType("app")
     fake_app.CODING = True      # admin_required : utilisateur simule
-    fake_app.JWT_SECRET = "s"
-    fake_app.JWT_ALGORITHM = "HS256"
+    fake_app.decoder_jeton_portail = lambda t: pytest.fail("CODING : jeton non decode")
     fake_app.APP_KEY = "cockpit"
     fake_app.SUPER_ADMIN_ROLE = "super_admin"
     fake_app.ROLE_HIERARCHY = {}

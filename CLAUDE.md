@@ -38,6 +38,7 @@ Pas de tests automatisés ni de linter configurés.
 | `SECRET_KEY` | Clé secrète Flask | valeur dev (interdit en prod) |
 | `JWT_SECRET` | Clé JWT | valeur dev (interdit en prod) |
 | `MONGO_URI` | URI MongoDB | `mongodb://localhost:27017/` |
+| `TITAN_JWKS_URL` | JWKS EdDSA du portail TITAN Home v2 (`decoder_jeton_portail` de `app.py` : EdDSA par le JWKS, HS256 par `JWT_SECRET`, puis révocation partagée `titan_shared`). JWKS injoignable : jetons EdDSA refusés, HS256 acceptés | `http://127.0.0.1:8080/.well-known/jwks.json` |
 | `CODING` | `true` bypass l'auth en dev | `false` |
 | `COCKPIT_ANTHROPIC_API_KEY` | Clé API Anthropic de Cockpit (clé console « cockpit-prod »). ⚠️ Seule lue : `ANTHROPIC_API_KEY` est volontairement ignorée (lue par tout script du même compte Windows, elle rendait la consommation indiscernable) | — (routes IA en 503 si vide) |
 | `CLAUDE_MODEL` | Modèle Claude utilisé par l'Assistant IA | `claude-sonnet-5-5` |

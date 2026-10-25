@@ -40,7 +40,7 @@ HIK_PASSWORD = os.getenv("HIK_PASSWORD", "")
 # Auth helper (import from app at request time to avoid circular import)
 # ---------------------------------------------------------------------------
 def _check_admin():
-    from app import (CODING, JWT_SECRET, JWT_ALGORITHM,
+    from app import (CODING, decoder_jeton_portail,
                      ROLE_HIERARCHY, ROLE_ORDER, APP_KEY)
     import jwt as pyjwt
     if CODING:
@@ -65,7 +65,7 @@ def _check_admin():
     if not token:
         return jsonify({"error": "Not authenticated"}), 401
     try:
-        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = decoder_jeton_portail(token)
     except Exception:
         return jsonify({"error": "Invalid token"}), 401
     roles = payload.get("roles_by_app", {}).get(APP_KEY, "")

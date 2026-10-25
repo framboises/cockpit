@@ -338,8 +338,8 @@ class TestAdminGuardSuperAdmin:
         secret = "test-secret-key"
         fake_app = types.ModuleType("app")
         fake_app.CODING = False
-        fake_app.JWT_SECRET = secret
-        fake_app.JWT_ALGORITHM = "HS256"
+        # Vrai decodage PyJWT, sans la revocation (testee dans test_jeton_portail.py)
+        fake_app.decoder_jeton_portail = lambda t: pyjwt.decode(t, secret, algorithms=["HS256"])
         fake_app.APP_KEY = "cockpit"
         fake_app.SUPER_ADMIN_ROLE = "super_admin"
         monkeypatch.setitem(sys.modules, "app", fake_app)
@@ -394,12 +394,11 @@ class TestGuidage:
         monkeypatch.setattr(watch_api.watch_state, "build_state",
                             lambda d, n, n_utc, **kw: {"t": 1, "al": []})
         # CODING=True court-circuite le garde admin, comme en dev.
-        # _admin_guard importe les cinq constantes d'un coup AVANT de
+        # _admin_guard importe ses noms d'un coup AVANT de
         # tester CODING : les omettre leve ImportError, pas un 401.
         fake_app = types.ModuleType("app")
         fake_app.CODING = True
-        fake_app.JWT_SECRET = "test"
-        fake_app.JWT_ALGORITHM = "HS256"
+        fake_app.decoder_jeton_portail = lambda t: pytest.fail("CODING : jeton non decode")
         fake_app.APP_KEY = "cockpit"
         fake_app.SUPER_ADMIN_ROLE = "super_admin"
         monkeypatch.setitem(sys.modules, "app", fake_app)

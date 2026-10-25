@@ -2988,7 +2988,7 @@ def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         from app import (
-            JWT_SECRET, JWT_ALGORITHM, CODING, APP_KEY,
+            decoder_jeton_portail, CODING, APP_KEY,
             SUPER_ADMIN_ROLE, ROLE_HIERARCHY,
         )
         import jwt as pyjwt
@@ -3006,7 +3006,7 @@ def admin_required(f):
         if not token:
             return jsonify({"error": "auth_required"}), 401
         try:
-            payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            payload = decoder_jeton_portail(token)
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
             return jsonify({"error": "invalid_token"}), 401
 
@@ -4966,7 +4966,7 @@ def field_photo_serve(photo_path):
 
 
 def _photo_viewer_allowed():
-    from app import JWT_SECRET, JWT_ALGORITHM, CODING, APP_KEY, SUPER_ADMIN_ROLE
+    from app import decoder_jeton_portail, CODING, APP_KEY, SUPER_ADMIN_ROLE
     import jwt as pyjwt
 
     if CODING:
@@ -4980,7 +4980,7 @@ def _photo_viewer_allowed():
     jwt_token = request.cookies.get("access_token")
     if jwt_token:
         try:
-            payload = pyjwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            payload = decoder_jeton_portail(jwt_token)
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
             return False
         if SUPER_ADMIN_ROLE in (payload.get("global_roles") or []):

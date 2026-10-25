@@ -1,7 +1,7 @@
 Flask>=2.3.0
 Flask-Cors>=4.0.0
 Flask-WTF>=1.2.1
-PyJWT>=2.8.0
+PyJWT[crypto]>=2.8.0   # EdDSA du JWKS du portail TITAN Home v2
 cryptography>=42.0.0
 pymongo>=4.6.0
 astral>=2.2
@@ -20,3 +20,6 @@ pandas>=2.0.0
 defusedxml>=0.7.1
 reportlab>=4.0   # dossier PDF de planification des cameras (cameras_dossier.py)
 pypdf>=4.0   # fiches techniques jointes au dossier PDF (cameras_dossier.py)
+# Module partage TITAN (revocation des jetons du portail), versionne dans le depot home.
+# Production (Windows) : chemin du serveur. Dev : pip install -e ../home/partage (voir README).
+titan-shared @ file:///E:/TITAN/production/homev2/partage ; sys_platform == "win32"

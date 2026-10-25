@@ -78,7 +78,7 @@ def _check_block_permission():
     from app import get_user_allowed_blocks
     import jwt as pyjwt
     from app import (
-        JWT_SECRET, JWT_ALGORITHM, CODING, ROLE_HIERARCHY,
+        decoder_jeton_portail, CODING, ROLE_HIERARCHY,
         ROLE_ORDER, APP_KEY, SUPER_ADMIN_ROLE,
     )
 
@@ -104,7 +104,7 @@ def _check_block_permission():
         if not token:
             return jsonify({"error": "Authentification requise"}), 401
         try:
-            payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            payload = decoder_jeton_portail(token)
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
             return jsonify({"error": "Token invalide ou expire"}), 401
 
