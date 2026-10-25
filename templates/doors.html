@@ -1,86 +1,117 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Portes - Cockpit</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>COCKPIT — Portes</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/doors.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
+
+{#
+  Portes (/doors?event=&year=, portes_etat.py) : outil operateur, pas un mur.
+  Toutes les portes actives rangees par mode (entree / mixte / sortie) a
+  gauche, analyse detaillee de la porte choisie a droite. Trois vues dans
+  l'en-tete : Direct (60 s), Rejeu (jour + quart d'heure), Bilan RETEX.
+  La vue murale est /portes-mur. Rendu : static/js/doors.js.
+#}
 <body>
+<div class="app-layout">
 
-  <header class="barre">
-    <div class="titre">
-      <span class="material-symbols-outlined">door_front</span>
-      <span>Portes</span>
-      <span class="edition" id="edition">{{ event }} {{ year }}</span>
-    </div>
+  {% set sidebar_active = '/doors' %}
+  {% include '_sidebar.html' %}
 
-    <nav class="vues" role="tablist">
-      <button type="button" class="vue actif" data-vue="direct">
-        <span class="material-symbols-outlined">sensors</span>Direct</button>
-      <button type="button" class="vue" data-vue="rejeu">
-        <span class="material-symbols-outlined">history</span>Rejeu</button>
-      <button type="button" class="vue" data-vue="bilan">
-        <span class="material-symbols-outlined">summarize</span>Bilan RETEX</button>
-    </nav>
+  <div class="app-main pt-page">
 
-    <div class="rejeu-ctrl" id="rejeu-ctrl" hidden>
-      <select id="rejeu-jour" aria-label="Jour"></select>
-      <input type="range" id="rejeu-heure" min="0" max="95" step="1" value="40" aria-label="Heure">
-      <span class="rejeu-h" id="rejeu-h">10:00</span>
-    </div>
+    <header class="app-header pt-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <span class="material-symbols-outlined pt-header-ico">door_front</span>
+      <span class="header-event-name">Portes</span>
+      <span class="pt-edition" id="edition">{{ event }} {{ year }}</span>
 
-    <div class="bilan-ctrl" id="bilan-ctrl" hidden>
-      <select id="bilan-edition" aria-label="Edition"></select>
-    </div>
+      <nav class="pt-vues" role="tablist" aria-label="Vue">
+        <button type="button" class="vue actif" data-vue="direct">
+          <span class="material-symbols-outlined">sensors</span>Direct</button>
+        <button type="button" class="vue" data-vue="rejeu">
+          <span class="material-symbols-outlined">history</span>Rejeu</button>
+        <button type="button" class="vue" data-vue="bilan">
+          <span class="material-symbols-outlined">summarize</span>Bilan RETEX</button>
+      </nav>
 
-    <div class="fraicheur" id="fraicheur"><span class="puce"></span><span id="fraicheur-txt">chargement</span></div>
-  </header>
+      <div class="pt-ctrl" id="rejeu-ctrl" hidden>
+        <select id="rejeu-jour" aria-label="Jour"></select>
+        <input type="range" id="rejeu-heure" min="0" max="95" step="1" value="40" aria-label="Heure">
+        <span class="rejeu-h" id="rejeu-h">10:00</span>
+      </div>
+      <div class="pt-ctrl" id="bilan-ctrl" hidden>
+        <select id="bilan-edition" aria-label="Edition"></select>
+      </div>
 
-  <!-- ===================== Vue Direct / Rejeu ===================== -->
-  <main id="vue-etat">
-    <section class="kpis" id="kpis"></section>
+      <div class="header-spacer"></div>
+      <span class="fraicheur" id="fraicheur" title="Actualisation automatique chaque minute en direct">
+        <span class="puce"></span><span id="fraicheur-txt">chargement</span>
+      </span>
+    </header>
 
-    <div class="etat-grille">
-      <section class="liste">
-        <div class="liste-tete">
-          <div class="legende">
-            <span class="leg entree">Entrée</span>
-            <span class="leg mixte">Mixte</span>
-            <span class="leg sortie">Sortie</span>
-            <span class="leg-note" id="leg-note"></span>
+    <!-- ===================== Vue Direct / Rejeu ===================== -->
+    <main class="pt-main" id="vue-etat">
+      <section class="kpis" id="kpis"></section>
+
+      <div class="etat-grille">
+        <section class="liste">
+          <div class="liste-tete">
+            <div class="legende">
+              <span class="leg entree">Entrée</span>
+              <span class="leg mixte">Mixte</span>
+              <span class="leg sortie">Sortie</span>
+              <span class="leg-note" id="leg-note"></span>
+            </div>
           </div>
-        </div>
-        <div id="groupes"></div>
+          <div id="groupes"></div>
+        </section>
+
+        <section class="detail" id="detail">
+          <div class="vide" id="detail-vide">
+            <span class="material-symbols-outlined">touch_app</span>
+            <p>Choisir une porte pour l'analyser : débits entrée / sortie face au N-1, capacité de sécurité, appareils, prévision, fiches et programme.</p>
+          </div>
+          <div id="detail-contenu" hidden></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- ===================== Vue Bilan RETEX ===================== -->
+    <main class="pt-main" id="vue-bilan" hidden>
+      <section class="bilan-jours" id="bilan-jours"></section>
+      <section class="bilan-table-wrap">
+        <table class="bilan-table" id="bilan-table"></table>
+        <p class="note" id="bilan-note"></p>
       </section>
+    </main>
 
-      <section class="detail" id="detail">
-        <div class="vide" id="detail-vide">
-          <span class="material-symbols-outlined">touch_app</span>
-          <p>Choisir une porte pour l'analyser : débits entrée / sortie face au N-1, capacité de sécurité, appareils, prévision, fiches et programme.</p>
-        </div>
-        <div id="detail-contenu" hidden></div>
-      </section>
-    </div>
-  </main>
+    <footer class="app-footer">
+      <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
+    </footer>
 
-  <!-- ===================== Vue Bilan RETEX ===================== -->
-  <main id="vue-bilan" hidden>
-    <section class="bilan-jours" id="bilan-jours"></section>
-    <section class="bilan-table-wrap">
-      <table class="bilan-table" id="bilan-table"></table>
-      <p class="note" id="bilan-note"></p>
-    </section>
-  </main>
+  </div>
+</div>
 
-  <script>
-    var EVENT = {{ event|tojson }};
-    var YEAR  = {{ year|tojson }};
-  </script>
-  <script src="{{ url_for('static', filename='js/doors.js') }}"></script>
+<div id="toast-container"></div>
+
+<script>
+  var EVENT = {{ event|tojson }};
+  var YEAR  = {{ year|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/doors.js') }}"></script>
 </body>
 </html>

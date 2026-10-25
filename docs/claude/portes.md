@@ -2,7 +2,7 @@
 
 ## Portes : page operateur `/doors`, mur TV `/portes-mur` (`portes_etat.py`)
 
-Menu : « Portes » est dans **Surveillance** (outil operateur), « Mur portes » dans **Ecrans TV**.
+Menu : « Portes » est dans **Surveillance** (outil operateur), « Mur portes » dans **Ecrans TV**. `/doors` est une page Cockpit standard (`_sidebar.html`, `app-header`, `app-footer`, theme clair de `style.css`, `doors.css` limite a `.pt-page`) ; seul `/portes-mur` a le style TV sombre.
 
 Un seul calcul, `portes_etat.py` (pur, `db` en argument, comme `presents_etat.py`), trois usages :
 

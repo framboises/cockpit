@@ -23,8 +23,9 @@
   var EVENT = window.EVENT;
   var YEAR = window.YEAR;
 
-  var COUL = { entree: "#3b82f6", sortie: "#f97316", mixte: "#a78bfa", ferme: "#475569" };
-  var NIVEAU_COUL = { saturation: "#ef4444", saturation_prevue: "#f97316", vigilance: "#eab308", normal: "#22c55e" };
+  // Memes teintes que doors.css (theme clair Cockpit)
+  var COUL = { entree: "#2563eb", sortie: "#ea580c", mixte: "#7c3aed", ferme: "#94a3b8" };
+  var NIVEAU_COUL = { saturation: "#dc2626", saturation_prevue: "#ea580c", vigilance: "#d97706", normal: "#16a34a" };
   var NIVEAU_MOT = { saturation: "Saturation", saturation_prevue: "Saturation prévue", vigilance: "Vigilance" };
   var MODE_MOT = { entree: "Entrée", sortie: "Sortie", mixte: "Mixte" };
 
@@ -51,7 +52,7 @@
   }
   function pct(c) { return c === null || c === undefined ? "--" : Math.round(c * 100) + " %"; }
   function couleurCharge(c) {
-    if (c === null || c === undefined) return "#64748b";
+    if (c === null || c === undefined) return "#94a3b8";
     if (c >= 1) return NIVEAU_COUL.saturation;
     if (c >= 0.8) return NIVEAU_COUL.vigilance;
     return NIVEAU_COUL.normal;
@@ -431,19 +432,19 @@
     var capE = s.map(function (x) { return x.cap_e === undefined ? null : x.cap_e; });
     var idxA = lab.indexOf(d.a.slice(0, 3) + String(Math.floor((+d.a.slice(3, 5)) / 15) * 15).padStart(2, "0"));
     var ds = [
-      { type: "bar", label: "Entrées /h", data: e, backgroundColor: "rgba(59,130,246,0.75)", stack: "m", barPercentage: 1, categoryPercentage: 0.95 },
-      { type: "bar", label: "Sorties /h", data: so, backgroundColor: "rgba(249,115,22,0.75)", stack: "m", barPercentage: 1, categoryPercentage: 0.95 },
-      { type: "line", label: "N-1 entrées", data: n1e, borderColor: "#93c5fd", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, spanGaps: false },
-      { type: "line", label: "N-1 sorties", data: n1s, borderColor: "#fdba74", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, spanGaps: false },
-      { type: "line", label: "Capacité appareils entrée", data: capE, borderColor: "rgba(148,163,184,0.7)", borderWidth: 1, pointRadius: 0, stepped: true }
+      { type: "bar", label: "Entrées /h", data: e, backgroundColor: "rgba(37,99,235,0.70)", stack: "m", barPercentage: 1, categoryPercentage: 0.95 },
+      { type: "bar", label: "Sorties /h", data: so, backgroundColor: "rgba(234,88,12,0.70)", stack: "m", barPercentage: 1, categoryPercentage: 0.95 },
+      { type: "line", label: "N-1 entrées", data: n1e, borderColor: "#1e3a8a", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, spanGaps: false },
+      { type: "line", label: "N-1 sorties", data: n1s, borderColor: "#9a3412", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, spanGaps: false },
+      { type: "line", label: "Capacité appareils entrée", data: capE, borderColor: "#94a3b8", borderWidth: 1, pointRadius: 0, stepped: true }
     ];
     if (n1t.some(function (x) { return x; })) {
       // Import horaire N-1 : passages tous sens confondus, impossible a
       // ranger en entrees ou en sorties.
-      ds.push({ type: "line", label: "N-1 tous sens", data: n1t, borderColor: "#94a3b8", borderDash: [2, 3], borderWidth: 1.5, pointRadius: 0 });
+      ds.push({ type: "line", label: "N-1 tous sens", data: n1t, borderColor: "#475569", borderDash: [2, 3], borderWidth: 1.5, pointRadius: 0 });
     }
     if (cap.some(function (x) { return x; })) {
-      ds.push({ type: "line", label: "Capacité sécurité", data: cap, borderColor: "#ef4444", borderWidth: 2, pointRadius: 0, stepped: true });
+      ds.push({ type: "line", label: "Capacité sécurité", data: cap, borderColor: "#dc2626", borderWidth: 2, pointRadius: 0, stepped: true });
     }
     // Une serie vide (pas de N-1 par sens, pas de planning) encombrerait la legende.
     ds = ds.filter(function (x) { return x.data.some(function (v) { return v !== null && v !== undefined; }); });
@@ -453,12 +454,12 @@
         responsive: true, maintainAspectRatio: false, animation: false,
         interaction: { mode: "index", intersect: false },
         scales: {
-          x: { stacked: true, ticks: { color: "#94a3b8", maxTicksLimit: 13 }, grid: { color: "rgba(148,163,184,0.08)" } },
-          y: { ticks: { color: "#94a3b8", callback: function (v) { return Math.abs(v).toLocaleString("fr-FR"); } },
-               grid: { color: function (c) { return c.tick.value === 0 ? "rgba(226,232,240,0.5)" : "rgba(148,163,184,0.08)"; } } }
+          x: { stacked: true, ticks: { color: "#607286", maxTicksLimit: 13 }, grid: { color: "rgba(96,114,134,0.10)" } },
+          y: { ticks: { color: "#607286", callback: function (v) { return Math.abs(v).toLocaleString("fr-FR"); } },
+               grid: { color: function (c) { return c.tick.value === 0 ? "rgba(31,45,61,0.45)" : "rgba(96,114,134,0.10)"; } } }
         },
         plugins: {
-          legend: { labels: { color: "#cbd5e1", boxWidth: 12, font: { size: 11 } } },
+          legend: { labels: { color: "#1f2d3d", boxWidth: 12, font: { size: 11, family: "Outfit" } } },
           tooltip: { callbacks: { label: function (c) {
             return c.dataset.label + " : " + (c.raw === null ? "--" : Math.abs(c.raw).toLocaleString("fr-FR"));
           } } }
@@ -473,7 +474,7 @@
           var x = ch.scales.x.getPixelForValue(idxA) - (ch.scales.x.getPixelForValue(1) - ch.scales.x.getPixelForValue(0)) / 2;
           var ctx = ch.ctx;
           ctx.save();
-          ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = "rgba(31,45,61,0.55)"; ctx.setLineDash([3, 3]);
           ctx.beginPath(); ctx.moveTo(x, ch.chartArea.top); ctx.lineTo(x, ch.chartArea.bottom); ctx.stroke();
           ctx.restore();
         }
