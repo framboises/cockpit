@@ -197,8 +197,11 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   restaient `new` et allumaient les cameras alors qu'aucune alerte n'etait
   partie). Filtree mais SigLIP voit personne / vehicule >= 0,5 = `doute` : a
   traiter, jamais en cours. Avis "up" = `alerte`. `overview.totals.ecartees` /
-  `doutes` (KPI "ecartees par l'IA", "dont N a verifier"). Elles restent
-  listees (filtre IA) pour l'entrainement. Meme regle sur le mur TV.
+  `doutes` (KPI "ecartees par l'IA", "dont N a verifier"). LISTE : masquees
+  par defaut (`episodes()` sans `ai` ajoute `$nor ECARTEE_OR`, requete
+  equivalente a `portee`) ; filtre IA `ecartees` (KPI cliquable) ou `all`
+  pour les revoir (entrainement). `overview` les compte toujours. Meme regle
+  sur le mur TV.
 - Hors planning (`armed: false`) : JAMAIS compte "en cours" ni "a traiter"
   (`overview` : totals, by_channel, by_zone ; badges des cartes). Une
   intrusion au sens propre n'existe que pendant le planning.

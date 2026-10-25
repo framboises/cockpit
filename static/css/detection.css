@@ -875,3 +875,5 @@ body:not(.ia-mode-intrusions) .dt-tabs { display: none !important; }
   .ia-pair { grid-template-columns: 1fr; }
   .ia-toolbar-help { display: none; }
 }
+.dt-kpi.is-link { cursor: pointer; }
+.dt-kpi.is-link:hover { outline: 1px solid var(--line, #cbd5e1); }

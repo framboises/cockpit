@@ -352,9 +352,19 @@
         box.appendChild(kpi("mark_email_unread", "#b45309", t["new"], t.doutes ? "a traiter (dont " + t.doutes + " a verifier)" : "a traiter", t["new"] > 0));
         box.appendChild(kpi("directions_walk", "#f97316", t.human, "pietons"));
         box.appendChild(kpi("directions_car", "#3b82f6", t.vehicle, "vehicules"));
-        box.appendChild(kpi("shield", "#64748b", t.episodes, "intrusions"));
-        // Oiseaux, grillage, reflets... : aucune alerte, hors "en cours" / "a traiter" et pastilles
-        if (t.ecartees) box.appendChild(kpi("filter_alt_off", "#94a3b8", t.ecartees, "ecartees par l'IA"));
+        // Sans filtre IA, la liste masque les ecartees : le total aussi
+        box.appendChild(kpi("shield", "#64748b", S.ai ? t.episodes : t.episodes - t.ecartees, "intrusions"));
+        // Oiseaux, grillage, reflets... : aucune alerte, hors liste par defaut,
+        // hors "en cours" / "a traiter" et pastilles. Clic = les afficher
+        if (t.ecartees && S.ai !== "ecartees") {
+            var ke = kpi("filter_alt_off", "#94a3b8", t.ecartees, "ecartees par l'IA (masquees)");
+            ke.classList.add("is-link");
+            ke.title = "Afficher les intrusions ecartees par l'IA";
+            ke.addEventListener("click", function () {
+                S.ai = "ecartees"; $("dt-ai").value = "ecartees"; updateFilterCount(); refreshAll();
+            });
+            box.appendChild(ke);
+        }
         var sp = el("div", "dt-kpi dt-kpi-spark");
         sp.appendChild(el("div", "dt-kpi-l", "Activite " + (S.period === "day" ? "de la journee" : PERIOD_LABEL[S.period]) + (ov.period.step_min < 60 ? " (par " + ov.period.step_min + " min)" : " (par " + ov.period.step_min / 60 + " h)")));
         var n = ov.period.bars, max = 1;

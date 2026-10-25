@@ -132,3 +132,31 @@ def test_overview_sans_les_ecartees(db, monkeypatch):
     t, c = rep.get_json()["totals"], rep.get_json()["by_channel"]["%s:1" % cam]
     assert (t["active"], t["new"], t["ecartees"], t["doutes"]) == (1, 2, 1, 1)
     assert c["new"] == 2 and c["n"] == 3
+
+
+def test_liste_sans_les_ecartees_par_defaut(db, monkeypatch):
+    import app as A
+    monkeypatch.setattr(D, "_db", db)
+    monkeypatch.setattr(A, "CODING", True)
+    cam = _camera(db, "Porte Houx")
+    maintenant = datetime.now(timezone.utc)
+    cas = {"oiseau": {"ai": {"status": "filtered", "guess": [{"label": "oiseau", "p": 0.9}]}},
+           "doute": {"ai": {"status": "filtered", "guess": [{"label": "personne", "p": 0.7}]}},
+           "faux": {"ai": {"status": "confirmed"}, "ai_vote": {"vote": "down"}},
+           "rachete": {"ai": {"status": "filtered", "guess": []}, "ai_vote": {"vote": "up"}},
+           "alerte": {"ai": {"status": "confirmed"}},
+           "sans_ia": {}}
+    for nom, extra in cas.items():
+        db.hik_intrusions.insert_one(dict({"camera_id": cam, "channel": 1, "camera_name": nom,
+                                           "started_at": _naif(maintenant - timedelta(minutes=5)),
+                                           "last_at": _naif(maintenant - timedelta(minutes=4)),
+                                           "target_types": ["human"], "status": "new"}, **extra))
+    c = A.app.test_client()
+
+    def noms(ai):
+        return sorted(e["camera_name"] for e in c.get("/api/detection/episodes?ai=" + ai).get_json()["items"])
+    assert noms("") == ["alerte", "doute", "rachete", "sans_ia"]
+    assert noms("ecartees") == ["faux", "oiseau"]
+    assert len(noms("all")) == 6
+    # Meme partage que portee()
+    assert sorted(n for n, x in cas.items() if D.portee(x) == "ecartee") == ["faux", "oiseau"]

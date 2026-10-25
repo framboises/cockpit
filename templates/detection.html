@@ -123,8 +123,10 @@
           <div class="dt-filter-row">
             <select class="dt-select" id="dt-camera" aria-label="Camera"><option value="">Toutes les cameras</option></select>
             <select class="dt-select" id="dt-ai" aria-label="Verification IA">
-              <option value="">IA : toutes</option>
-              <option value="filtered">Filtrees par l'IA (sans alerte)</option>
+              <option value="">IA : sans les ecartees</option>
+              <option value="all">IA : toutes (ecartees comprises)</option>
+              <option value="ecartees">Ecartees par l'IA (oiseau, grillage...)</option>
+              <option value="filtered">Filtrees par l'IA (ecartees + a verifier)</option>
               <option value="alerted">Alertes envoyees</option>
               <option value="voted">Avec mon avis</option>
             </select>

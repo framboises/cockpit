@@ -258,6 +258,15 @@ def _zones_of(ep, zones):
 
 
 _REAL_CATS = ("personne", "vehicule")
+# Filtree par l'IA mais SigLIP voit une personne / un vehicule a ce score au
+# moins : "a verifier" (doute), sinon ecartee (aiDoubt de detection.js)
+DOUTE_MIN = 0.5
+# Requete Mongo equivalente a portee(ep) == "ecartee"
+ECARTEE_OR = [
+    {"ai_vote.vote": "down"},
+    {"ai.status": "filtered", "ai_vote.vote": {"$ne": "up"},
+     "ai.guess": {"$not": {"$elemMatch": {"label": {"$in": list(_REAL_CATS)}, "p": {"$gte": DOUTE_MIN}}}}},
+]
 
 
 def _iou(a, b):
@@ -408,6 +417,9 @@ def _episode_query(args, zones):
         q["ai.status"] = {"$ne": "filtered"}
     elif ai == "voted":
         q["ai_vote.vote"] = {"$in": AI_VOTES}
+    elif ai == "ecartees":
+        q.setdefault("$and", []).append({"$or": ECARTEE_OR})
+    # "" : la LISTE masque les ecartees (episodes()) ; "all" : toutes
     cam = args.get("camera", "")
     if cam and ":" in cam:
         cid, ch = cam.split(":", 1)
@@ -760,7 +772,7 @@ def portee(ep):
     ai = ep.get("ai") or {}
     if vote == "up" or ai.get("status") != "filtered":
         return "alerte"
-    if any(g.get("label") in _REAL_CATS and (g.get("p") or 0) >= 0.5 for g in ai.get("guess") or []):
+    if any(g.get("label") in _REAL_CATS and (g.get("p") or 0) >= DOUTE_MIN for g in ai.get("guess") or []):
         return "doute"
     return "ecartee"
 
@@ -788,7 +800,7 @@ def overview():
         # Ecartee par l'IA (oiseau, grillage...) : aucune alerte n'est partie,
         # ni "en cours" ni "a traiter" ; douteuse : a traiter, jamais en cours
         pt = portee(ep)
-        totals["ecartees"] += armed and pt == "ecartee"
+        totals["ecartees"] += pt == "ecartee"
         totals["doutes"] += armed and pt == "doute" and status == "new"
         a_traiter = armed and status == "new" and pt != "ecartee"
         if (armed and pt != "ecartee") or status != "new":
@@ -823,6 +835,10 @@ def episodes():
     db = _ensure_db()
     zones = _zones(db)
     q, _p = _episode_query(request.args, zones)
+    if not request.args.get("ai", ""):
+        # Par defaut, pas de temps perdu sur les oiseaux / grillages : les
+        # ecartees ne sont listees qu'avec le filtre IA (compteur de la page)
+        q = {"$and": [q, {"$nor": ECARTEE_OR}]}
     before = request.args.get("before", "")
     if before:
         b_dt, _, b_id = before.partition("|")
