@@ -160,3 +160,26 @@ def test_liste_sans_les_ecartees_par_defaut(db, monkeypatch):
     assert len(noms("all")) == 6
     # Meme partage que portee()
     assert sorted(n for n, x in cas.items() if D.portee(x) == "ecartee") == ["faux", "oiseau"]
+
+
+def test_intrusion_de_test_sur_le_mur(db, monkeypatch):
+    # Bouton "Tester sur le mur TV" : en cours sur le mur (TEST), jamais dans
+    # hik_intrusions (ni alerte, ni liste, ni compteurs)
+    import app as A
+    monkeypatch.setattr(D, "_db", db)
+    monkeypatch.setattr(A, "CODING", True)
+    monkeypatch.setitem(A.app.config, "WTF_CSRF_ENABLED", False)
+    cam = _camera(db, "Porte Houx")
+    _intrusion(db, cam, "Porte Houx", 300, 17000, status="closed", target_types=["vehicle"])
+    sans = D.etat_mur(db)["totaux"]
+    rep = A.app.test_client().post("/api/detection/test-mur", json={"camera_id": str(cam)})
+    assert rep.status_code == 200 and rep.get_json()["photo"] is True
+    assert db.hik_intrusions.count_documents({}) == 1
+    d = D.etat_mur(db)
+    t = d["en_cours"][0]
+    assert t["test"] and t["camera"] == "Porte Houx" and t["type"] == "vehicle"
+    assert t["photo"] == "/api/intrusions/photo?p=intrusions/a.jpg"
+    assert d["cameras"][0]["actif"] and d["totaux"] == sans  # hors comptes
+    # Fini apres TEST_MUR_S
+    assert D.etat_mur(db, datetime.now(timezone.utc) + timedelta(seconds=D.TEST_MUR_S + 1))["en_cours"] == []
+    assert A.app.test_client().post("/api/detection/test-mur", json={"camera_id": "x"}).status_code == 404

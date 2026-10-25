@@ -53,6 +53,8 @@ def _ensure_db():
         "titan" if titan_env in {"prod", "production"} else "titan_dev"]
     db["detection_zones"].create_index("name")
     db["hik_intrusions"].create_index([("status", 1), ("started_at", -1)])
+    # Intrusions de test du mur TV : effacees a leur fin (TTL)
+    db["detection_tests"].create_index("until", expireAfterSeconds=0)
     _db = db
     return db
 
@@ -1261,6 +1263,11 @@ def etat_mur(db, now=None):
         if derniere is None and not actif:
             derniere = item or _mur_episode(ep, zones, now)
 
+    tests = _tests_mur(db, zones, now)
+    en_cours = tests + en_cours
+    for t in tests:
+        par_camera.setdefault(t["camera_id"], {"actif": False, "a_traiter": 0, "jour": 0})["actif"] = True
+
     groups = list(db["detection_groups"].find().sort("name", 1))
     etats = {str(g["_id"]): arming.group_state(g, now, db)[0] for g in groups}
     cameras = {}
@@ -1290,6 +1297,47 @@ def etat_mur(db, now=None):
         "groupes": [{"nom": g.get("name", ""), "couleur": g.get("color", "#2563eb"), "arme": etats[str(g["_id"])],
                      "libelle": _pub_group(g, now, db=db)["state_label"]} for g in groups],
     }
+
+
+TEST_MUR_S = 90
+
+
+@detection_bp.route("/api/detection/test-mur", methods=["POST"])
+def test_mur():
+    """Intrusion de TEST sur le mur TV (/intrusions-mur) pendant TEST_MUR_S :
+    rangee a part (detection_tests), jamais dans hik_intrusions : ni alerte,
+    ni WhatsApp, ni liste, ni compteurs. Reprend la derniere photo reelle de
+    la camera quand il y en a une."""
+    db = _ensure_db()
+    data = request.get_json(silent=True) or {}
+    cam = db["cockpit_cameras"].find_one({"_id": _oid(data.get("camera_id")),
+                                          "channels.roles.type": "fielddetection"})
+    if not cam:
+        return jsonify({"error": "Camera de detection introuvable"}), 404
+    canaux = [c for c in cam.get("channels") or []
+              if any(r.get("type") == "fielddetection" for r in c.get("roles") or [])]
+    canal = next((c for c in canaux if c.get("no") == data.get("channel")), canaux[0])
+    now = datetime.now(timezone.utc)
+    der = db["hik_intrusions"].find_one({"camera_id": cam["_id"], "cover.photo": {"$exists": True}},
+                                        {"cover": 1, "target_types": 1}, sort=[("started_at", DESCENDING)]) or {}
+    db["detection_tests"].insert_one({
+        "camera_id": cam["_id"], "channel": canal.get("no"),
+        "camera_name": cam.get("name", ""), "channel_name": canal.get("name") or cam.get("name", ""),
+        "started_at": now, "until": now + timedelta(seconds=TEST_MUR_S), "by": _who(),
+        "cover": der.get("cover") or {}, "target_types": der.get("target_types") or ["human"],
+    })
+    return jsonify({"ok": True, "duree_s": TEST_MUR_S, "photo": bool(der)})
+
+
+def _tests_mur(db, zones, now):
+    """Intrusions de test en cours, au format du mur (test: True)."""
+    out = []
+    for t in db["detection_tests"].find({"until": {"$gt": now}}).sort("started_at", -1).limit(5):
+        ep = dict(t, last_at=now, photos=[])
+        item = _mur_episode(ep, zones, now)
+        item.update(test=True, depuis_s=0, par=t.get("by", ""))
+        out.append(item)
+    return out
 
 
 def image_mur(rel):

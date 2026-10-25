@@ -728,4 +728,16 @@ n'accepte que `intrusions/`, jamais `captures/`).
   intrusion en cours les concerne. Carte figee (cadree sur cameras + zones).
 - Pied : intrusions du jour (heure de Paris), pietons, vehicules, non
   traitees, ecartees par l'IA, hors planning, histogramme par heure.
+- NOUVELLE intrusion : PLEIN ECRAN 20 s (`PLEIN_MS` : photo + zoom, camera,
+  zone, duree, compte a rebours), puis retour carte + panneau ; referme
+  plus tot si l'intrusion se termine. Une intrusion n'ouvre le plein ecran
+  qu'une fois (`S.vus`), y compris au chargement de la page.
+- Carte : zoom fractionnaire (`zoomSnap` 0,05) cadre au plus pres des
+  cameras et zones, marge = pastille en cours + etiquette.
+- TEST : bouton "Tester sur le mur TV" (icone TV) sur chaque camera du volet
+  Configurer de `/detection` -> `POST /api/detection/test-mur {camera_id,
+  channel?}` -> `detection_tests` (TTL sur `until`, `TEST_MUR_S` 90 s),
+  derniere photo reelle de la camera. JAMAIS dans `hik_intrusions` : ni
+  alerte, ni WhatsApp, ni liste, ni compteurs. Mur : en cours, plein ecran,
+  pastille TEST, "Exercice lance par ... : aucune alerte reelle".
 - Le mur ne traite rien : le traitement reste dans `/detection`.

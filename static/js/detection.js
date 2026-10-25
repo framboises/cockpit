@@ -1546,6 +1546,18 @@
                     links: ch.channels.map(function (x) { return { camera_id: x.camera_id, channel: x.channel, regions: [] }; }) });
             });
             it.appendChild(dz);
+            // Intrusion de TEST sur le mur TV (/intrusions-mur) : ni alerte,
+            // ni liste, ni compteurs ; derniere photo reelle de la camera
+            var tm = el("button", "dt-icon-btn"); tm.type = "button";
+            tm.title = "Tester sur le mur TV : fausse intrusion affichee 90 s sur /intrusions-mur (aucune alerte)";
+            tm.appendChild(icon("connected_tv"));
+            tm.addEventListener("click", function () {
+                send("POST", "/api/detection/test-mur", { camera_id: ch.id }).then(function (r) {
+                    toast("success", "Intrusion de test sur le mur TV pendant " + r.duree_s + " s" +
+                        (r.photo ? " (derniere photo de la camera)" : " (pas encore de photo pour cette camera)"));
+                }).catch(function (e) { toast("error", e.message); });
+            });
+            it.appendChild(tm);
             // Sur place, devant la camera : position GPS du telephone
             if (navigator.geolocation && window.isSecureContext) {
                 var gps = el("button", "dt-icon-btn"); gps.type = "button"; gps.title = "Placer a ma position (GPS)";
