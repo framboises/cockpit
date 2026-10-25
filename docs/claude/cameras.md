@@ -457,6 +457,11 @@ cartouche bas droite "n/N PLANCHE" (rendu en DEUX passes pour connaitre N).
   A) signalee : stockage provisoire. Chaque fiche rappelle "Enchainement Dn -
   etape k sur N" et la planche du suivi ; l'identification porte la camera
   reposee et son IP ; le recapitulatif liste les deplacements avec les IP.
+  Ordre et numerotation des planches (`order_by_chains`, dans `collect`) :
+  priorite, MAIS un enchainement reste groupe dans l'ordre des travaux (le
+  lieu ou une camera est deposee est suivi du lieu ou elle est reposee), au
+  rang de son membre le plus prioritaire ; reperes C1..Cn attribues apres ce
+  regroupement (renvois removed_by / reused_by mis a jour).
   Sommaire de la couverture : pages relevees a la premiere passe
   (`Doc.new_page(mark)`). Pas de fleche dans les textes : Barlow n'a pas le
   glyphe.

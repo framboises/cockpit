@@ -237,8 +237,9 @@ def fetch_tiles(views):
 # Donnees
 # ---------------------------------------------------------------------------
 def collect(db, statuses=None, ids=None):
-    """Projets retenus, tries par priorite (sans priorite : a la fin, par nom),
-    numerotes C1..Cn, avec les cameras existantes citees et leur position, le
+    """Projets retenus, tries par priorite (sans priorite : a la fin, par nom)
+    puis regroupes par enchainement de deplacements (order_by_chains),
+    numerotes C1..Cn dans cet ordre, avec les cameras existantes citees et leur position, le
     modele et l'objectif de chaque canal (catalogue cameras_models) et le
     reemploi : camera remplacee par un projet et reinstallee par un autre."""
     import detection
@@ -264,9 +265,9 @@ def collect(db, statuses=None, ids=None):
         }
     # Reemploi : tous les projets (y compris hors du dossier) ; repere Cn si retenu
     reps = {d["_id"]: "C%d" % i for i, d in enumerate(planned, 1)}
-    removed_by, reused_by = {}, {}
+    removed_by, reused_by, prefs = {}, {}, {}
     for p in db["cameras_planned"].find({}, {"name": 1, "replaces": 1, "moves_camera_id": 1}):
-        ref = {"_id": p["_id"], "name": p.get("name", ""), "rep": reps.get(p["_id"])}
+        ref = prefs[p["_id"]] = {"_id": p["_id"], "name": p.get("name", ""), "rep": reps.get(p["_id"])}
         for o in p.get("replaces") or []:
             removed_by[o] = ref
         if p.get("moves_camera_id"):
@@ -290,7 +291,33 @@ def collect(db, statuses=None, ids=None):
             "model": mby.get(d.get("model_id")) if d.get("model_id") else None,
             "channels": out, "moves": moves, "replaces": replaces, "kind": kind,
         })
+    items = order_by_chains(items)
+    for i, it in enumerate(items, 1):
+        it["rep"] = "C%d" % i
+        if it["doc"]["_id"] in prefs:  # references partagees (removed_by / reused_by)
+            prefs[it["doc"]["_id"]]["rep"] = it["rep"]
     return items, existing
+
+
+def order_by_chains(items):
+    """Ordre des planches : priorite, mais un enchainement de deplacements
+    reste groupe dans l'ordre des travaux (le lieu ou une camera est deposee
+    est suivi du lieu ou elle est reposee), place au rang de son membre le
+    plus prioritaire."""
+    chains = build_chains(items)
+    of = {id(it): ch for ch in chains for it in ch["steps"]}
+    out, done = [], set()
+    for it in items:
+        if id(it) in done:
+            continue
+        ch = of.get(id(it))
+        for x in (ch["steps"] if ch else [it]):
+            if id(x) not in done:
+                done.add(id(x))
+                out.append(x)
+    for it in out:  # recalcule par build_pdf apres la numerotation definitive
+        it.pop("chain", None)
+    return out
 
 
 def _proj_ref(ref):
@@ -848,7 +875,7 @@ def page_cover(d, items, views):
     n_reuse = sum(1 for it in items if it["kind"] == "deplacement" and it["moves"].get("removed_by"))
     n_rep = sum(1 for it in items for r in it["replaces"] if not r.get("reused_by"))
     n_dev = sum(len(devices_of(it)) for it in items)
-    lines = ["%d emplacement%s, classés par ordre de priorité (C1 à C%d)" % (len(items), "s" if len(items) > 1 else "", len(items)),
+    lines = ["%d emplacement%s (C1 à C%d) par priorité, déplacements en chaîne regroupés" % (len(items), "s" if len(items) > 1 else "", len(items)),
              "%d emplacement%s à équiper de matériel neuf : %d caméra%s à commander" % (
                  n_new, "s" if n_new > 1 else "", n_dev, "s" if n_dev > 1 else "")]
     if n_move:
@@ -873,7 +900,7 @@ def page_cover(d, items, views):
     d.map(v, mx, my, mw, mh, lambda proj, k: [draw_pin(d, proj, it["lat"], it["lng"], it["rep"][1:], r=5.5, font_size=5.5)
                                                        for it in items], north=False, scale=False)
     d.text(mx + 4, my + mh - 11, "PLAN D'ENSEMBLE – EMPLACEMENTS EN PROJET", "Barlow-Bold", 5.8, WHITE)
-    d.text(mx, my - 12, "Emplacements numérotés par ordre de priorité, orthophoto IGN", "Barlow-Regular", 5.6, MUTED)
+    d.text(mx, my - 12, "Emplacements numérotés par priorité, déplacements en chaîne regroupés – orthophoto IGN", "Barlow-Regular", 5.6, MUTED)
     y = my - 50
     d.text(mx, y, "SOMMAIRE", "Barlow-Bold", 10)
     y -= 26
@@ -919,7 +946,7 @@ def _overview_draw(d, items, existing):
 def legend(d, x, y, with_existing=True):
     c = d.c
     y = d.section(x, y, "Légende")
-    rows = [("pin", "caméra en projet (repère C1, C2… = ordre de priorité)"),
+    rows = [("pin", "caméra en projet (C1, C2… : priorité, chaînes de déplacements à la suite)"),
             ("cone", "angle de vue prévu (direction, ouverture, portée DORI « observer »)")]
     if with_existing:
         rows.append(("exist", "caméra existante et son angle de vue (gris)"))

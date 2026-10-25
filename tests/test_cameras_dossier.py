@@ -152,6 +152,8 @@ def test_materiel(db):
     # 10 canaux d'un multi-capteurs 1 + 4 : deux appareils
     items[0]["channels"] += [dict(c) for c in items[0]["channels"]]
     assert D.devices_of(items[0]) == ["Hikvision DS-2DP7D836 (1 PTZ + 4 objectifs fixes)"] * 2
+    # Objectif de la camera deplacee deduit de son modele reel
+    assert items[1]["channels"][0]["lens"] == "2dp-ptz"
 
 
 def test_reemploi_dans_le_dossier(db):
@@ -163,8 +165,6 @@ def test_reemploi_dans_le_dossier(db):
     assert p4["replaces"][0]["reused_by"]["rep"] == reuse["rep"]
     assert reuse["moves"]["removed_by"]["rep"] == "C1"
     assert D.kind_label(reuse) == "Réemploi d'une caméra existante déposée par C1"
-    # Objectif de la camera deplacee deduit de son modele reel
-    assert items[1]["channels"][0]["lens"] == "2dp-ptz"
 
 
 def test_geodesie():
@@ -273,3 +273,23 @@ def test_permutation(db):
     items, _e = D.collect(db, statuses=["souhaitee"])
     chains = D.build_chains(items)
     assert len(chains) == 1 and chains[0]["cycle"] and len(chains[0]["steps"]) == 2
+
+
+def test_planches_groupees_par_enchainement(db):
+    """Le lieu ou une camera est deposee est suivi du lieu ou elle est reposee,
+    meme si un autre projet est plus prioritaire que la suite de la chaine."""
+    pa, pb, px = ObjectId(), ObjectId(), ObjectId()
+    db["cameras_planned"].docs = [
+        {"_id": pb, "name": "A chez B", "status": "souhaitee", "priority": 5, "lat": 47.948, "lng": 0.2101,
+         "moves_camera_id": A, "replaces": [B], "channels": [{"no": 1}]},
+        {"_id": px, "name": "Autre", "status": "souhaitee", "priority": 2, "lat": 47.95, "lng": 0.22, "channels": [{"no": 1}]},
+        {"_id": pa, "name": "Neuve chez A", "status": "souhaitee", "priority": 1, "lat": 47.947, "lng": 0.209,
+         "replaces": [A], "channels": [{"no": 1, "optics": "fixe"}]},
+    ]
+    items, _e = D.collect(db, statuses=["souhaitee"])
+    assert [(it["rep"], it["name"]) for it in items] == [("C1", "Neuve chez A"), ("C2", "A chez B"), ("C3", "Autre")]
+    # Les renvois suivent la numerotation definitive
+    assert items[0]["replaces"][0]["reused_by"]["rep"] == "C2"
+    assert items[1]["moves"]["removed_by"]["rep"] == "C1"
+    chains = D.build_chains(items)
+    assert [it["rep"] for it in chains[0]["steps"]] == ["C1", "C2"]
