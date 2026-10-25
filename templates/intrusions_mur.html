@@ -264,8 +264,23 @@
     carte = L.map("carte", { center: CENTRE, zoom: 15, maxZoom: 20, zoomControl: false, zoomSnap: 0.05,
       attributionControl: true, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
       boxZoom: false, keyboard: false, touchZoom: false });
-    L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-      { attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 20 }).addTo(carte);
+    // Secours sous l'IGN : une tuile IGN manquante laisse voir la vue
+    // aerienne Esri au lieu d'un carre noir
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { attribution: "Esri", maxNativeZoom: 19, maxZoom: 20, zIndex: 1 }).addTo(carte);
+    var ign = L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      { attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 20, zIndex: 2 }).addTo(carte);
+    // Le mur ne recharge jamais sa carte : une tuile en echec (serveur IGN
+    // lent, erreur ponctuelle) restait un trou pour toujours. Nouvel essai
+    // apres 2 s, 4 s... jusqu'a TUILE_ESSAIS fois.
+    var TUILE_ESSAIS = 5;
+    ign.on("tileerror", function (ev) {
+      var t = ev.tile, n = +(t.getAttribute("data-essais") || 0) + 1;
+      if (n > TUILE_ESSAIS) return;
+      t.setAttribute("data-essais", n);
+      var src = ign.getTileUrl(ev.coords);
+      setTimeout(function () { t.src = src + "&essai=" + n; }, 2000 * n);
+    });
     coucheZones = L.layerGroup().addTo(carte);
     coucheCams = L.layerGroup().addTo(carte);
     if (window.ResizeObserver) new ResizeObserver(function () { carte.invalidateSize(); cadrer(true); }).observe($("carte"));

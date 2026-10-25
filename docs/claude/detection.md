@@ -734,6 +734,10 @@ n'accepte que `intrusions/`, jamais `captures/`).
   qu'une fois (`S.vus`), y compris au chargement de la page.
 - Carte : zoom fractionnaire (`zoomSnap` 0,05) cadre au plus pres des
   cameras et zones, marge = pastille en cours + etiquette.
+  Tuiles : IGN ortho par-dessus Esri World Imagery (secours : une tuile IGN
+  manquante laisse voir Esri, plus de carre noir) ; tuile IGN en echec
+  re-demandee apres 2 s, 4 s... (5 essais, `tileerror`) : le mur ne
+  recharge jamais sa carte.
 - TEST : bouton "Tester sur le mur TV" (icone TV) sur chaque camera du volet
   Configurer de `/detection` -> `POST /api/detection/test-mur {camera_id,
   channel?}` -> `detection_tests` (TTL sur `until`, `TEST_MUR_S` 90 s),
