@@ -315,12 +315,16 @@
     carte.flyToBounds(L.latLngBounds(pts), { paddingTopLeft: [120, 50], paddingBottomRight: [120, 110], maxZoom: 17, duration: 1.2 });
   }
 
+  // Couleur inseree dans le HTML du marqueur : format strict (deja filtre par le serveur)
+  function couleurSure(c) { return /^#[0-9a-fA-F]{3,8}$/.test(c || "") ? c : "#6366f1"; }
+
   function iconeBalise(o) {
+    var c = couleurSure(o.g.couleur);
     var b = o.b, etat = !b.en_ligne ? "off" : b.mouvement ? "move" : "arret";
     var taille = etat === "move" ? 40 : etat === "arret" ? 34 : 26;
-    var html = '<div class="bal ' + etat + (b.en_ligne && !b.gps ? " nogps" : "") + '" style="--c:' + o.g.couleur + '">' +
+    var html = '<div class="bal ' + etat + (b.en_ligne && !b.gps ? " nogps" : "") + '" style="--c:' + c + '">' +
       (etat === "move" ? '<div class="cap" style="transform:rotate(' + (+b.cap || 0) + 'deg)"></div>' : "") +
-      '<div class="rond" style="background:' + o.g.couleur + '"><span class="ms" style="font-size:' + Math.round(taille * 0.52) + 'px">' +
+      '<div class="rond" style="background:' + c + '"><span class="ms" style="font-size:' + Math.round(taille * 0.52) + 'px">' +
       (b.tablette ? "tablet_android" : String(o.g.icone).replace(/[^a-z0-9_]/g, "")) + "</span></div></div>";
     return { etat: etat, icon: L.divIcon({ className: "", html: html, iconSize: [taille, taille], iconAnchor: [taille / 2, taille / 2] }) };
   }

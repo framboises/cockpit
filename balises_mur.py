@@ -16,6 +16,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 import time
 
 import balises_core as B
@@ -60,9 +61,16 @@ def lire_groupes(brut):
     return out[:MAX_GROUPES]
 
 
+_COULEUR = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+_ICONE = re.compile(r"^[a-z0-9_]{1,40}$")
+
+
 def _option(g):
+    # Couleur et icone inserees dans du HTML / CSS (mur, portail) : format strict
+    couleur, icone = str(g.get("color") or ""), str(g.get("icon") or "")
     return {"valeur": g["id"], "libelle": g.get("label") or g["id"],
-            "couleur": g.get("color") or "#6366f1", "icone": g.get("icon") or "location_on",
+            "couleur": couleur if _COULEUR.match(couleur) else "#6366f1",
+            "icone": icone if _ICONE.match(icone) else "location_on",
             "nb": len(g.get("anoloc_device_ids") or [])}
 
 
