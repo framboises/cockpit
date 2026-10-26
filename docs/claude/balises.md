@@ -127,6 +127,35 @@ Etat par definition : `cockpit_alert_engine_state._id = "beacon:<slug>"`.
 - Mouvement : arret -> mouvement (Teltonika : capteur ; Anoloc : statut / vitesse).
 - `actionData` porte `lat`/`lng` (bouton localiser), `device_id`, `label`, `group`, `source`.
 
+## Mur TV de suivi GPS (`/balises-mur`, `balises_mur.py`)
+
+Mis en place le 26/10/2026. Page manager, aussi ouverte aux afficheurs TV du portail
+(`PAGES_AFFICHEUR` : `/balises-mur`, `/api/balises/mur`), registre `balises_mur`, menu Ecrans TV.
+
+- `?groupes=a,b,c` : 1 a 3 ids de `beacon_groups`, ordre conserve (`lire_groupes`, 3 au plus).
+  Groupe inconnu, desactive ou non visible : ignore et signale (`ignores`, bandeau du panneau).
+  Sans parametre : dernier choix du navigateur (localStorage `balisesMur.groupes`), sinon
+  selecteur. Le bouton reglage (en-tete) change le choix et reecrit l'adresse (a mettre en favori).
+- `?event&year` facultatifs : tablettes Field rattachees aux groupes (comme `/anoloc/live`).
+  `?fond=ortho` : vue aerienne au lieu du plan IGN assombri.
+- Visibilite : `anoloc._get_user_visible_groups` (un afficheur, sans groupe Cockpit, voit tout).
+- `etat_mur` : en ligne / GPS par `balises_core.device_state` ; en mouvement = en ligne et
+  vitesse >= 5 km/h (ou capteur Teltonika) ; trainee = `anoloc_positions` des 10 dernieres
+  minutes (60 points max par balise, balises en ligne seulement, jamais recalee : affichage brut).
+- Front : rafraichi toutes les 5 s, marqueurs glisses (animation 1,6 s, saut > 2 km sans
+  animation), recadrage seulement si une balise en ligne sort du cadre ou si l'ensemble change,
+  lignes du panneau qui debordent remplacees par "+ N autres" (les balises a l'arret d'abord).
+
+### Choix publies pour le portail : collection partagee `tv_choix`
+
+Le portail TITAN (meme base Mongo) propose les groupes a l'affectation d'un ecran et remplit la
+variable `{groupes}` de l'adresse du catalogue TV (`https://cockpit.lemans.org/balises-mur?groupes={groupes}`).
+Document `_id: "cockpit:groupes_balises"` : `app_key` "cockpit", `variable` "groupes", `libelle`,
+`aide`, `min` 1, `max` 3, `separateur` ",", `options [{valeur, libelle, couleur, icone, nb}]`
+(groupes actifs, ordre de la configuration), `maj_le`. Ecrit par `balises_mur.publier_choix_tv` :
+au demarrage (force), a l'enregistrement de Configuration > Balises GPS (force), et par le mur au
+plus toutes les 60 s s'il a change. Cockpit ne lit jamais ce document : il fait foi pour le portail.
+
 ## A faire / a verifier
 
 - Mapping AVL de l'ATC700 (`codec8.IO_MAP`) : confirmer avec l'AVL ID list

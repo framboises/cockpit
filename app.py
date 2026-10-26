@@ -448,6 +448,7 @@ PAGES_AFFICHEUR = frozenset({
     "/meteo-mur", "/api/meteo/mur",        # mur meteo (manager) et sa charge unique
     "/portes-mur", "/api/portes/etat",     # mur des portes (manager) et son etat
     "/intrusions-mur", "/api/intrusions/mur", "/api/intrusions/photo",  # mur des intrusions (manager)
+    "/balises-mur", "/api/balises/mur",     # mur de suivi GPS (manager), ?groupes= choisi par le portail
     "/circulation",                         # trafic (manager) ; /alerts et /trafic/all_routes sont en user
     "/", "/doors", "/terrains", "/general_stat",  # deja en user : listees pour le mode cadre
 })
@@ -624,6 +625,7 @@ PAGE_REGISTRY = [
     {"id": "meteo_mur",    "label": "Mur meteo",          "icon": "radar",           "role": "manager", "paths": ["/meteo-mur"]},
     {"id": "portes_mur",   "label": "Mur portes",         "icon": "door_sliding",    "role": "manager", "paths": ["/portes-mur"]},
     {"id": "intrusions_mur", "label": "Mur intrusions",   "icon": "shield_person",   "role": "manager", "paths": ["/intrusions-mur", "/api/intrusions"]},
+    {"id": "balises_mur",  "label": "Mur suivi GPS",      "icon": "share_location",  "role": "manager", "paths": ["/balises-mur", "/api/balises/mur"]},
     {"id": "pmv",          "label": "PMV",                "icon": "signpost",        "role": "manager", "paths": ["/pmv", "/api/pmv"]},
 ]
 ALL_PAGE_IDS = [p["id"] for p in PAGE_REGISTRY]
@@ -2766,6 +2768,12 @@ try:
     _balises_core.ensure_indexes(db)
 except Exception as _e:
     logging.getLogger("balises").warning("index balises : %s", _e)
+try:
+    # Groupes proposes par le portail pour le mur de suivi GPS (tv_choix)
+    import balises_mur as _balises_mur
+    _balises_mur.publier_choix_tv(db, force=True)
+except Exception as _e:
+    logging.getLogger("balises").warning("choix TV balises : %s", _e)
 # Reservations Momentus par lieu de la carte (momentus_api.py). GET user,
 # lecture seule des collections momentus_* (synchro momentus_sync.py).
 app.register_blueprint(momentus_bp)
@@ -4323,6 +4331,33 @@ def api_intrusions_mur():
 def api_intrusions_photo():
     import detection
     return detection.image_mur(request.args.get("p", ""))
+
+
+@app.route('/balises-mur', methods=['GET'])
+@role_required("manager")
+def balises_mur_page():
+    """Mur TV de suivi GPS : 1 a 3 groupes de balises sur une carte
+    (?groupes=a,b,c, ordre conserve). Sans groupe : selecteur (dernier choix
+    du navigateur sinon). Le portail pose ?groupes= sur l'URL de l'afficheur
+    (variable {groupes}, tv_choix). ?event&year facultatifs : tablettes Field
+    rattachees aux groupes. Consomme /api/balises/mur toutes les 5 s."""
+    return render_template("balises_mur.html")
+
+
+@app.route('/api/balises/mur', methods=['GET'])
+@role_required("manager")
+def api_balises_mur():
+    import balises_mur
+    import anoloc as _anoloc
+    demandes = balises_mur.lire_groupes(request.args.get("groupes", ""))
+    cfg = db["anoloc_config"].find_one({"_id": "global"}) or {}
+    visibles = _anoloc._get_user_visible_groups(cfg)
+    tablettes = {}
+    event, year = request.args.get("event"), request.args.get("year")
+    if event and year and demandes:
+        for gid, docs in _anoloc._get_field_tablets_by_group(db, event, year).items():
+            tablettes[gid] = [balises_mur.tablette(t) for t in docs]
+    return jsonify(balises_mur.etat_mur(db, demandes, visibles=visibles, tablettes=tablettes))
 
 
 @app.route('/portes-mur', methods=['GET'])

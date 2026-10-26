@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Suivi GPS - Poste de commandement</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+
+  <style>
+  /* ==========================================================================
+     MUR DE SUIVI GPS - TV du poste de commandement
+
+     Lu de 3 a 5 m, sans clic. 1 a 3 groupes de balises (?groupes=a,b,c,
+     ordre conserve, couleur et icone du groupe) :
+       - carte : une pastille par balise (icone du groupe), fleche de cap et
+         onde quand elle roule, trainee des 10 dernieres minutes, nom sous la
+         pastille ; hors ligne = gris, a sa derniere position ;
+       - panneau : un bloc par groupe, en ligne / en mouvement, une ligne par
+         balise en ligne (vitesse ou "arret"), les hors ligne en resume.
+     La carte se recadre seule sur les balises en ligne (sans a-coups : seulement
+     quand une balise sort du cadre ou que les groupes changent).
+     Sans ?groupes= : dernier choix de ce navigateur, sinon selecteur. Le portail
+     TITAN pose ?groupes= sur l'adresse de l'afficheur (variable {groupes},
+     collection tv_choix). ?fond=ortho : vue aerienne au lieu du plan sombre.
+     Donnees : /api/balises/mur (balises_mur.etat_mur), toutes les 5 s.
+     ========================================================================== */
+  :root{
+    --bg:#0b1220; --bg-2:#0f172a; --panel:#1e293b; --panel-2:#172132;
+    --line:rgba(148,163,184,0.16); --line-2:rgba(148,163,184,0.30);
+    --text:#f1f5f9; --muted:#94a3b8; --muted-2:#64748b;
+    --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444; --off:#64748b; --move:#38bdf8;
+    --t-geant:   clamp(1.8rem, min(3.4vw, 6vh), 5.4rem);
+    --t-grand:   clamp(1.3rem, min(2.2vw, 3.9vh), 3rem);
+    --t-moyen:   clamp(1rem, min(1.35vw, 2.4vh), 1.9rem);
+    --t-ligne:   clamp(0.9rem, min(1.1vw, 2vh), 1.6rem);
+    --t-libelle: clamp(0.72rem, min(0.9vw, 1.6vh), 1.15rem);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  [hidden]{display:none !important}
+  html,body{height:100%}
+  body{background:var(--bg); color:var(--text); font-family:'Outfit',system-ui,sans-serif;
+    overflow:hidden; display:flex; flex-direction:column; font-variant-numeric:tabular-nums}
+  .ms{font-family:'Material Symbols Outlined'; font-weight:normal; font-style:normal; line-height:1;
+    display:inline-block; font-variation-settings:'FILL' 1; vertical-align:-0.12em}
+  .libelle{font-size:var(--t-libelle); font-weight:700; text-transform:uppercase; letter-spacing:0.09em; color:var(--muted)}
+  .une-ligne{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+  .puce{width:0.8vw; height:0.8vw; min-width:12px; min-height:12px; border-radius:50%; display:inline-block; flex:0 0 auto}
+  .clign{animation:clign 1.2s ease-in-out infinite}
+  @keyframes clign{0%,100%{opacity:1}50%{opacity:0.45}}
+
+  /* En-tete */
+  .tete{display:flex; align-items:center; gap:clamp(12px,1.6vw,32px); padding:0.8vh 1.4vw;
+    background:var(--bg-2); border-bottom:1px solid var(--line); flex:0 0 auto}
+  .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted); white-space:nowrap}
+  .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
+  .resume{display:flex; gap:1.6vw; align-items:baseline; min-width:0}
+  .resume .n{font-size:var(--t-grand); font-weight:900; line-height:1}
+  .resume .l{font-size:var(--t-libelle); font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-left:0.4vw}
+  .resume .move .n{color:var(--move)}
+  .resume .off .n{color:var(--muted)}
+  .flux{margin-left:auto; font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center; gap:0.5vw; white-space:nowrap}
+  .reglage{background:none; border:1px solid var(--line); color:var(--muted-2); border-radius:0.6vw; padding:0.3vh 0.5vw;
+    font-size:var(--t-moyen); cursor:pointer; line-height:1}
+  .reglage:hover{color:var(--text); border-color:var(--line-2)}
+
+  /* Corps : carte | panneau */
+  .corps{flex:1 1 0; min-height:0; display:grid; grid-template-columns:minmax(0,68fr) minmax(0,32fr); gap:1vw; padding:1vh 1.4vw 1.2vh}
+  .carte{position:relative; border-radius:1vw; overflow:hidden; border:1px solid var(--line); background:var(--panel-2)}
+  #carte{position:absolute; inset:0; background:#0b1220}
+  body.plan .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(0.82) contrast(0.92) saturate(0.55)}
+  body.ortho .leaflet-tile-pane{filter:brightness(0.6) saturate(0.7)}
+  .leaflet-control-attribution{display:none}
+  .legende{position:absolute; left:1vw; bottom:1vh; z-index:500; display:flex; gap:1.2vw; padding:0.6vh 1vw; align-items:center;
+    background:rgba(11,18,32,0.85); border-radius:0.6vw; font-size:var(--t-libelle); font-weight:700; color:var(--muted)}
+  .legende span{display:flex; align-items:center; gap:0.4vw}
+  .legende .tr{display:inline-block; width:2vw; height:0.5vh; min-height:3px; border-radius:2px;
+    background:linear-gradient(90deg, rgba(148,163,184,0), var(--muted))}
+  .vide-carte{position:absolute; inset:0; z-index:600; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:1vh;
+    color:var(--muted); font-size:var(--t-moyen); background:rgba(11,18,32,0.55); pointer-events:none; text-align:center}
+  .vide-carte .ms{font-size:5vw; color:var(--muted-2)}
+
+  /* Marqueurs : pastille du groupe, fleche de cap, onde en mouvement */
+  .bal{position:relative; width:100%; height:100%}
+  .bal .rond{position:absolute; inset:0; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    border:3px solid #0b1220; box-shadow:0 0 0 2px rgba(255,255,255,0.85), 0 4px 12px rgba(0,0,0,0.55); color:#fff}
+  .bal .rond .ms{font-size:20px}
+  .bal .cap{position:absolute; left:50%; top:50%; width:0; height:0; margin-left:-9px; margin-top:-36px;
+    border-left:9px solid transparent; border-right:9px solid transparent; border-bottom:14px solid #fff;
+    transform-origin:9px 36px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.7))}
+  .bal.move::before{content:""; position:absolute; inset:-40%; border-radius:50%; border:3px solid var(--c); animation:onde 1.8s ease-out infinite}
+  .bal.arret .rond{box-shadow:0 0 0 2px rgba(255,255,255,0.55), 0 4px 12px rgba(0,0,0,0.55)}
+  .bal.off{opacity:0.55}
+  .bal.off .rond{background:var(--off) !important; box-shadow:0 0 0 2px rgba(148,163,184,0.5)}
+  .bal.off .rond .ms{color:#cbd5e1}
+  .bal.nogps .rond{border-style:dashed}
+  @keyframes onde{0%{transform:scale(0.5); opacity:1}100%{transform:scale(1.5); opacity:0}}
+  .leaflet-tooltip.nom{background:rgba(11,18,32,0.88); color:#fff; border:0; border-radius:6px; font:800 14px 'Outfit',sans-serif;
+    padding:1px 7px; box-shadow:0 3px 10px rgba(0,0,0,0.5); border-bottom:3px solid var(--c, #fff)}
+  .leaflet-tooltip.nom::before{display:none}
+  .leaflet-tooltip.nom.vite{font-size:15px}
+  .leaflet-tooltip.nom b{color:var(--move); margin-left:5px}
+
+  /* Panneau : un bloc par groupe */
+  .panneau{display:flex; flex-direction:column; gap:1vh; min-height:0}
+  .bloc{min-height:0; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--line);
+    border-radius:1vw; overflow:hidden; border-top:0.5vh solid var(--c)}
+  .bloc .entete{display:flex; align-items:center; gap:0.8vw; padding:1vh 1vw 0.8vh}
+  .bloc .ico{width:clamp(30px,2.6vw,60px); height:clamp(30px,2.6vw,60px); border-radius:50%; background:var(--c); color:#fff;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto}
+  .bloc .ico .ms{font-size:clamp(18px,1.6vw,36px)}
+  .bloc .nom{font-size:var(--t-grand); font-weight:900; line-height:1.05}
+  .bloc .compte{margin-left:auto; text-align:right; white-space:nowrap}
+  .bloc .compte .n{font-size:var(--t-grand); font-weight:900; line-height:1}
+  .bloc .compte .n small{font-size:0.55em; color:var(--muted); font-weight:700}
+  .bloc .compte .m{font-size:var(--t-libelle); font-weight:800; color:var(--move); text-transform:uppercase; letter-spacing:0.06em}
+  .lignes{flex:1 1 0; min-height:0; overflow:hidden; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-content:start;
+    gap:0.35vh 0.8vw; padding:0 1vw 0.8vh}
+  .lignes.une{grid-template-columns:minmax(0,1fr)}
+  .ligne{display:flex; align-items:center; gap:0.5vw; font-size:var(--t-ligne); font-weight:700; min-width:0;
+    padding:0.35vh 0.5vw; border-radius:0.5vw; background:rgba(148,163,184,0.06)}
+  .ligne.move{background:rgba(56,189,248,0.12)}
+  .ligne .puce{width:0.6vw; height:0.6vw; min-width:9px; min-height:9px}
+  .ligne .lab{flex:1 1 auto}
+  .ligne .v{white-space:nowrap; font-weight:900}
+  .ligne.move .v{color:var(--move)}
+  .ligne .v.arret{color:var(--muted); font-weight:700; font-size:0.85em}
+  .lignes.aere{gap:0.8vh 0.8vw}
+  .lignes.aere .ligne{font-size:calc(var(--t-moyen) * 1.3); padding:1vh 0.9vw; border-radius:0.7vw}
+  .lignes.aere .ligne .puce{width:1vw; height:1vw}
+  .ligne.plus{color:var(--muted); font-weight:700; background:none; font-size:var(--t-libelle); text-transform:uppercase; letter-spacing:0.06em}
+  .ligne .bat{color:var(--warn); font-size:0.85em; white-space:nowrap}
+  .ligne .bat.crit{color:var(--crit)}
+  .horsligne{flex:0 0 auto; padding:0.6vh 1vw 1vh; font-size:var(--t-libelle); color:var(--muted-2); font-weight:600;
+    border-top:1px solid var(--line); line-height:1.35; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical}
+  .horsligne b{color:var(--muted); font-weight:800; text-transform:uppercase; letter-spacing:0.06em; margin-right:0.4vw}
+  .rien{font-size:var(--t-moyen); color:var(--muted-2); padding:0 1vw 1vh}
+  .avis{background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); color:#fcd34d; border-radius:0.8vw;
+    padding:0.8vh 1vw; font-size:var(--t-libelle); font-weight:700}
+
+  /* Selecteur de groupes */
+  .choix{position:fixed; inset:0; z-index:3000; background:rgba(5,9,18,0.86); display:flex; align-items:center; justify-content:center; padding:16px}
+  .choix .boite{background:var(--bg-2); border:1px solid var(--line-2); border-radius:18px; padding:28px 30px; width:min(820px,100%);
+    max-height:100%; overflow:auto; box-shadow:0 30px 80px rgba(0,0,0,0.6)}
+  .choix h1{font-size:clamp(1.3rem,2.2vw,2rem); font-weight:900}
+  .choix p{color:var(--muted); margin:6px 0 20px; font-size:1rem}
+  .choix .grille{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px}
+  .choix .opt{display:flex; align-items:center; gap:12px; padding:14px; border-radius:12px; border:2px solid var(--line);
+    background:var(--panel); color:var(--text); font:inherit; text-align:left; cursor:pointer}
+  .choix .opt:hover{border-color:var(--line-2)}
+  .choix .opt.on{border-color:var(--c); background:color-mix(in srgb, var(--c) 18%, var(--panel))}
+  .choix .opt:disabled{opacity:0.4; cursor:not-allowed}
+  .choix .opt .ico{width:40px; height:40px; border-radius:50%; background:var(--c); display:flex; align-items:center; justify-content:center; flex:0 0 auto}
+  .choix .opt .t{font-weight:800; font-size:1.05rem}
+  .choix .opt .s{color:var(--muted); font-size:0.85rem}
+  .choix .opt .rang{margin-left:auto; width:28px; height:28px; border-radius:50%; background:var(--c); color:#fff; font-weight:900;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto}
+  .choix .bas{display:flex; align-items:center; gap:12px; margin-top:22px}
+  .choix .bas .nb{color:var(--muted); margin-right:auto}
+  .choix button.go{background:#2563eb; color:#fff; border:0; border-radius:10px; padding:12px 22px; font:800 1rem 'Outfit',sans-serif; cursor:pointer}
+  .choix button.go:disabled{opacity:0.4; cursor:not-allowed}
+  .choix button.annul{background:none; color:var(--muted); border:1px solid var(--line-2); border-radius:10px; padding:12px 18px; font:700 1rem 'Outfit',sans-serif; cursor:pointer}
+  </style>
+</head>
+<body class="plan">
+
+  <header class="tete">
+    <span class="marque">SUIVI GPS</span>
+    <span class="horloge" id="horloge">--:--</span>
+    <div class="resume" id="resume"></div>
+    <span class="flux" id="flux"><span class="puce" style="background:var(--muted-2)"></span>chargement</span>
+    <button type="button" class="reglage" id="reglage" title="Choisir les groupes affichés"><span class="ms">tune</span></button>
+  </header>
+
+  <main class="corps">
+    <section class="carte">
+      <div id="carte"></div>
+      <div class="vide-carte" id="vide-carte" hidden></div>
+      <div class="legende">
+        <span><span class="puce" style="background:var(--move)"></span>En mouvement</span>
+        <span><span class="puce" style="background:var(--muted)"></span>À l'arrêt</span>
+        <span><span class="puce" style="background:var(--off); opacity:0.55"></span>Hors ligne</span>
+        <span><span class="tr"></span>10 dernières min</span>
+      </div>
+    </section>
+    <section class="panneau" id="panneau"></section>
+  </main>
+
+  <div class="choix" id="choix" hidden></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(function () {
+  "use strict";
+  var RAFRAICHIR_MS = 5000;
+  var GLISSE_MS = 1600;        // deplacement anime d'une position a la suivante
+  var MAX_GROUPES = 3;
+  var CENTRE = [47.938561, 0.224318];
+  var CLE_LOCALE = "balisesMur.groupes";
+  var params = new URLSearchParams(location.search);
+
+  var S = { data: null, decalage: 0, recu: 0, erreur: null, groupes: [], marqueurs: {}, traces: {},
+            sigCadre: "", choixOuvert: false };
+  var carte, coucheTraces, coucheBalises;
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, txt) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (txt != null) e.textContent = txt;
+    return e;
+  }
+  function ico(nom) { return el("span", "ms", nom); }
+  function maintenant() { return Date.now() + S.decalage; }
+  function hm(ms) {
+    var d = new Date(ms);
+    return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+  }
+  function age(s) {
+    if (s == null) return "jamais vue";
+    if (s < 90) return "à l'instant";
+    var m = Math.round(s / 60);
+    if (m < 60) return m + " min";
+    var h = Math.floor(m / 60);
+    if (h < 48) return h + " h";
+    return Math.floor(h / 24) + " j";
+  }
+
+  /* ---------------- groupes choisis ---------------- */
+  function lireListe(txt) {
+    var out = [];
+    (txt || "").split(",").forEach(function (x) {
+      x = x.trim();
+      if (x && out.indexOf(x) < 0) out.push(x);
+    });
+    return out.slice(0, MAX_GROUPES);
+  }
+  function memoire(v) {
+    try {
+      if (v === undefined) return localStorage.getItem(CLE_LOCALE) || "";
+      localStorage.setItem(CLE_LOCALE, v);
+    } catch (e) {}
+    return "";
+  }
+  function appliquerGroupes(liste) {
+    S.groupes = liste.slice(0, MAX_GROUPES);
+    var txt = S.groupes.join(",");
+    memoire(txt);
+    params.set("groupes", txt);
+    history.replaceState(null, "", location.pathname + "?" + params.toString().replace(/%2C/g, ","));
+    S.sigCadre = "";
+    charger(true);
+  }
+
+  /* ---------------- carte ---------------- */
+  function initCarte() {
+    var ortho = params.get("fond") === "ortho";
+    document.body.className = ortho ? "ortho" : "plan";
+    carte = L.map("carte", { center: CENTRE, zoom: 14, maxZoom: 19, zoomControl: false, zoomSnap: 0.05,
+      attributionControl: true, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
+      boxZoom: false, keyboard: false, touchZoom: false });
+    // Secours sous l'IGN : une tuile IGN manquante laisse voir OSM / Esri
+    if (ortho) {
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        { maxNativeZoom: 19, maxZoom: 19, zIndex: 1 }).addTo(carte);
+    } else {
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { maxNativeZoom: 19, maxZoom: 19, zIndex: 1 }).addTo(carte);
+    }
+    var ign = L.tileLayer(ortho
+      ? "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"
+      : "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      { attribution: "IGN-F/Geoplateforme", maxNativeZoom: ortho ? 19 : 18, maxZoom: 19, zIndex: 2 }).addTo(carte);
+    // Le mur ne recharge jamais sa carte : nouvel essai d'une tuile en echec
+    ign.on("tileerror", function (ev) {
+      var t = ev.tile, n = +(t.getAttribute("data-essais") || 0) + 1;
+      if (n > 5) return;
+      t.setAttribute("data-essais", n);
+      var src = ign.getTileUrl(ev.coords);
+      setTimeout(function () { t.src = src + "&essai=" + n; }, 2000 * n);
+    });
+    coucheTraces = L.layerGroup().addTo(carte);
+    coucheBalises = L.layerGroup().addTo(carte);
+    if (window.ResizeObserver) new ResizeObserver(function () { carte.invalidateSize(); S.sigCadre = ""; cadrer(); }).observe($("carte"));
+  }
+
+  function toutesBalises(d) {
+    var out = [];
+    (d.groupes || []).forEach(function (g) {
+      g.balises.forEach(function (b) { out.push({ b: b, g: g }); });
+    });
+    return out;
+  }
+
+  // Cadre = balises en ligne ; sans balise en ligne, toutes les positions
+  // connues. Recadre seulement si une balise en ligne sort du cadre actuel ou
+  // si l'ensemble a cadrer change (groupes, balise qui revient...).
+  function cadrer() {
+    var d = S.data;
+    if (!d || !carte) return;
+    var tout = toutesBalises(d).filter(function (o) { return o.b.lat != null && o.b.lng != null; });
+    var enLigne = tout.filter(function (o) { return o.b.en_ligne; });
+    var base = enLigne.length ? enLigne : tout;
+    if (!base.length) { carte.setView(CENTRE, 14); return; }
+    var pts = base.map(function (o) { return [o.b.lat, o.b.lng]; });
+    var sig = base.map(function (o) { return o.b.id; }).sort().join("|");
+    var vue = carte.getBounds().pad(-0.06);
+    var dehors = enLigne.some(function (o) { return !vue.contains([o.b.lat, o.b.lng]); });
+    if (sig === S.sigCadre && !dehors) return;
+    S.sigCadre = sig;
+    carte.flyToBounds(L.latLngBounds(pts), { paddingTopLeft: [120, 50], paddingBottomRight: [120, 110], maxZoom: 17, duration: 1.2 });
+  }
+
+  function iconeBalise(o) {
+    var b = o.b, etat = !b.en_ligne ? "off" : b.mouvement ? "move" : "arret";
+    var taille = etat === "move" ? 40 : etat === "arret" ? 34 : 26;
+    var html = '<div class="bal ' + etat + (b.en_ligne && !b.gps ? " nogps" : "") + '" style="--c:' + o.g.couleur + '">' +
+      (etat === "move" ? '<div class="cap" style="transform:rotate(' + (+b.cap || 0) + 'deg)"></div>' : "") +
+      '<div class="rond" style="background:' + o.g.couleur + '"><span class="ms" style="font-size:' + Math.round(taille * 0.52) + 'px">' +
+      (b.tablette ? "tablet_android" : String(o.g.icone).replace(/[^a-z0-9_]/g, "")) + "</span></div></div>";
+    return { etat: etat, icon: L.divIcon({ className: "", html: html, iconSize: [taille, taille], iconAnchor: [taille / 2, taille / 2] }) };
+  }
+
+  function glisser(m, vers) {
+    var de = m.getLatLng();
+    if (Math.abs(de.lat - vers[0]) < 1e-7 && Math.abs(de.lng - vers[1]) < 1e-7) return;
+    // Saut de plus de ~2 km : pas d'animation (rattrapage, balise revenue)
+    if (carte.distance(de, vers) > 2000) { m.setLatLng(vers); return; }
+    var t0 = performance.now();
+    m._glisse = t0;
+    function pas(t) {
+      if (m._glisse !== t0) return;
+      var k = Math.min(1, (t - t0) / GLISSE_MS);
+      k = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      m.setLatLng([de.lat + (vers[0] - de.lat) * k, de.lng + (vers[1] - de.lng) * k]);
+      if (k < 1) requestAnimationFrame(pas);
+    }
+    requestAnimationFrame(pas);
+  }
+
+  function dessinerCarte(d) {
+    var vus = {};
+    coucheTraces.clearLayers();
+    toutesBalises(d).forEach(function (o) {
+      var b = o.b;
+      if (b.lat == null || b.lng == null) return;
+      vus[b.id] = true;
+      // Trainee : du plus ancien (transparent) au plus recent
+      if (b.en_ligne && b.trace && b.trace.length > 1) {
+        var tr = b.trace.concat([[b.lat, b.lng]]), n = tr.length;
+        for (var i = 1; i < n; i++) {
+          L.polyline([tr[i - 1], tr[i]], { color: o.g.couleur, weight: 5, opacity: 0.15 + 0.7 * i / n,
+            lineCap: "round", interactive: false }).addTo(coucheTraces);
+        }
+      }
+      var ic = iconeBalise(o);
+      var cle = ic.etat + "|" + b.cap + "|" + b.gps + "|" + o.g.couleur + "|" + b.vitesse;
+      var m = S.marqueurs[b.id];
+      var z = ic.etat === "move" ? 3000 : ic.etat === "arret" ? 2000 : 0;
+      if (!m) {
+        m = L.marker([b.lat, b.lng], { icon: ic.icon, zIndexOffset: z, keyboard: false, interactive: false }).addTo(coucheBalises);
+        S.marqueurs[b.id] = m;
+      } else {
+        if (m._cle !== cle) { m.setIcon(ic.icon); m.setZIndexOffset(z); }
+        glisser(m, [b.lat, b.lng]);
+      }
+      if (m._cle !== cle) {
+        m.unbindTooltip();
+        if (b.en_ligne) {
+          // Texte en noeuds : Leaflet interprete une chaine comme du HTML
+          var t = el("span", "", b.label);
+          if (b.mouvement) t.appendChild(el("b", "", b.vitesse + " km/h"));
+          m.bindTooltip(t, { permanent: true, direction: "bottom", offset: [0, ic.etat === "move" ? 18 : 15],
+            className: "nom" + (b.mouvement ? " vite" : "") });
+          var tt = m.getTooltip().getElement && m.getTooltip().getElement();
+          if (tt) tt.style.setProperty("--c", o.g.couleur);
+        }
+        m._cle = cle;
+      }
+      var tip = m.getTooltip();
+      if (tip && tip.getElement()) tip.getElement().style.setProperty("--c", o.g.couleur);
+    });
+    Object.keys(S.marqueurs).forEach(function (id) {
+      if (!vus[id]) { coucheBalises.removeLayer(S.marqueurs[id]); delete S.marqueurs[id]; }
+    });
+    var vide = $("vide-carte");
+    vide.textContent = "";
+    var aucune = !Object.keys(vus).length;
+    vide.hidden = !aucune || !S.groupes.length || !d.actif;
+    if (aucune) {
+      vide.appendChild(ico("location_off"));
+      vide.appendChild(el("div", "", "Aucune position connue pour ces groupes"));
+    }
+    cadrer();
+  }
+
+  /* ---------------- panneau ---------------- */
+  function ligneBalise(b, g) {
+    var l = el("div", "ligne" + (b.mouvement ? " move" : ""));
+    var pu = el("span", "puce");
+    pu.style.background = b.mouvement ? "var(--move)" : g.couleur;
+    l.appendChild(pu);
+    l.appendChild(el("span", "lab une-ligne", b.label));
+    if (b.batterie != null && b.batterie <= 20 && !b.charge) {
+      var bat = el("span", "bat" + (b.batterie <= 10 ? " crit" : ""));
+      bat.appendChild(ico("battery_alert"));
+      bat.appendChild(document.createTextNode(Math.round(b.batterie) + "%"));
+      l.appendChild(bat);
+    }
+    if (b.mouvement) l.appendChild(el("span", "v", b.vitesse + " km/h"));
+    else l.appendChild(el("span", "v arret", b.gps ? "arrêt" : "sans GPS"));
+    return l;
+  }
+
+  function rendrePanneau(d) {
+    var p = $("panneau");
+    p.textContent = "";
+    if (d.ignores && d.ignores.length) {
+      p.appendChild(el("div", "avis", "Groupe" + (d.ignores.length > 1 ? "s" : "") + " introuvable" +
+        (d.ignores.length > 1 ? "s" : "") + " ou désactivé" + (d.ignores.length > 1 ? "s" : "") + " : " + d.ignores.join(", ")));
+    }
+    (d.groupes || []).forEach(function (g) {
+      var bloc = el("section", "bloc");
+      bloc.style.setProperty("--c", g.couleur);
+      var enLigne = g.balises.filter(function (b) { return b.en_ligne; });
+      var hors = g.balises.filter(function (b) { return !b.en_ligne; });
+      // Hauteur du bloc selon le nombre de lignes a montrer
+      var deux = enLigne.length > 4;
+      bloc.style.flex = (Math.ceil(Math.max(enLigne.length, 1) / (deux ? 2 : 1)) + 2.5 + (hors.length ? 1.5 : 0)) + " 1 0";
+      var ent = el("div", "entete");
+      var ic = el("div", "ico"); ic.appendChild(ico(String(g.icone)));
+      ent.appendChild(ic);
+      ent.appendChild(el("div", "nom une-ligne", g.libelle));
+      var c = el("div", "compte");
+      var n = el("div", "n", String(g.en_ligne));
+      n.appendChild(el("small", "", " / " + g.total));
+      c.appendChild(n);
+      c.appendChild(el("div", "m", g.en_mouvement ? g.en_mouvement + " en mouvement" : "en ligne"));
+      ent.appendChild(c);
+      bloc.appendChild(ent);
+      if (enLigne.length) {
+        enLigne.sort(function (a, b) {
+          if (a.mouvement !== b.mouvement) return a.mouvement ? -1 : 1;
+          if (a.mouvement) return b.vitesse - a.vitesse;
+          return a.label.localeCompare(b.label, "fr", { numeric: true });
+        });
+        // Peu de balises : lignes plus grandes, lisibles de loin
+        var aere = enLigne.length * (deux ? 0.5 : 1) * d.groupes.length <= 8;
+        var ls = el("div", "lignes" + (deux ? "" : " une") + (aere ? " aere" : ""));
+        enLigne.forEach(function (b) { ls.appendChild(ligneBalise(b, g)); });
+        bloc.appendChild(ls);
+      } else {
+        bloc.appendChild(el("div", "rien", g.total ? "Aucune balise en ligne" : "Aucune balise dans ce groupe"));
+      }
+      if (hors.length) {
+        hors.sort(function (a, b) { return a.label.localeCompare(b.label, "fr", { numeric: true }); });
+        var h = el("div", "horsligne");
+        h.appendChild(el("b", "", hors.length + " hors ligne"));
+        h.appendChild(document.createTextNode(hors.map(function (b) {
+          return b.label + (b.age_s != null ? " (" + age(b.age_s) + ")" : "");
+        }).join(" · ")));
+        bloc.appendChild(h);
+      }
+      p.appendChild(bloc);
+    });
+    ajusterLignes();
+  }
+
+  // Lignes qui ne tiennent pas dans leur bloc : retirees par la fin (les
+  // balises a l'arret, les moins utiles), remplacees par "+ N autres"
+  function ajusterLignes() {
+    document.querySelectorAll("#panneau .lignes").forEach(function (ls) {
+      var cachees = 0, plus = null;
+      while (ls.scrollHeight > ls.clientHeight + 1) {
+        if (!plus) { plus = el("div", "ligne plus"); ls.appendChild(plus); }
+        var der = plus.previousElementSibling;
+        if (!der) break;
+        ls.removeChild(der);
+        cachees++;
+        plus.textContent = "+ " + cachees + " autre" + (cachees > 1 ? "s" : "");
+      }
+    });
+  }
+
+  function rendreResume(d) {
+    var r = $("resume");
+    r.textContent = "";
+    if (!d.groupes || !d.groupes.length) return;
+    var t = { en: 0, mv: 0, tot: 0 };
+    d.groupes.forEach(function (g) { t.en += g.en_ligne; t.mv += g.en_mouvement; t.tot += g.total; });
+    [[t.en, "en ligne", ""], [t.mv, "en mouvement", "move"], [t.tot - t.en, "hors ligne", "off"]].forEach(function (x) {
+      var s = el("span", x[2]);
+      s.appendChild(el("span", "n", String(x[0])));
+      s.appendChild(el("span", "l", x[1]));
+      r.appendChild(s);
+    });
+  }
+
+  /* ---------------- selecteur ---------------- */
+  function ouvrirChoix() {
+    var d = S.data;
+    if (!d) return;
+    var box = $("choix"), sel = S.groupes.slice();
+    S.choixOuvert = true;
+    function dessiner() {
+      box.textContent = "";
+      var b = el("div", "boite");
+      b.appendChild(el("h1", "", "Groupes à suivre"));
+      b.appendChild(el("p", "", "Choisissez de 1 à " + MAX_GROUPES + " groupes, dans l'ordre d'affichage. " +
+        "Le choix reste dans l'adresse de la page (à mettre en favori) et dans ce navigateur."));
+      var gr = el("div", "grille");
+      if (!d.dispo.length) gr.appendChild(el("div", "rien", "Aucun groupe de balises actif."));
+      d.dispo.forEach(function (o) {
+        var rang = sel.indexOf(o.valeur);
+        var bt = el("button", "opt" + (rang >= 0 ? " on" : ""));
+        bt.type = "button";
+        bt.style.setProperty("--c", o.couleur);
+        bt.disabled = rang < 0 && sel.length >= MAX_GROUPES;
+        var ic = el("span", "ico"); ic.appendChild(ico(o.icone)); bt.appendChild(ic);
+        var tx = el("span", "");
+        tx.appendChild(el("div", "t", o.libelle));
+        tx.appendChild(el("div", "s", o.nb + " balise" + (o.nb > 1 ? "s" : "")));
+        bt.appendChild(tx);
+        if (rang >= 0) bt.appendChild(el("span", "rang", String(rang + 1)));
+        bt.addEventListener("click", function () {
+          var i = sel.indexOf(o.valeur);
+          if (i >= 0) sel.splice(i, 1); else if (sel.length < MAX_GROUPES) sel.push(o.valeur);
+          dessiner();
+        });
+        gr.appendChild(bt);
+      });
+      b.appendChild(gr);
+      var bas = el("div", "bas");
+      bas.appendChild(el("span", "nb", sel.length + " / " + MAX_GROUPES + " choisi" + (sel.length > 1 ? "s" : "")));
+      if (S.groupes.length) {
+        var an = el("button", "annul", "Annuler"); an.type = "button";
+        an.addEventListener("click", fermerChoix);
+        bas.appendChild(an);
+      }
+      var go = el("button", "go", "Afficher"); go.type = "button";
+      go.disabled = !sel.length;
+      go.addEventListener("click", function () { fermerChoix(); appliquerGroupes(sel); });
+      bas.appendChild(go);
+      b.appendChild(bas);
+      box.appendChild(b);
+    }
+    dessiner();
+    box.hidden = false;
+  }
+  function fermerChoix() { $("choix").hidden = true; $("choix").textContent = ""; S.choixOuvert = false; }
+  $("reglage").addEventListener("click", ouvrirChoix);
+
+  /* ---------------- boucle ---------------- */
+  function rendre(d) {
+    if (!d.actif) {
+      $("panneau").textContent = "";
+      $("panneau").appendChild(el("div", "avis", "Le suivi GPS est désactivé (Configuration > Balises GPS)."));
+      $("resume").textContent = "";
+      return;
+    }
+    rendreResume(d);
+    rendrePanneau(d);
+    dessinerCarte(d);
+    if (!S.groupes.length && !S.choixOuvert) ouvrirChoix();
+  }
+
+  function tic() {
+    var n = new Date(maintenant());
+    $("horloge").textContent = ("0" + n.getHours()).slice(-2) + ":" + ("0" + n.getMinutes()).slice(-2) +
+      ":" + ("0" + n.getSeconds()).slice(-2);
+    var f = $("flux"), a = (Date.now() - S.recu) / 1000;
+    f.textContent = "";
+    var pu = el("span", "puce");
+    var ok = S.recu && a < 30 && !S.erreur;
+    pu.style.background = ok ? "var(--ok)" : "var(--crit)";
+    if (!ok) pu.className = "puce clign";
+    f.appendChild(pu);
+    f.appendChild(document.createTextNode(!S.recu ? "chargement" : ok ? "à jour " + hm(S.recu)
+      : "DONNÉES ARRÊTÉES depuis " + age(a)));
+  }
+
+  var minuteur = null;
+  function charger(immediat) {
+    if (minuteur) { clearTimeout(minuteur); minuteur = null; }
+    var q = new URLSearchParams();
+    q.set("groupes", S.groupes.join(","));
+    if (params.get("event") && params.get("year")) { q.set("event", params.get("event")); q.set("year", params.get("year")); }
+    fetch("/api/balises/mur?" + q.toString(), { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) {
+        S.decalage = new Date(d.maintenant).getTime() - Date.now();
+        S.data = d; S.recu = Date.now(); S.erreur = null;
+        rendre(d);
+      })
+      .catch(function (e) { S.erreur = e; })
+      .then(function () { minuteur = setTimeout(charger, RAFRAICHIR_MS); });
+  }
+
+  // Polices chargees ou fenetre redimensionnee : les lignes du panneau ne
+  // tiennent plus pareil
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (S.data) rendrePanneau(S.data); });
+  window.addEventListener("resize", function () { if (S.data) rendrePanneau(S.data); });
+  S.groupes = lireListe(params.get("groupes") || memoire());
+  initCarte();
+  charger();
+  setInterval(tic, 1000);
+  tic();
+})();
+</script>
+</body>
+</html>

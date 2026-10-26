@@ -785,6 +785,12 @@ def anoloc_config_save():
         {**update, "_id": "global"},
         upsert=True,
     )
+    # Liste des groupes proposee par le portail pour le mur de suivi GPS
+    try:
+        import balises_mur
+        balises_mur.publier_choix_tv(db, force=True)
+    except Exception:
+        logger.exception("publication tv_choix des groupes de balises")
     return jsonify({"ok": True})
 
 

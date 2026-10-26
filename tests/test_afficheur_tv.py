@@ -118,6 +118,20 @@ class TestLectureAfficheur:
         for chemin in ("/intrusions-mur", "/api/intrusions/mur"):
             _refuse(_avec(client, _jeton(env, borne=False)).get(chemin))
 
+    def test_mur_de_suivi_gps(self, env, client):
+        env["anoloc_config"].insert_one({"_id": "global", "enabled": True, "beacon_groups": [
+            {"id": "med", "label": "Medical", "anoloc_device_ids": []}]})
+        c = _avec(client, _jeton(env))
+        rep = c.get("/balises-mur?groupes=med")
+        assert rep.status_code == 200
+        assert rep.headers.get("Content-Security-Policy") == TestModeCadre.CSP
+        rep = c.get("/api/balises/mur?groupes=med,autre")
+        assert rep.status_code == 200
+        d = rep.get_json()
+        assert [g["id"] for g in d["groupes"]] == ["med"] and d["ignores"] == ["autre"]
+        for chemin in ("/balises-mur", "/api/balises/mur"):
+            _refuse(_avec(client, _jeton(env, borne=False)).get(chemin))
+
     def test_pages_du_groupe_ne_bloquent_pas_l_afficheur(self, env, client, monkeypatch):
         # Groupe par defaut restreint, sans les murs : l'afficheur passe sur
         # PAGES_AFFICHEUR, un humain du meme groupe reste bloque

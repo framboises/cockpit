@@ -117,6 +117,10 @@
             <span class="material-symbols-outlined">shield_person</span>
             <span class="label">Mur intrusions</span>
         </a>{% endif %}
+        {% if _mgr and (page_allowed is not defined or page_allowed('balises_mur')) %}<a href="/balises-mur" class="nav-btn" target="_blank" rel="noopener" title="Mur de suivi GPS plein ecran (1 a 3 groupes de balises)" data-nav-item>
+            <span class="material-symbols-outlined">share_location</span>
+            <span class="label">Mur suivi GPS</span>
+        </a>{% endif %}
         {% endset %}
         {{ nav_group('tv', 'tv', 'Ecrans TV', _g_tv) }}
 
