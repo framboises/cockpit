@@ -191,6 +191,60 @@ def test_duree_ronde():
     assert GF._minutes(None, "10:00") is None
 
 
+class _FakeCol:
+    def __init__(self, docs):
+        self.docs = {d["_id"]: d for d in docs}
+
+    def find(self, q, proj=None):
+        return [d for d in self.docs.values() if d.get("batch") == q.get("batch") and d.get("error") is None]
+
+    def update_many(self, q, upd):
+        for d in self.docs.values():
+            if d.get("batch") == q.get("batch"):
+                d.update(upd["$set"])
+
+    def update_one(self, q, upd):
+        self.docs[q["_id"]].update(upd["$set"])
+
+
+class TestSelectionAControler:
+    def _lot(self):
+        docs = [{"_id": "r%02d" % i, "batch": "L1", "gravite": 1, "nature": "routine", "error": None}
+                for i in range(80)]
+        docs += [{"_id": "g5", "batch": "L1", "gravite": 5, "nature": "incident", "error": None},
+                 {"_id": "al", "batch": "L1", "gravite": 2, "nature": "routine", "alarme_non_remise": True,
+                  "error": None},
+                 {"_id": "sc", "batch": "L1", "gravite": 3, "nature": "incident", "secours": {"nature": "malaise"},
+                  "error": None}]
+        docs += [{"_id": "i%02d" % i, "batch": "L1", "gravite": 2, "nature": "incident", "error": None}
+                 for i in range(17)]
+        return {"c": _FakeCol(docs)}
+
+    def test_vingt_pour_cent_et_cas_interessants(self):
+        db = self._lot()
+        assert PE.select_for_review(db, "c", "L1") == 20
+        marked = {k: d["a_controler"] for k, d in db["c"].docs.items() if d.get("a_controler")}
+        assert len(marked) == 20
+        assert {"g5", "al", "sc"} <= set(marked)
+        assert sum(1 for m in marked.values() if "aleatoire" in m["raisons"]) == 2
+        routines = [k for k, d in db["c"].docs.items()
+                    if d.get("a_controler") and k.startswith("r") and "aleatoire" not in d["a_controler"]["raisons"]]
+        assert len(routines) < 10                       # pas 20 rondes identiques
+
+    def test_reselection_garde_les_fiches_controlees(self):
+        db = self._lot()
+        PE.select_for_review(db, "c", "L1")
+        done = [k for k, d in db["c"].docs.items() if d.get("a_controler")][:5]
+        for k in done:
+            db["c"].docs[k]["review"] = {"verdict": "ok"}
+        PE.select_for_review(db, "c", "L1")
+        assert all(db["c"].docs[k].get("a_controler") for k in done)
+
+    def test_raisons(self):
+        s, why = PE.review_reasons({"gravite": 4, "secours": {"x": 1}, "geo": {"source": "lieu"}})
+        assert "gravite 4" in why and "secours" in why and "position deduite" in why and s >= 10
+
+
 def test_point_dans_polygone_avec_trou():
     geom = {"type": "Polygon", "coordinates": [
         [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],

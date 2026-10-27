@@ -364,6 +364,97 @@ def flag_unrestored_alarms(db, coll, event, year):
     return n
 
 
+# ---------------------------------------------------------------------------
+# Selection des fiches a controler dans un lot (marquees a la generation)
+# ---------------------------------------------------------------------------
+REVIEW_SHARE = 0.2          # 20 fiches a controler par lot de 100
+REVIEW_MIN = 5
+REVIEW_RANDOM = 2           # tirees au hasard : mesure de justesse non biaisee
+
+
+def review_reasons(d):
+    """(score, raisons) d'une fiche structuree : ce qui merite l'oeil d'un admin."""
+    score, why = 0, []
+
+    def add(points, reason):
+        nonlocal score
+        score += points
+        why.append(reason)
+
+    g = d.get("gravite") or 0
+    if g >= 4:
+        add(6 if g == 5 else 5, "gravite %d" % g)
+    if d.get("alarme_non_remise"):
+        add(5, "alarme jamais remise")
+    if d.get("secours"):
+        add(3, "secours")
+    if d.get("dysfonctionnement"):
+        add(3, "dysfonctionnement")
+    if d.get("jalon"):
+        add(2, "jalon")
+    if d.get("doublon_probable") or d.get("doublon_declare"):
+        add(2, "doublon")
+    if (d.get("geo") or {}).get("source") in ("lieu", "titre"):
+        add(2, "position deduite")
+    if d.get("sous_classification_proposee") and not (d.get("taxo") or {}).get("sous_classification"):
+        add(1, "sous-classification proposee")
+    if d.get("nature") == "routine" and g >= 2:
+        add(2, "routine jugee grave")
+    if d.get("nature") == "incident" and g == 1:
+        add(1, "incident juge mineur")
+    if (d.get("donnees_personnelles") or []) and g >= 3:
+        add(1, "donnees personnelles")
+    return score, why
+
+
+def select_for_review(db, coll, batch, share=REVIEW_SHARE):
+    """Marque `a_controler` {raisons, rang} sur ~20 % des fiches du lot : 2 au
+    hasard (justesse non biaisee), puis les plus interessantes, avec au plus
+    quelques fiches par couple nature x gravite (pas 20 rondes identiques).
+    Rejouable : le marquage du lot est recalcule a chaque appel."""
+    import random
+    docs = list(db[coll].find({"batch": batch, "error": None, "gravite": {"$ne": None}}))
+    if not docs:
+        return 0
+    k = min(len(docs), max(REVIEW_MIN, int(round(len(docs) * share))))
+    rng = random.Random(batch)                       # meme lot = meme tirage
+    picks = {}
+    # Deja marquees ET controlees : on les garde (re-selection en fin de traitement)
+    for d in docs:
+        if d.get("a_controler") and d.get("review"):
+            picks[d["_id"]] = d["a_controler"].get("raisons") or ["diversite"]
+    n_random = sum(1 for w in picks.values() if "aleatoire" in w)
+    pool = [d for d in docs if d["_id"] not in picks]
+    for d in rng.sample(pool, max(0, min(REVIEW_RANDOM - n_random, k - len(picks), len(pool)))):
+        picks[d["_id"]] = ["aleatoire"]
+    scored = sorted(((review_reasons(d), d) for d in docs if d["_id"] not in picks),
+                    key=lambda x: -x[0][0])
+    cap = max(2, k // 5)
+    buckets = {}
+    for (score, why), d in scored:
+        if len(picks) >= k:
+            break
+        key = (d.get("nature"), d.get("gravite"))
+        if buckets.get(key, 0) >= cap and score < 5:   # les cas graves passent toujours
+            continue
+        buckets[key] = buckets.get(key, 0) + 1
+        picks[d["_id"]] = why or ["diversite"]
+    # Complement si la diversite a trop filtre : toujours dans le couple
+    # nature x gravite le moins represente, incidents d'abord, puis score
+    rest = [(score, why, d) for (score, why), d in scored if d["_id"] not in picks]
+    while len(picks) < k and rest:
+        rest.sort(key=lambda x: (buckets.get((x[2].get("nature"), x[2].get("gravite")), 0),
+                                 x[2].get("nature") != "incident", -x[0]))
+        score, why, d = rest.pop(0)
+        key = (d.get("nature"), d.get("gravite"))
+        buckets[key] = buckets.get(key, 0) + 1
+        picks[d["_id"]] = why or ["diversite"]
+    db[coll].update_many({"batch": batch}, {"$set": {"a_controler": None}})
+    for rank, (fid, why) in enumerate(picks.items(), 1):
+        db[coll].update_one({"_id": fid}, {"$set": {"a_controler": {"raisons": why, "rang": rank}}})
+    return len(picks)
+
+
 def resolve_declared_duplicates(db, coll, event, year):
     """Relie `doublon_declare_sql` a la fiche citee (pcorg.sql_id) : verite de
     terrain pour mesurer le detecteur de doublons probables."""

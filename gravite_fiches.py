@@ -61,7 +61,7 @@ def _pub_digest(d, fiche=None):
                                   "doublon_probable", "nature", "activite", "ronde", "alarme",
                                   "dysfonctionnement", "jalon", "secours", "prise_service",
                                   "sous_classification_proposee", "taxo", "area", "relances",
-                                  "doublon_declare", "alarme_non_remise")}
+                                  "doublon_declare", "alarme_non_remise", "a_controler")}
     out["id"] = d["_id"]
     out["at"] = _iso(d.get("at"))
     out["ms"] = (d.get("meta") or {}).get("ms")
@@ -128,6 +128,9 @@ def gravite_fiches_summary():
                     "errors": {"$sum": {"$cond": [{"$ne": ["$error", None]}, 1, 0]}},
                     "reviewed": {"$sum": {"$cond": [{"$ifNull": ["$review", False]}, 1, 0]}},
                     "ok": {"$sum": {"$cond": [{"$eq": ["$review.verdict", "ok"]}, 1, 0]}},
+                    "marked": {"$sum": {"$cond": [{"$ifNull": ["$a_controler", False]}, 1, 0]}},
+                    "marked_done": {"$sum": {"$cond": [{"$and": [{"$ifNull": ["$a_controler", False]},
+                                                                  {"$ifNull": ["$review", False]}]}, 1, 0]}},
                     "first": {"$min": "$at"}, "last": {"$max": "$at"},
                     "prompt_version": {"$first": "$prompt_version"}}},
         {"$sort": {"_id": -1}}, {"$limit": 40}]))
@@ -137,7 +140,11 @@ def gravite_fiches_summary():
 
     # Controles : justesse et matrice gravite JUGEE (au moment du controle) x validee
     reviews = list(col.find({"review": {"$ne": None}},
-                            {"gravite": 1, "review": 1, "prompt_version": 1}))
+                            {"gravite": 1, "review": 1, "prompt_version": 1, "a_controler": 1}))
+    # Justesse sur les seules fiches tirees AU HASARD : les autres sont choisies
+    # parce qu'elles sont delicates, leur justesse sous-estime le modele.
+    rand = [d for d in reviews if "aleatoire" in ((d.get("a_controler") or {}).get("raisons") or [])]
+    rand_ok = sum(1 for d in rand if (d.get("review") or {}).get("verdict") == "ok")
     matrix = {}
     verdicts = {v: 0 for v in VERDICTS}
     inexact = 0
@@ -213,7 +220,7 @@ def gravite_fiches_summary():
         "max_request_batches": PD.MAX_REQUEST_BATCHES,
         "reviews": {"count": len(reviews), "verdicts": verdicts, "resume_inexact": inexact,
                     "matrix": matrix, "champs_faux": champs_faux, "doublons": doublons_rev,
-                    "by_version": by_version},
+                    "by_version": by_version, "aleatoire": {"n": len(rand), "ok": rand_ok}},
         "quality": quality,
     })
 
@@ -365,8 +372,18 @@ def _quality_v3(col, base):
 @gravite_fiches_bp.route("/api/gravite-fiches/batch/<batch>")
 @admin_required
 def gravite_fiches_batch(batch):
-    digests = list(_db()[PD.COLL].find({"batch": batch}).sort("at", 1))
-    return jsonify({"batch": batch, "items": _with_fiches(digests)})
+    """Fiches A CONTROLER du lot (marquees a la generation) ; ?tout=1 = lot entier."""
+    col = _db()[PD.COLL]
+    total = col.count_documents({"batch": batch})
+    q = {"batch": batch}
+    marked = col.count_documents(dict(q, a_controler={"$ne": None}))
+    only_marked = request.args.get("tout") != "1" and marked > 0
+    if only_marked:
+        q["a_controler"] = {"$ne": None}
+    digests = list(col.find(q))
+    digests.sort(key=lambda d: ((d.get("a_controler") or {}).get("rang") or 999, str(d.get("at"))))
+    return jsonify({"batch": batch, "items": _with_fiches(digests), "total": total,
+                    "marked": marked, "only_marked": only_marked})
 
 
 @gravite_fiches_bp.route("/api/gravite-fiches/sample")
@@ -381,6 +398,11 @@ def gravite_fiches_sample():
     match = {"prompt_version": PD.PROMPT_VERSION, "error": None, "review": None}
     grav = request.args.get("gravite")
     col = _db()[PD.COLL]
+    # Les fiches marquees « a controler » a la generation passent d'abord
+    if not grav and col.count_documents(dict(match, a_controler={"$ne": None})):
+        docs = list(col.find(dict(match, a_controler={"$ne": None})).sort([("batch", -1)]).limit(n))
+        docs.sort(key=lambda d: (str(d.get("batch")), (d.get("a_controler") or {}).get("rang") or 999))
+        return jsonify({"items": _with_fiches(docs), "marked": True})
     if grav and grav.isdigit():
         docs = list(col.aggregate([{"$match": dict(match, gravite=int(grav))}, {"$sample": {"size": n}}]))
     else:

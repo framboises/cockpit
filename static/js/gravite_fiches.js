@@ -270,6 +270,11 @@
     var marge = count ? Math.round(196 * Math.sqrt((p * (1 - p)) / count)) : null;
     k.appendChild(kpi("Fiches controlees", fmtInt(count)));
     k.appendChild(kpi("Justes", fmtPct(v.ok || 0, count), marge !== null ? "marge +/- " + marge + " points" : ""));
+    var al = r.aleatoire || {};
+    var pa = al.n ? al.ok / al.n : 0;
+    k.appendChild(kpi("Justes (tirage au hasard)", al.n ? fmtPct(al.ok, al.n) : "-",
+      al.n ? al.n + " fiches, marge +/- " + Math.round(196 * Math.sqrt((pa * (1 - pa)) / al.n)) + " points"
+        : "mesure non biaisee"));
     k.appendChild(kpi("Trop haut", fmtInt(v.trop_haut || 0), "modele trop severe"));
     k.appendChild(kpi("Trop bas", fmtInt(v.trop_bas || 0), "modele trop indulgent"));
     k.appendChild(kpi("Resumes inexacts", fmtInt(r.resume_inexact || 0), fmtPct(r.resume_inexact || 0, count)));
@@ -341,7 +346,8 @@
       tr.appendChild(el("td", null, b.prompt_version || "-"));
       tr.appendChild(el("td", "gf-num", b.n));
       tr.appendChild(el("td", "gf-num", b.errors || ""));
-      tr.appendChild(el("td", "gf-num", b.reviewed + " / " + (b.n - (b.errors || 0))));
+      tr.appendChild(el("td", "gf-num", b.marked ? b.marked_done + " / " + b.marked
+        : b.reviewed + " / " + (b.n - (b.errors || 0))));
       tr.appendChild(el("td", "gf-num", b.reviewed ? fmtPct(b.ok, b.reviewed) : "-"));
       tr.addEventListener("click", function () { openBatch(b.batch); });
       body.appendChild(tr);
@@ -354,10 +360,14 @@
   }
 
   // ---------- Fiches d'un lot / d'un sondage ----------
-  function openBatch(batch) {
+  function openBatch(batch, all) {
     state.batch = batch;
-    apiGet("/api/gravite-fiches/batch/" + encodeURIComponent(batch)).then(function (r) {
-      showItems("Lot " + batch, r.items);
+    apiGet("/api/gravite-fiches/batch/" + encodeURIComponent(batch) + (all ? "?tout=1" : "")).then(function (r) {
+      var title = r.only_marked
+        ? "Lot " + batch + " : " + r.items.length + " fiches a controler sur " + r.total
+        : "Lot " + batch + " : " + r.items.length + " fiches";
+      showItems(title, r.items, r.only_marked ? { label: "Voir tout le lot (" + r.total + ")", fn: function () { openBatch(batch, true); } }
+        : (r.marked ? { label: "Seulement les " + r.marked + " a controler", fn: function () { openBatch(batch, false); } } : null));
       loadSummary();
     }).catch(function (e) { toast("error", "Lot illisible : " + e.message); });
   }
@@ -371,13 +381,19 @@
     }).catch(function (e) { toast("error", "Sondage impossible : " + e.message); });
   }
 
-  function showItems(title, items) {
+  function showItems(title, items, toggle) {
     state.items = items;
     state.focus = 0;
     document.getElementById("gf-items-card").hidden = false;
     document.getElementById("gf-items-title").textContent = title;
     var box = document.getElementById("gf-items");
     clear(box);
+    if (toggle) {
+      var tb = el("button", "btn gf-batch-toggle", toggle.label);
+      tb.type = "button";
+      tb.addEventListener("click", toggle.fn);
+      box.appendChild(tb);
+    }
     if (!items.length) {
       box.appendChild(el("div", "gf-muted", "Rien a afficher."));
       return;
@@ -422,6 +438,14 @@
       right.appendChild(el("div", "gf-error", "Echec du modele (" + (it.attempts || 1) + " essai(s)) : " + it.error));
       card.appendChild(right);
       return card;
+    }
+    if (it.a_controler) {
+      var why = el("div", "gf-why");
+      why.appendChild(el("span", "gf-muted", "A controler : "));
+      (it.a_controler.raisons || []).forEach(function (r) {
+        why.appendChild(el("span", "gf-tag" + (r === "aleatoire" ? "" : " gf-warn"), r === "aleatoire" ? "tirage au hasard" : r));
+      });
+      right.appendChild(why);
     }
     var head = el("div", "gf-head");
     head.appendChild(el("span", "gf-badge gf-g" + it.gravite, it.gravite));

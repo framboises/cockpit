@@ -536,7 +536,9 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
                 reason = "heure de fin atteinte"
                 break
             if in_batch >= batch_size:
-                log.info("Lot %s-%03d termine", run_id, batch_no)
+                # Fiches a controler marquees des la fin du lot (controle possible sans attendre)
+                n_mark = PE.select_for_review(db, COLL, "%s-%03d" % (run_id, batch_no))
+                log.info("Lot %s-%03d termine (%d fiches a controler)", run_id, batch_no, n_mark)
                 if max_batches is not None and batch_no >= max_batches:
                     reason = "nombre de lots atteint"
                     break
@@ -576,6 +578,10 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
             PE.resolve_declared_duplicates(db, COLL, ev, yr)
         if touched:
             log.info("Doublons probables : %d ; alarmes sans remise en service : %d", dups, alarms)
+        # Re-selection des fiches a controler de chaque lot de ce traitement, maintenant
+        # que doublons et alarmes non remises sont connus (fiches deja controlees gardees)
+        for b in sorted(db[COLL].distinct("batch", {"batch": {"$regex": "^%s-" % re.escape(run_id)}})):
+            PE.select_for_review(db, COLL, b)
     finally:
         release_lock(db, {"done": done, "errors": errors, "stop_reason": reason})
     dur = (_now() - started).total_seconds()
@@ -600,6 +606,8 @@ def enrich_only(db):
     for ev, yr in touched:
         PE.flag_unrestored_alarms(db, COLL, ev, yr)
         PE.resolve_declared_duplicates(db, COLL, ev, yr)
+    for b in db[COLL].distinct("batch", {"batch": {"$ne": None}}):
+        PE.select_for_review(db, COLL, b)
     log.info("Enrichissement seul : %d fiches, %d doublons probables", n, dups)
     return {"enriched": n, "duplicates": dups}
 

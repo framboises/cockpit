@@ -86,6 +86,9 @@
 .gf-chip.gf-yes.gf-on { background: #dcfce7; border-color: #86efac; color: #166534; }
 .gf-dup { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #fff7ed; font-size: 12px; }
 .gf-chips-line { display: flex; flex-wrap: wrap; gap: 6px; }
+.gf-why { margin-bottom: 6px; }
+.gf-batch-toggle { margin-bottom: 10px; }
+body.gf-reviewing .gf-batch-toggle { width: 100%; }
 .gf-versions { font-size: 12px; max-width: 460px; }
 .gf-quality-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .gf-qbox { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
