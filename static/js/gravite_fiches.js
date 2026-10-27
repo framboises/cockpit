@@ -14,8 +14,14 @@
   };
   var state = { batch: null, items: [], focus: 0, timer: null, running: false };
   // Faits que l'admin peut signaler faux (meme liste que gravite_fiches.CHAMPS, sauf resume)
-  var CHAMPS = [["lieu", "Lieu"], ["position", "Position"], ["heures", "Heures"], ["equipement", "Equipement"],
-                ["moyens", "Moyens"], ["services", "Services ext."], ["causes", "Causes"], ["issue", "Issue"]];
+  var CHAMPS = [["nature", "Nature"], ["lieu", "Lieu"], ["position", "Position"], ["heures", "Heures"],
+                ["equipement", "Equipement"], ["moyens", "Moyens"], ["services", "Services ext."], ["causes", "Causes"],
+                ["issue", "Issue"], ["sous_classification", "Sous-classif."], ["ronde", "Ronde"], ["alarme", "Alarme"],
+                ["dysfonctionnement", "Dysfonct."], ["jalon", "Jalon"], ["secours", "Secours"],
+                ["prise_service", "Prise de service"]];
+  // Puces des blocs v3 : affichees seulement si le bloc est present sur la fiche
+  var CHAMPS_BLOCS = ["ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service"];
+  var NATURE_LABELS = { incident: "Incident", routine: "Routine", information: "Information" };
   var POS_LABELS = { gps: "GPS d'origine", carroyage: "Carroyage", lieu: "Lieu cite", titre: "Titre", aucune: "Aucune" };
   var ISSUE_LABELS = { resolu: "Resolu", transmis: "Transmis", sans_suite: "Sans suite", en_attente: "En attente", non_precise: "Non precise" };
 
@@ -210,7 +216,47 @@
     grid.appendChild(qbox("Issue", (q.issues || []).map(function (r) { return [ISSUE_LABELS[r.v] || r.v, r.n]; })));
     var perso = (q.donnees_perso || []).map(function (r) { return [r.v, r.n]; });
     perso.unshift(["Doublons probables", fmtInt(q.doublons)]);
+    var dd = q.doublons_declares || {};
+    if (dd.n) perso.unshift(["Doublons declares retrouves", dd.retrouves + " / " + dd.n + " (" + fmtPct(dd.retrouves, dd.n) + ")"]);
     grid.appendChild(qbox("Doublons et donnees personnelles", perso));
+
+    function lab(v) { return String(v || "-").replace(/_/g, " "); }
+    function pairs(list) { return (list || []).map(function (r) { return [lab(r.v), r.n]; }); }
+    grid.appendChild(qbox("Nature des fiches", pairs(q.natures).map(function (r) {
+      return [NATURE_LABELS[r[0]] || r[0], r[1] + " (" + fmtPct(r[1], q.total) + ")"];
+    }).concat(pairs(q.activites))));
+    var ro = q.rondes || {};
+    grid.appendChild(qbox("Rondes (" + fmtInt(ro.n) + ")", [
+      ["RAS / anomalie", fmtInt(ro.ras) + " / " + fmtInt(ro.anomalies)],
+      ["Duree mediane", ro.duree_mediane !== null && ro.duree_mediane !== undefined ? ro.duree_mediane + " min" : "-"],
+    ].concat(pairs(ro.points).slice(0, 8).map(function (r) { return ["Point : " + r[0], r[1]]; }))
+     .concat(pairs(ro.anomalies_top).slice(0, 5).map(function (r) { return ["Anomalie : " + r[0], r[1]]; }))));
+    var a = q.alarmes || {};
+    grid.appendChild(qbox("Alarmes intrusion", [
+      ["Mises hors service", fmtInt(a.hors_service)], ["Remises en service", fmtInt(a.remises)],
+      ["JAMAIS remises (24 h)", fmtInt(a.non_remises)],
+    ].concat((a.derniers_non_remis || []).map(function (x) { return [x.quand, x.batiment || "-"]; }))));
+    var rx = q.retex || {};
+    grid.appendChild(qbox("Retour d'experience (dysfonctionnements)", pairs(rx.par_type)
+      .concat((rx.derniers || []).slice(0, 8).map(function (x) { return [x.quand + " - " + lab(x.type), x.description || "-"]; }))));
+    var jl = q.jalons || {};
+    grid.appendChild(qbox("Jalons d'exploitation", pairs(jl.par_type)
+      .concat((jl.derniers || []).slice(0, 8).map(function (x) { return [x.quand, lab(x.type) + " " + (x.heure || "")]; }))));
+    var sc = q.secours || {};
+    grid.appendChild(qbox("Bilan secours (" + fmtInt(sc.n) + ")", pairs(sc.nature)
+      .concat(pairs(sc.tranche_age).map(function (r) { return ["Age " + r[0], r[1]]; }))
+      .concat(pairs(sc.prise_en_charge).map(function (r) { return ["Prise en charge : " + r[0], r[1]]; }))));
+    var pr = q.presences || {};
+    grid.appendChild(qbox("Prises de service (" + fmtInt(pr.n) + ")", pairs(pr.postes)));
+    grid.appendChild(qbox("Reactivite des services", (q.reactivite || []).map(function (x) {
+      return [x.service + " (" + x.n + ")", (x.fin_mediane !== null ? x.fin_mediane + " min" : "-") +
+        (x.relances_moy !== null ? " | " + x.relances_moy + " rel." : "")];
+    })));
+    var tx = q.taxonomie || {};
+    grid.appendChild(qbox("Taxonomie", [["Hors liste officielle", fmtInt(tx.hors_liste)],
+      ["Sous-classif. proposees (absentes)", fmtInt(tx.proposees)]]
+      .concat(pairs(tx.sous_classifications).slice(0, 8))
+      .concat(pairs(tx.motifs).slice(0, 5).map(function (r) { return ["Motif : " + r[0], r[1]]; }))));
     box.appendChild(grid);
   }
 
@@ -460,6 +506,42 @@
     row("Services ext.", tags(it.services_exterieurs));
     row("Causes", tags(it.causes));
     row("Issue codee", ISSUE_LABELS[it.issue_code] || it.issue_code || "-");
+    if (it.nature) {
+      row("Nature", (NATURE_LABELS[it.nature] || it.nature) + (it.activite ? " - " + it.activite.replace(/_/g, " ") : ""));
+    }
+    var tx = it.taxo || {};
+    if (tx.sous_classification || it.sous_classification_proposee) {
+      var scTxt = tx.sous_classification ? tx.sous_classification + (tx.sous_classification_officielle ? "" : " (hors liste)") : "-";
+      if (!tx.sous_classification && it.sous_classification_proposee) scTxt = "proposee : " + it.sous_classification_proposee;
+      row("Sous-classif.", scTxt);
+    }
+    if (tx.motif) row("Motif", tx.motif);
+    if (tx.service) row("Service contacte", tx.service + (it.relances ? " (" + it.relances + " relance(s))" : ""));
+    var b = it.ronde;
+    if (b) {
+      row("Ronde", [b.debut && b.fin ? b.debut + " - " + b.fin : null, b.resultat ? b.resultat.toUpperCase() : null,
+        (b.points || []).length ? (b.points || []).length + " points : " + b.points.join(", ") : null,
+        (b.anomalies || []).length ? "anomalies : " + b.anomalies.join(", ") : null].filter(Boolean).join("  |  "));
+    }
+    if (it.alarme) {
+      var al = el("span", null, [it.alarme.action ? it.alarme.action.replace(/_/g, " ") : null, it.alarme.batiment,
+        it.alarme.prestataire].filter(Boolean).join(" - "));
+      if (it.alarme_non_remise) al.appendChild(el("span", "gf-tag gf-warn", " jamais remise en service"));
+      row("Alarme", al);
+    }
+    if (it.dysfonctionnement) row("Dysfonct.", (it.dysfonctionnement.type || "") + " : " + (it.dysfonctionnement.description || ""));
+    if (it.jalon) row("Jalon", [it.jalon.type ? it.jalon.type.replace(/_/g, " ") : null, it.jalon.heure, it.jalon.libelle].filter(Boolean).join(" - "));
+    if (it.secours) {
+      var s2 = it.secours;
+      row("Secours", [s2.nature, s2.sexe !== "non_precise" ? s2.sexe : null, s2.tranche_age !== "non_precise" ? s2.tranche_age : null,
+        s2.prise_en_charge ? "prise en charge : " + s2.prise_en_charge.replace(/_/g, " ") : null].filter(Boolean).join(" - "));
+    }
+    if (it.prise_service) {
+      var p2 = it.prise_service;
+      row("Prise de service", [p2.type, p2.poste, p2.debut && p2.fin ? p2.debut + " - " + p2.fin : (p2.debut || p2.fin),
+        (p2.materiel || []).length ? "materiel : " + p2.materiel.join(", ") : null].filter(Boolean).join(" - "));
+    }
+    if (it.doublon_declare) row("Doublon declare", "de la fiche n " + it.doublon_declare.sql_id);
     if ((it.donnees_personnelles || []).length) row("Donnees perso", tags(it.donnees_personnelles, "gf-warn"));
     if (it.completude) {
       row("Completude", it.completude.score + " / " + it.completude.max +
@@ -472,6 +554,8 @@
     var box = el("div", "gf-fields");
     box.appendChild(el("span", "gf-muted", "Faux :"));
     CHAMPS.forEach(function (c) {
+      if (CHAMPS_BLOCS.indexOf(c[0]) >= 0 && !it[c[0]]) return;          // bloc absent : rien a juger
+      if (c[0] === "sous_classification" && !it.sous_classification_proposee) return;
       var b = el("button", "gf-chip", c[1]);
       b.type = "button";
       b.dataset.champ = c[0];
@@ -573,10 +657,22 @@
   var PHONE_QUERY = "(max-width: 760px), (pointer: coarse) and (max-height: 540px)";
   function isPhone() { return window.matchMedia(PHONE_QUERY).matches; }
 
+  // Sur telephone, c'est .app-main qui defile (pas la page : barres fixes stables sur iOS)
+  function scroller() {
+    var m = document.querySelector(".app-main");
+    return isPhone() && m ? m : null;
+  }
+
+  function scrollToTop() {
+    var s = scroller();
+    if (s) s.scrollTo({ top: 0, behavior: "smooth" });
+    else window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function exitReview() {
     document.body.classList.remove("gf-reviewing");
     document.getElementById("gf-mobile-bar").hidden = true;
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToTop();
     loadSummary();
   }
 
@@ -588,9 +684,12 @@
     state.focus = idx;
     updateMobileBar();
     if (isPhone()) {
-      // Une fiche a la fois : on remonte en haut de la fiche affichee
-      var top = cards[idx].getBoundingClientRect().top + window.pageYOffset - 10;
-      window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      // Une fiche a la fois : on remonte en haut de la fiche affichee (dans .app-main)
+      var s = scroller();
+      if (s) {
+        var top = cards[idx].getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop - 10;
+        s.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      }
     } else if (scroll) {
       cards[idx].scrollIntoView({ behavior: "smooth", block: "center" });
     }

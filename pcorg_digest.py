@@ -65,11 +65,35 @@ OLLAMA_TIMEOUT = int(os.getenv("PCORG_DIGEST_TIMEOUT", "180"))
 # preventif = 1, tout feu >= 3, gaz / explosion = 5, test = 1) ; ajout du lieu
 # cite, des heures des etapes, de l'equipement, des services exterieurs, des
 # causes, de l'issue codee et des donnees personnelles reperees.
-PROMPT_VERSION = "v2"
+# v3 (27/10/2026) : nature de la fiche (incident / routine / information : 52 %
+# de la base est le PC Surete, surtout des rondes), blocs ronde, alarme,
+# dysfonctionnement, jalon, secours, prise de service, et sous-classification
+# choisie dans la liste officielle de la categorie (pcorg_config).
+PROMPT_VERSION = "v3"
 CAUSES = ("alcool", "meteo", "affluence", "travaux", "panne_materiel", "signaletique",
           "conduite_dangereuse", "malveillance", "accident", "sante", "stationnement", "autre")
 ISSUES = ("resolu", "transmis", "sans_suite", "en_attente", "non_precise")
 DONNEES_PERSO = ("nom", "telephone", "plaque", "age", "sante", "adresse")
+NATURES = ("incident", "routine", "information")
+ACTIVITES = ("ronde", "ouverture_fermeture", "prise_service", "prestation", "consigne", "controle_acces", "autre")
+# Blocs facultatifs : champ -> {sous-champ: valeurs admises (None = texte libre / liste / heure)}
+BLOCS = {
+    "ronde": {"debut": "hh", "fin": "hh", "points": "list", "resultat": ("ras", "anomalie"), "anomalies": "list"},
+    "alarme": {"action": ("mise_hors_service", "remise_en_service", "les_deux"), "batiment": "text",
+               "prestataire": "text"},
+    "dysfonctionnement": {"type": ("communication", "documentation", "materiel", "effectif", "procedure", "autre"),
+                          "description": "text"},
+    "jalon": {"type": ("ouverture_portes", "fermeture_portes", "parking_complet", "evacuation", "debut_course",
+                       "fin_course", "feu_vert", "autre"), "heure": "hh", "libelle": "text"},
+    "secours": {"nature": ("malaise", "traumatisme", "chute", "coup_de_chaleur", "plaie", "douleur",
+                           "intoxication", "autre"),
+                "sexe": ("homme", "femme", "non_precise"),
+                "tranche_age": ("enfant", "18-30", "30-50", "50-70", "70+", "non_precise"),
+                "prise_en_charge": ("cms", "evacuation", "laisse_sur_place", "refus", "non_precise")},
+    "prise_service": {"type": ("prise", "fin", "prise_et_fin"), "poste": "text", "debut": "hh", "fin": "hh",
+                      "materiel": "list"},
+}
+NUM_PREDICT = 1200          # le modele alfred est regle a 500 en sortie : trop court pour la v3
 PROMPT = """Tu analyses une fiche de main courante du PC Organisation du circuit des 24 Heures du Mans
 (securite, secours, technique, flux, fourriere, information) pendant un evenement.
 
@@ -107,6 +131,32 @@ panache, non maitrisable » = 5.
 - issue_code : resolu, transmis, sans_suite, en_attente ou non_precise
 - donnees_personnelles : types presents dans le texte parmi nom, telephone, plaque, age, sante, adresse
 
+3. NATURE de la fiche :
+- "incident" : evenement anormal qui demande une action (meme mineur)
+- "routine" : activite prevue (ronde, ouverture ou fermeture, prise ou fin de service, prestation de
+  nettoyage, consigne, controle d'acces). Une routine SANS anomalie a la gravite 1.
+- "information" : message, point de situation, decision ou consigne du PC, sans action
+activite : ronde, ouverture_fermeture, prise_service, prestation, consigne, controle_acces, autre, ou null
+
+4. BLOCS : remplir SEULEMENT ceux qui concernent la fiche, sinon null.
+- ronde : {"debut": "HH:MM", "fin": "HH:MM", "points": [batiments ou lieux controles, dans l'ordre],
+  "resultat": "ras" ou "anomalie", "anomalies": [anomalies trouvees]}
+- alarme (mise hors service / remise en service d'une alarme intrusion) : {"action": "mise_hors_service",
+  "remise_en_service" ou "les_deux", "batiment": "...", "prestataire": "societe concernee ou non precise"}
+- dysfonctionnement (rate d'organisation a retenir pour le retour d'experience) : {"type": "communication"
+  (service injoignable, info non transmise), "documentation" (plan ou consigne faux), "materiel", "effectif",
+  "procedure" ou "autre", "description": "une phrase, sans nom de personne"}
+- jalon (etape d'exploitation de l'evenement) : {"type": "ouverture_portes", "fermeture_portes",
+  "parking_complet", "evacuation", "debut_course", "fin_course", "feu_vert" ou "autre", "heure": "HH:MM",
+  "libelle": "..."}
+- secours (victime) : {"nature": "malaise", "traumatisme", "chute", "coup_de_chaleur", "plaie", "douleur",
+  "intoxication" ou "autre", "sexe": "homme", "femme" ou "non_precise", "tranche_age": "enfant", "18-30",
+  "30-50", "50-70", "70+" ou "non_precise", "prise_en_charge": "cms", "evacuation", "laisse_sur_place",
+  "refus" ou "non_precise"}
+- prise_service : {"type": "prise", "fin" ou "prise_et_fin", "poste": "poste ou porte, sans nom de personne",
+  "debut": "HH:MM", "fin": "HH:MM", "materiel": [materiel remis ou rendu]}
+- sous_classification : la valeur EXACTE de la liste fournie avec la fiche qui correspond le mieux, ou null
+
 Reponds UNIQUEMENT par un objet JSON :
 {"gravite": 1 a 5, "justification": "pourquoi ce niveau, 20 mots maximum",
  "type": "nature de l'incident en quelques mots", "victimes": nombre (0 si aucune ou non precise),
@@ -114,6 +164,9 @@ Reponds UNIQUEMENT par un objet JSON :
  "sur_place": "HH:MM" ou null, "fin": "HH:MM" ou null}, "equipement": "...",
  "moyens_engages": [...], "services_exterieurs": [...], "causes": [...],
  "issue": "...", "issue_code": "...", "donnees_personnelles": [...],
+ "nature": "...", "activite": "..." ou null, "ronde": {...} ou null, "alarme": {...} ou null,
+ "dysfonctionnement": {...} ou null, "jalon": {...} ou null, "secours": {...} ou null,
+ "prise_service": {...} ou null, "sous_classification": "..." ou null,
  "resume": "deux phrases maximum, sans nom de personne, telephone ni plaque"}
 
 Fiche :
@@ -140,23 +193,54 @@ def _now():
 # JAMAIS l'appelant ni le telephone au modele.
 SOURCE_PROJECTION = {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1,
                      "event": 1, "year": 1, "ts": 1, "date_local": 1, "time_local": 1,
-                     "area": 1, "gps": 1, "content_category.carroye": 1}
+                     "area": 1, "gps": 1, "sql_id": 1,
+                     "content_category.carroye": 1, "content_category.classification": 1,
+                     "content_category.motif_intervention": 1, "content_category.sous_classification": 1,
+                     "content_category.service_contacte": 1, "content_category.relance": 1,
+                     "content_category.intervenant1": 1, "content_category.intervenant2": 1,
+                     "content_category.intervenant3": 1, "content_category.intervenant4": 1,
+                     "content_category.intervenant5": 1}
 
 
-def source_text(doc):
+def load_sous_classifications(db):
+    """{categorie: [libelles officiels]} depuis pcorg_config (doublons d'accents retires)."""
+    doc = db["pcorg_config"].find_one({"_id": "pcorg_lists"}, {"sous_classifications": 1}) or {}
+    out = {}
+    for cat, items in (doc.get("sous_classifications") or {}).items():
+        seen, labels = set(), []
+        for it in items or []:
+            lab = str((it or {}).get("label") or "").strip()
+            if lab and PE.norm(lab) not in seen:
+                seen.add(PE.norm(lab))
+                labels.append(lab)
+        out[cat] = labels
+    return out
+
+
+def source_text(doc, sc_list=None):
     area = doc.get("area")
-    area = area.get("name") if isinstance(area, dict) else area
+    area = (area.get("desc") or area.get("name")) if isinstance(area, dict) else area
     lines = [
         "Evenement : %s %s" % (doc.get("event") or "", doc.get("year") or ""),
         "Date : %s %s" % (doc.get("date_local") or "", doc.get("time_local") or ""),
         "Categorie : %s" % (doc.get("category") or "non precisee"),
         "Urgence saisie : %s" % (doc.get("niveau_urgence") or "aucune"),
     ]
-    if area:
+    cc = doc.get("content_category") or {}
+    for label, key in (("Classification", "classification"), ("Motif", "motif_intervention"),
+                       ("Sous-classification saisie", "sous_classification")):
+        if cc.get(key):
+            lines.append("%s : %s" % (label, cc[key]))
+    if area and str(area).strip() not in ("_MC PCS", "_MC PCO"):    # zones generiques : pas un lieu
         lines.append("Zone : %s" % area)
     lines.append("Titre : %s" % (doc.get("text") or "").strip())
     lines.append("Deroule :\n%s" % (doc.get("comment") or "").strip())
-    return "\n".join(lines)[:SOURCE_MAX_CHARS]
+    body = "\n".join(lines)[:SOURCE_MAX_CHARS]
+    if sc_list:
+        body += "\n\nSous-classifications possibles pour cette categorie : %s" % " ; ".join(sc_list)
+    else:
+        body += "\n\nPas de liste de sous-classifications pour cette categorie : sous_classification = null"
+    return body
 
 
 def src_hash(doc):
@@ -226,7 +310,31 @@ def _clean_hhmm(v):
     return "%02d:%s" % (int(m.group(1)), m.group(2))
 
 
-def parse_reply(raw):
+def _clean_bloc(v, spec):
+    """Bloc facultatif (ronde, alarme...) -> dict controle, ou None s'il est vide."""
+    if not isinstance(v, dict):
+        return None
+    out, useful = {}, False
+    for k, kind in spec.items():
+        x = v.get(k)
+        if kind == "hh":
+            out[k] = _clean_hhmm(x)
+        elif kind == "list":
+            out[k] = _clean_list(x, drop_persons=True)
+        elif kind == "text":
+            out[k] = _clean_text(x, limit=300)
+            if out[k] == "non precise":
+                del out[k]
+                continue
+        else:                                     # valeurs admises
+            s = str(x or "").strip().lower().replace(" ", "_")
+            out[k] = s if s in kind else None
+        if out[k] not in (None, [], "non_precise"):
+            useful = True
+    return out if useful else None
+
+
+def parse_reply(raw, sc_allowed=None):
     """Reponse JSON du modele -> dict controle. ValueError si inexploitable."""
     data = json.loads(raw)
     if not isinstance(data, dict):
@@ -252,19 +360,36 @@ def parse_reply(raw):
     out["issue_code"] = code if code in ISSUES else "non_precise"
     et = data.get("etapes") if isinstance(data.get("etapes"), dict) else {}
     out["etapes"] = {k: _clean_hhmm(et.get(k)) for k in ("signalement", "engagement", "sur_place", "fin")}
+    nat = str(data.get("nature") or "").strip().lower()
+    out["nature"] = nat if nat in NATURES else None
+    act = str(data.get("activite") or "").strip().lower().replace(" ", "_")
+    out["activite"] = act if act in ACTIVITES else None
+    for bloc, spec in BLOCS.items():
+        out[bloc] = _clean_bloc(data.get(bloc), spec)
+    # Sous-classification : seulement une valeur EXACTE de la liste officielle (accents pres)
+    sc = str(data.get("sous_classification") or "").strip()
+    match = None
+    if sc and sc_allowed:
+        match = next((x for x in sc_allowed if PE.norm(x) == PE.norm(sc)), None)
+    out["sous_classification_proposee"] = match
     return out
 
 
-def analyze(doc, session=None):
-    """(resultat, meta) pour une fiche. Leve en cas d'echec reseau / reponse."""
+def analyze(doc, session=None, sc_lists=None):
+    """(resultat, meta) pour une fiche. Leve en cas d'echec reseau / reponse.
+    num_ctx n'est PAS envoye : le changer forcerait Ollama a recharger le
+    modele partage avec le chat Alfred (charge en 16 384)."""
     s = session or requests
+    sc_list = (sc_lists or {}).get(doc.get("category"))
     t0 = time.time()
     r = s.post(OLLAMA_URL + "/api/generate", timeout=OLLAMA_TIMEOUT, json={
-        "model": OLLAMA_MODEL, "prompt": PROMPT + source_text(doc), "stream": False,
-        "format": "json", "options": {"temperature": 0}, "keep_alive": "30m"})
+        "model": OLLAMA_MODEL, "prompt": PROMPT + source_text(doc, sc_list), "stream": False,
+        "format": "json", "options": {"temperature": 0, "num_predict": NUM_PREDICT}, "keep_alive": "30m"})
     r.raise_for_status()
     body = r.json()
-    res = parse_reply(body.get("response") or "")
+    if body.get("done_reason") == "length":
+        raise ValueError("reponse coupee (num_predict atteint)")
+    res = parse_reply(body.get("response") or "", sc_list)
     return res, {"ms": int((time.time() - t0) * 1000), "tokens_out": body.get("eval_count"),
                  "tokens_in": body.get("prompt_eval_count")}
 
@@ -399,6 +524,8 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
     reason = "termine"
     sess = session or requests.Session()
     gaz = PE.Gazetteer(db)
+    taxo = PE.Taxonomy(db)
+    sc_lists = load_sous_classifications(db)
     touched = set()
     try:
         for doc in iter_todo(db, only_gps, event):
@@ -420,8 +547,8 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
                     "src_hash": src_hash(doc), "model": OLLAMA_MODEL,
                     "prompt_version": PROMPT_VERSION, "batch": batch, "at": _now()}
             try:
-                res, meta = analyze(doc, sess)
-                res.update(PE.enrich(gaz, doc, res))
+                res, meta = analyze(doc, sess, sc_lists)
+                res.update(PE.enrich(gaz, doc, res, taxo))
                 db[COLL].update_one({"_id": doc["_id"]}, {
                     "$set": dict(base, **res, meta=meta, error=None, attempts=0)}, upsert=True)
                 touched.add((doc.get("event"), doc.get("year")))
@@ -442,11 +569,13 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
         else:
             if in_batch:
                 log.info("Lot %s-%03d termine", run_id, batch_no)
-        dups = 0
-        for ev, yr in touched:          # doublons : par evenement touche (code pur, rapide)
+        dups = alarms = 0
+        for ev, yr in touched:          # par evenement touche (code pur, rapide)
             dups += PE.link_duplicates(db, COLL, ev, yr)
+            alarms += PE.flag_unrestored_alarms(db, COLL, ev, yr)
+            PE.resolve_declared_duplicates(db, COLL, ev, yr)
         if touched:
-            log.info("Doublons probables sur les evenements traites : %d", dups)
+            log.info("Doublons probables : %d ; alarmes sans remise en service : %d", dups, alarms)
     finally:
         release_lock(db, {"done": done, "errors": errors, "stop_reason": reason})
     dur = (_now() - started).total_seconds()
@@ -458,15 +587,19 @@ def enrich_only(db):
     """Recalcule les champs « code pur » (position, zone, delais, completude,
     doublons) de toutes les fiches deja structurees, sans le modele."""
     gaz = PE.Gazetteer(db)
+    taxo = PE.Taxonomy(db)
     n, touched = 0, set()
     for d in db[COLL].find({"error": None, "gravite": {"$ne": None}}):
         fiche = db["pcorg"].find_one({"_id": d["_id"]}, SOURCE_PROJECTION)
         if not fiche:
             continue
-        db[COLL].update_one({"_id": d["_id"]}, {"$set": PE.enrich(gaz, fiche, d)})
+        db[COLL].update_one({"_id": d["_id"]}, {"$set": PE.enrich(gaz, fiche, d, taxo)})
         touched.add((d.get("event"), d.get("year")))
         n += 1
     dups = sum(PE.link_duplicates(db, COLL, ev, yr) for ev, yr in touched)
+    for ev, yr in touched:
+        PE.flag_unrestored_alarms(db, COLL, ev, yr)
+        PE.resolve_declared_duplicates(db, COLL, ev, yr)
     log.info("Enrichissement seul : %d fiches, %d doublons probables", n, dups)
     return {"enriched": n, "duplicates": dups}
 

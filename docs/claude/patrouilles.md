@@ -205,6 +205,22 @@ fiche, stockee en base et relue directement par le moteur.
   chaque version sur les fiches validees.
 - Lancement uniquement par la page (lots de 50 / 100) ou la fenetre de nuit, via la tache planifiee
   « Cockpit - Fiches structurees » (`pcorg_digest.bat`, chaque minute, `--poll --night 01:00-06:00`).
+- Consignes **v3** (27/10/2026), apres lecture d'un echantillon : 52 % de la base est le PC Surete (rondes,
+  ouvertures / fermetures, prestations, alarmes) et 15 % des prises de service. Ajouts : `nature`
+  (incident / routine / information) et `activite` ; blocs facultatifs `ronde` (horaires, points dans
+  l'ordre, RAS / anomalies), `alarme` (mise hors service / remise), `dysfonctionnement` (RETEX : communication,
+  documentation, materiel, effectif, procedure), `jalon` (ouverture des portes...), `secours` (nature, sexe,
+  tranche d'age, prise en charge : categories seulement), `prise_service` (poste, horaires, materiel, sans
+  nom) ; `sous_classification_proposee` = valeur EXACTE de la liste officielle de la categorie
+  (`pcorg_config.pcorg_lists.sous_classifications`, envoyee avec la fiche). `num_predict` 1 200 par requete
+  (le modele alfred est regle a 500) ; `num_ctx` jamais envoye (le changer recharge le modele partage avec
+  le chat Alfred, charge en 16 384).
+- Code pur v3 : taxonomies rapprochees de la liste officielle (`Taxonomy` : variantes d'accents, synonymes
+  `SC_SYNONYMS`, 6 orthographes du motif « Ronde surete... »), niveaux de zone (`area.desc`), relances,
+  doublons DECLARES (« Doublon fiche 31645 » -> `sql_id`, verite de terrain du detecteur), alarmes mises hors
+  service sans remise en service du meme batiment sous 24 h (`alarme_non_remise`).
+- ⚠️ Pour les propositions de patrouilles (6.1) : ne retenir que `nature == "incident"`, sinon les foyers sont
+  noyes sous les rondes RAS et les prises de service.
 
 ### 6.0 bis Controle par sondage (page admin dediee)
 

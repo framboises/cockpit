@@ -104,12 +104,15 @@
 
 @media (max-width: 760px), (pointer: coarse) and (max-height: 540px) {
   #sidebar { display: none !important; }
-  /* style.css fige html / body a la hauteur de l'ecran (overflow: hidden) :
-     sur telephone la page entiere doit defiler au doigt */
-  html, body { height: auto !important; min-height: 100%; overflow-x: hidden !important;
-      overflow-y: auto !important; -webkit-overflow-scrolling: touch; overscroll-behavior-y: none; }
-  .app-layout { display: block; height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
-  .app-main, .app-main.single-col-page { margin-left: 0 !important; height: auto; overflow: visible !important; }
+  /* iOS : si la PAGE defile, Safari fait rebondir la vue et redimensionne sa
+     barre d'adresse, et les barres « fixes » du bas bougent dans tous les sens.
+     La page reste immobile (hauteur de l'ecran) et SEUL .app-main defile :
+     les barres fixes restent collees au bas de l'ecran. */
+  html, body { height: 100% !important; overflow: hidden !important; overscroll-behavior: none; }
+  .app-layout { display: block; height: 100vh; height: 100dvh; overflow: hidden; }
+  .app-main, .app-main.single-col-page { margin-left: 0 !important; height: 100vh; height: 100dvh;
+      overflow-x: hidden !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain; }
   .app-header { padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
       padding-top: max(6px, env(safe-area-inset-top)); min-height: 0; }
   .app-header .header-event-year { display: none !important; }

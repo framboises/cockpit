@@ -27,6 +27,12 @@ LAYERS = {
 }
 ZONES_COLLECTION = "competences"
 MIN_NAME_CHARS = 4          # un nom plus court n'est rapproche que par motif dedie (T12, V3...)
+# Un nom d'UN seul mot n'est retenu que si le lieu cite est exactement ce nom, et
+# jamais pour ces mots generiques : « PS.Nord » tombait sur un lieu « Nord »,
+# « Virage Porsche » sur « Porsche » (essai v3 du 27/10/2026).
+GENERIC_WORDS = {"nord", "sud", "est", "ouest", "village", "paddock", "piste", "circuit", "parking", "acces",
+                 "entree", "sortie", "porte", "portail", "tribune", "musee", "concert", "annexe", "family",
+                 "service", "accueil", "parc", "zone", "poste", "secteur", "aire", "camping"}
 DUP_WINDOW_MIN = 45         # doublons : ecart maximal entre deux fiches
 DUP_THRESHOLD = 0.72        # doublons : score minimal (0-1)
 
@@ -144,9 +150,13 @@ class Gazetteer:
         m = re.search(r" t(?:ribune)? ?0?(\d{1,2}) ", t)
         if m and int(m.group(1)) in self.tribunes:
             return self.tribunes[int(m.group(1))], "haute"
+        whole = t.strip()
         for e in self.entries:
-            if " %s " % e["norm"] in t:
-                return e, ("haute" if " " in e["norm"] else "moyenne")
+            if " " in e["norm"]:
+                if " %s " % e["norm"] in t:
+                    return e, "haute"
+            elif whole == e["norm"] and e["norm"] not in GENERIC_WORDS:
+                return e, "moyenne"
         m = re.search(r" (?:virage )?v(\d{1,2}) ", t)
         if m and int(m.group(1)) in self.virages:
             return self.virages[int(m.group(1))], "moyenne"
@@ -213,13 +223,159 @@ def completeness(d, geo):
             "manquants": [k for k, v in checks.items() if not v]}
 
 
-def enrich(gaz, fiche, d):
+# ---------------------------------------------------------------------------
+# Taxonomies : valeurs saisies rapprochees de la liste officielle (pcorg_config)
+# ---------------------------------------------------------------------------
+# Variantes vues dans les fiches que la normalisation seule ne rapproche pas
+SC_SYNONYMS = {
+    "gene circul": "gene a la circulation",
+    "non respect reglement circuit": "non respect reglementation circuit",
+    "non respect reglementation": "non respect reglementation circuit",
+    "intrusion zone reglementee": "intrusion",
+    "secours victime": "secours a victime",
+}
+
+
+def _motif_key(s):
+    """Motif d'intervention PC Surete : 6 orthographes de « Ronde surete interieur »."""
+    k = norm(s)
+    k = re.sub(r"\binterieure\b", "interieur", k)
+    k = re.sub(r"\bexterieure\b", "exterieur", k)
+    k = re.sub(r"\bbts?\b", "batiment", k)
+    k = re.sub(r"\bpre?station\b", "prestation", k)
+    return k.strip()
+
+
+class Taxonomy:
+    def __init__(self, db):
+        doc = db["pcorg_config"].find_one({"_id": "pcorg_lists"}) or {}
+        self.sc = {}                 # norm -> libelle officiel (toutes categories)
+        for items in (doc.get("sous_classifications") or {}).values():
+            for it in items or []:
+                lab = str((it or {}).get("label") or "").strip()
+                if lab:
+                    self.sc.setdefault(norm(lab), lab)
+        self.people = {}             # norm -> libelle officiel (intervenants + services)
+        for key in ("intervenants", "services"):
+            for it in doc.get(key) or []:
+                lab = str((it or {}).get("label") or "").strip()
+                if lab:
+                    self.people.setdefault(norm(lab), lab)
+
+    @staticmethod
+    def _match(value, table, synonyms=None):
+        """(libelle canonique, officiel ?) ; valeur vide -> (None, False)."""
+        k = norm(value)
+        if not k:
+            return None, False
+        k = (synonyms or {}).get(k, k)
+        if k in table:
+            return table[k], True
+        close = difflib.get_close_matches(k, list(table.keys()), n=1, cutoff=0.86)
+        if close:
+            return table[close[0]], True
+        return str(value).strip(), False
+
+    def of(self, fiche):
+        cc = fiche.get("content_category") or {}
+        sc, sc_off = self._match(cc.get("sous_classification"), self.sc, SC_SYNONYMS)
+        svc, _ = self._match(cc.get("service_contacte"), self.people)
+        intervenants = []
+        for i in range(1, 6):
+            v, _ = self._match(cc.get("intervenant%d" % i), self.people)
+            if v and v not in intervenants:
+                intervenants.append(v)
+        motif = cc.get("motif_intervention")
+        return {"sous_classification": sc, "sous_classification_officielle": sc_off,
+                "motif": _motif_key(motif) or None, "service": svc, "intervenants": intervenants,
+                "classification": cc.get("classification") or None}
+
+
+# « n°31650 » devient « n31650 » une fois normalise (le ° disparait)
+_DUP_DECL_RE = re.compile(r"doublon (?:de )?(?:la )?(?:avec )?(?:fiche |msg |message )?(?:n ?o ?|n ?)?(\d{3,6})")
+
+
+def declared_duplicate(fiche):
+    """Numero SQL d'une fiche citee comme doublon par l'operateur (« Doublon fiche 31645»)."""
+    m = _DUP_DECL_RE.search(norm("%s %s" % (fiche.get("text") or "", fiche.get("comment") or "")))
+    return int(m.group(1)) if m else None
+
+
+def area_levels(fiche):
+    """« _MC PCO/Interieur Dep./03-Zone Sud » -> niveaux ; zone generique = non localisee."""
+    a = fiche.get("area")
+    desc = (a.get("desc") if isinstance(a, dict) else a) or ""
+    levels = [x.strip() for x in str(desc).split("/") if x.strip()]
+    return {"niveaux": levels, "generique": desc.strip() in ("_MC PCS", "_MC PCO", "")}
+
+
+def _relances(fiche):
+    try:
+        n = int(str((fiche.get("content_category") or {}).get("relance")).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if 0 <= n <= 20 else None
+
+
+def enrich(gaz, fiche, d, taxo=None):
     """Champs calcules a stocker dans le digest."""
     geo = gaz.locate(fiche, d.get("lieu"))
     out = {"geo": geo, "zone": gaz.zone_of(geo["lat"], geo["lng"]) if geo else None,
            "delais": delays(d.get("etapes")), "completude": completeness(d, geo),
-           "lieu_norm": norm(geo["name"]) if geo and geo.get("name") else norm(d.get("lieu"))}
+           "lieu_norm": norm(geo["name"]) if geo and geo.get("name") else norm(d.get("lieu")),
+           "area": area_levels(fiche), "relances": _relances(fiche),
+           "doublon_declare_sql": declared_duplicate(fiche)}
+    if taxo is not None:
+        out["taxo"] = taxo.of(fiche)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Alarmes mises hors service et jamais remises (faille de surete)
+# ---------------------------------------------------------------------------
+ALARM_WINDOW_H = 24
+
+
+def flag_unrestored_alarms(db, coll, event, year):
+    """Pose `alarme_non_remise` (True / False) sur chaque mise hors service :
+    True si aucune remise en service du MEME batiment dans les 24 h suivantes."""
+    docs = list(db[coll].find({"event": event, "year": year, "alarme": {"$ne": None}, "ts": {"$ne": None}},
+                              {"ts": 1, "alarme": 1, "alarme_non_remise": 1}).sort("ts", 1))
+    n = 0
+    for i, d in enumerate(docs):
+        al = d.get("alarme") or {}
+        if al.get("action") != "mise_hors_service":
+            flag = False
+        else:
+            bat = norm(al.get("batiment"))
+            limit = d["ts"] + timedelta(hours=ALARM_WINDOW_H)
+            flag = True
+            for e in docs[i + 1:]:
+                if e["ts"] > limit:
+                    break
+                ea = e.get("alarme") or {}
+                if ea.get("action") in ("remise_en_service", "les_deux") and (
+                        not bat or difflib.SequenceMatcher(None, bat, norm(ea.get("batiment"))).ratio() >= 0.75):
+                    flag = False
+                    break
+        if flag != d.get("alarme_non_remise"):
+            db[coll].update_one({"_id": d["_id"]}, {"$set": {"alarme_non_remise": flag}})
+        n += 1 if flag else 0
+    return n
+
+
+def resolve_declared_duplicates(db, coll, event, year):
+    """Relie `doublon_declare_sql` a la fiche citee (pcorg.sql_id) : verite de
+    terrain pour mesurer le detecteur de doublons probables."""
+    n = 0
+    for d in db[coll].find({"event": event, "year": year, "doublon_declare_sql": {"$ne": None}},
+                           {"doublon_declare_sql": 1, "doublon_declare": 1}):
+        target = db["pcorg"].find_one({"sql_id": d["doublon_declare_sql"]}, {"_id": 1})
+        val = {"de": target["_id"], "sql_id": d["doublon_declare_sql"]} if target else None
+        if val != d.get("doublon_declare"):
+            db[coll].update_one({"_id": d["_id"]}, {"$set": {"doublon_declare": val}})
+        n += 1 if val else 0
+    return n
 
 
 # ---------------------------------------------------------------------------

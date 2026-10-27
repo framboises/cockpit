@@ -43,8 +43,15 @@ class TestPosition:
         assert _gaz().locate({}, "Porte Maison Blanche VL fermee")["layer"] == "portes"
 
     def test_titre_si_lieu_non_precise(self):
-        geo = _gaz().locate({"text": "Fuite passerelle Houx"}, "non precise")
-        assert geo["source"] == "titre" and geo["confidence"] == "moyenne"
+        geo = _gaz().locate({"text": "bouchon giratoire Antares"}, "non precise")
+        assert geo["source"] == "titre" and geo["confidence"] == "haute"
+
+    def test_nom_d_un_seul_mot_seulement_exact(self):
+        g = _gaz()
+        assert g.locate({}, "Houx")["name"] == "HOUX"                     # lieu cite = le nom
+        assert g.locate({"text": "Fuite passerelle Houx"}, "non precise") is None
+        g.entries.append({"name": "Nord", "norm": "nord", "layer": "x", "label": "x", "lat": 1, "lng": 1})
+        assert g.locate({}, "Nord") is None                               # mot generique, jamais seul
 
     def test_rien(self):
         assert _gaz().locate({"text": "rien"}, "non precise") is None
@@ -106,6 +113,82 @@ def test_fiche_controlee_retraitee_pour_nouvelle_version_seulement():
     d["prompt_version"] = PD.PROMPT_VERSION
     assert not PD.needs_work(fiche, d)
     assert not PD.needs_work(fiche, dict(d, error="x", attempts=1))  # echec : pas de retraitement
+
+
+class TestV3:
+    def test_blocs_et_nature(self):
+        r = PD.parse_reply(json.dumps({
+            "gravite": 1, "nature": "Routine", "activite": "ronde",
+            "ronde": {"debut": "21h17", "fin": "21:54", "points": ["Siege", "Panoramic 24"], "resultat": "RAS",
+                      "anomalies": []},
+            "alarme": {"action": "mise hors service", "batiment": "Musee", "prestataire": "non precise"},
+            "secours": {"nature": "malaise", "sexe": "femme", "tranche_age": "18-30", "prise_en_charge": "CMS"},
+            "jalon": None, "dysfonctionnement": {"type": "inconnu", "description": ""},
+            "sous_classification": "electricite"}), ["Electricité", "Logistique"])
+        assert r["nature"] == "routine" and r["activite"] == "ronde"
+        assert r["ronde"] == {"debut": "21:17", "fin": "21:54", "points": ["Siege", "Panoramic 24"],
+                              "resultat": "ras", "anomalies": []}
+        assert r["alarme"]["action"] == "mise_hors_service" and "prestataire" not in r["alarme"]
+        assert r["secours"]["prise_en_charge"] == "cms"
+        assert r["jalon"] is None and r["dysfonctionnement"] is None      # vide une fois nettoye
+        assert r["sous_classification_proposee"] == "Electricité"
+
+    def test_sous_classification_hors_liste_refusee(self):
+        r = PD.parse_reply('{"gravite": 2, "sous_classification": "Invente"}', ["Logistique"])
+        assert r["sous_classification_proposee"] is None
+        assert PD.parse_reply('{"gravite": 2, "sous_classification": "Logistique"}')["sous_classification_proposee"] is None
+
+    def test_liste_officielle_envoyee_au_modele(self):
+        src = PD.source_text({"text": "x", "comment": "y", "category": "PCO.Technique"}, ["Electricite", "Sanitaire"])
+        assert "Electricite ; Sanitaire" in src
+        assert "sous_classification = null" in PD.source_text({"text": "x"}, None)
+
+
+class TestTaxonomie:
+    def _taxo(self):
+        t = PE.Taxonomy.__new__(PE.Taxonomy)
+        t.sc = {PE.norm(x): x for x in ("Gene a la circulation", "Electricité", "Secours a victime",
+                                         "Non-respect reglementation - Circuit", "Intrusion")}
+        t.people = {PE.norm(x): x for x in ("Patrouille sécurité", "Service technique", "CMS")}
+        return t
+
+    def test_variantes_rapprochees(self):
+        t = self._taxo()
+        f = {"content_category": {"sous_classification": "Gêne circul", "service_contacte": "Service Technique",
+                                  "intervenant1": "Patrouille securite", "intervenant2": "Patrouille sécurité",
+                                  "motif_intervention": "Ronde sureté Interieure."}}
+        x = t.of(f)
+        assert x["sous_classification"] == "Gene a la circulation" and x["sous_classification_officielle"]
+        assert x["service"] == "Service technique"
+        assert x["intervenants"] == ["Patrouille sécurité"]
+        assert x["motif"] == "ronde surete interieur"
+        assert t.of({"content_category": {"sous_classification": "Electricite"}})["sous_classification"] == "Electricité"
+        assert t.of({"content_category": {"sous_classification": "Non-respect réglement circuit"}})["sous_classification_officielle"]
+
+    def test_hors_liste_garde(self):
+        x = self._taxo().of({"content_category": {"sous_classification": "Barrierage"}})
+        assert x["sous_classification"] == "Barrierage" and not x["sous_classification_officielle"]
+
+    def test_motifs(self):
+        for v in ("Ronde sureté Bt.", "Ronde sureté Bts", "ronde surete batiment"):
+            assert PE._motif_key(v) == "ronde surete batiment"
+        assert PE._motif_key("Préstation Nettoyage.") == PE._motif_key("Prestation Nettoyage")
+
+
+def test_doublon_declare_et_zone():
+    assert PE.declared_duplicate({"comment": "Convoi sorti a 14h30 ==> Doublon fiche 31645"}) == 31645
+    assert PE.declared_duplicate({"text": "doublon de la fiche n°31650"}) == 31650
+    assert PE.declared_duplicate({"text": "pas de doublon"}) is None
+    a = PE.area_levels({"area": {"desc": "_MC PCO/Interieur Dep./03-Zone Sud"}})
+    assert a["niveaux"] == ["_MC PCO", "Interieur Dep.", "03-Zone Sud"] and not a["generique"]
+    assert PE.area_levels({"area": {"desc": "_MC PCS"}})["generique"]
+
+
+def test_duree_ronde():
+    import gravite_fiches as GF
+    assert GF._minutes("21:17", "21:54") == 37
+    assert GF._minutes("23:50", "00:10") == 20
+    assert GF._minutes(None, "10:00") is None
 
 
 def test_point_dans_polygone_avec_trou():

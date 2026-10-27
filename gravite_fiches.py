@@ -21,7 +21,9 @@ logger = logging.getLogger("gravite_fiches")
 
 VERDICTS = ("ok", "trop_haut", "trop_bas")   # jugement porte sur la gravite du modele
 # Champs que l'admin peut signaler faux (controle par sondage des faits extraits)
-CHAMPS = ("lieu", "position", "heures", "equipement", "moyens", "services", "causes", "issue", "resume")
+CHAMPS = ("lieu", "position", "heures", "equipement", "moyens", "services", "causes", "issue", "resume",
+          "nature", "ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service",
+          "sous_classification")
 FICHE_FIELDS = {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1,
                 "event": 1, "year": 1, "date_local": 1, "time_local": 1}
 
@@ -56,7 +58,10 @@ def _pub_digest(d, fiche=None):
                                   "event", "year", "category", "has_gps", "lieu", "etapes", "delais",
                                   "equipement", "services_exterieurs", "causes", "issue_code",
                                   "donnees_personnelles", "geo", "zone", "completude",
-                                  "doublon_probable")}
+                                  "doublon_probable", "nature", "activite", "ronde", "alarme",
+                                  "dysfonctionnement", "jalon", "secours", "prise_service",
+                                  "sous_classification_proposee", "taxo", "area", "relances",
+                                  "doublon_declare", "alarme_non_remise")}
     out["id"] = d["_id"]
     out["at"] = _iso(d.get("at"))
     out["ms"] = (d.get("meta") or {}).get("ms")
@@ -235,7 +240,7 @@ def _quality(col, cur):
     equip = _top(col, dict(base, equipement={"$nin": ["aucun", "non precise", None, ""]}), "equipement")
     comp = list(col.aggregate([{"$match": dict(base, **{"completude.score": {"$ne": None}})},
                                {"$group": {"_id": None, "moy": {"$avg": "$completude.score"}}}]))
-    return {
+    out = {
         "total": total, "positions": pos,
         "delais": delais,
         "equipements": equip,
@@ -246,6 +251,115 @@ def _quality(col, cur):
         "doublons": col.count_documents(dict(base, doublon_probable={"$ne": None})),
         "completude_moy": round(comp[0]["moy"], 2) if comp else None,
     }
+    out.update(_quality_v3(col, base))
+    return out
+
+
+def _median(vals):
+    vals = sorted(v for v in vals if v is not None)
+    return vals[len(vals) // 2] if vals else None
+
+
+def _minutes(a, b):
+    """Duree HH:MM -> HH:MM en minutes (passage de minuit gere), ou None."""
+    try:
+        ha, ma = (int(x) for x in a.split(":"))
+        hb, mb = (int(x) for x in b.split(":"))
+    except (AttributeError, ValueError):
+        return None
+    d = (hb * 60 + mb) - (ha * 60 + ma)
+    d = d + 1440 if d < 0 else d
+    return d if d <= 720 else None
+
+
+def _when(d):
+    ts = d.get("ts")
+    return "%s %s %s" % (d.get("event") or "", d.get("year") or "",
+                         ts.strftime("%d/%m %H:%M") if isinstance(ts, datetime) else "")
+
+
+def _quality_v3(col, base):
+    """Indicateurs des blocs v3 : nature, rondes, alarmes, RETEX, jalons, secours,
+    presences, reactivite des services, taxonomie, doublons declares."""
+    out = {"natures": _top(col, base, "nature", n=4), "activites": _top(col, base, "activite", n=8)}
+
+    rondes = list(col.find(dict(base, ronde={"$ne": None}), {"ronde": 1}))
+    out["rondes"] = {
+        "n": len(rondes),
+        "ras": sum(1 for d in rondes if (d["ronde"] or {}).get("resultat") == "ras"),
+        "anomalies": sum(1 for d in rondes if (d["ronde"] or {}).get("resultat") == "anomalie"),
+        "duree_mediane": _median(_minutes((d["ronde"] or {}).get("debut"), (d["ronde"] or {}).get("fin"))
+                                 for d in rondes),
+        "points": _top(col, dict(base, ronde={"$ne": None}), "ronde.points", unwind=True),
+        "anomalies_top": _top(col, dict(base, ronde={"$ne": None}), "ronde.anomalies", n=8, unwind=True),
+    }
+
+    alarm = dict(base, alarme={"$ne": None})
+    out["alarmes"] = {
+        "hors_service": col.count_documents(dict(alarm, **{"alarme.action": "mise_hors_service"})),
+        "remises": col.count_documents(dict(alarm, **{"alarme.action": {"$in": ["remise_en_service", "les_deux"]}})),
+        "non_remises": col.count_documents(dict(base, alarme_non_remise=True)),
+        "derniers_non_remis": [{"quand": _when(d), "batiment": (d.get("alarme") or {}).get("batiment"),
+                                "id": d["_id"]}
+                               for d in col.find(dict(base, alarme_non_remise=True),
+                                                 {"alarme": 1, "ts": 1, "event": 1, "year": 1}).sort("ts", -1).limit(10)],
+    }
+
+    dysf = dict(base, dysfonctionnement={"$ne": None})
+    out["retex"] = {
+        "par_type": _top(col, dysf, "dysfonctionnement.type", n=6),
+        "derniers": [{"quand": _when(d), "type": (d.get("dysfonctionnement") or {}).get("type"),
+                      "description": (d.get("dysfonctionnement") or {}).get("description"), "id": d["_id"]}
+                     for d in col.find(dysf, {"dysfonctionnement": 1, "ts": 1, "event": 1, "year": 1})
+                     .sort("ts", -1).limit(12)],
+    }
+
+    jal = dict(base, jalon={"$ne": None})
+    out["jalons"] = {
+        "par_type": _top(col, jal, "jalon.type", n=8),
+        "derniers": [{"quand": _when(d), "type": (d.get("jalon") or {}).get("type"),
+                      "heure": (d.get("jalon") or {}).get("heure"),
+                      "libelle": (d.get("jalon") or {}).get("libelle"), "id": d["_id"]}
+                     for d in col.find(jal, {"jalon": 1, "ts": 1, "event": 1, "year": 1}).sort("ts", -1).limit(12)],
+    }
+
+    sec = dict(base, secours={"$ne": None})
+    out["secours"] = {"n": col.count_documents(sec)}
+    for k in ("nature", "tranche_age", "sexe", "prise_en_charge"):
+        out["secours"][k] = _top(col, sec, "secours." + k, n=8)
+
+    ps = dict(base, prise_service={"$ne": None})
+    out["presences"] = {"n": col.count_documents(ps), "postes": _top(col, ps, "prise_service.poste", n=10),
+                        "types": _top(col, ps, "prise_service.type", n=3)}
+
+    # Reactivite par service contacte : delai de fin median et relances moyennes
+    reac = {}
+    for d in col.find(dict(base, **{"taxo.service": {"$nin": [None, ""]}}),
+                      {"taxo.service": 1, "delais.fin": 1, "relances": 1}):
+        r = reac.setdefault(d["taxo"]["service"], {"n": 0, "fins": [], "relances": []})
+        r["n"] += 1
+        r["fins"].append((d.get("delais") or {}).get("fin"))
+        if d.get("relances") is not None:
+            r["relances"].append(d["relances"])
+    out["reactivite"] = sorted(
+        [{"service": k, "n": v["n"], "fin_mediane": _median(v["fins"]),
+          "relances_moy": round(sum(v["relances"]) / len(v["relances"]), 2) if v["relances"] else None}
+         for k, v in reac.items()], key=lambda x: -x["n"])[:12]
+
+    out["taxonomie"] = {
+        "sous_classifications": _top(col, base, "taxo.sous_classification", n=12),
+        "hors_liste": col.count_documents(dict(base, **{"taxo.sous_classification": {"$ne": None},
+                                                         "taxo.sous_classification_officielle": False})),
+        "proposees": col.count_documents(dict(base, sous_classification_proposee={"$ne": None},
+                                              **{"taxo.sous_classification": None})),
+        "motifs": _top(col, base, "taxo.motif", n=10),
+    }
+
+    # Doublons declares par les operateurs : part retrouvee par le detecteur
+    decl = list(col.find(dict(base, doublon_declare={"$ne": None}), {"doublon_declare": 1, "doublon_probable": 1}))
+    found = sum(1 for d in decl if (d.get("doublon_probable") or {}).get("de") == d["doublon_declare"]["de"])
+    out["doublons_declares"] = {"n": len(decl), "retrouves": found}
+    return out
 
 
 @gravite_fiches_bp.route("/api/gravite-fiches/batch/<batch>")
