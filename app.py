@@ -41,6 +41,7 @@ from vision_admin import vision_admin_bp
 from crise_auth import crise_auth_bp
 from routing import routing_bp
 from valhalla_admin import valhalla_admin_bp
+from gravite_fiches import gravite_fiches_bp
 from waze_feed import waze_feed_bp
 from cameras import cameras_bp
 from detection import detection_bp
@@ -668,6 +669,8 @@ ADMIN_PAGE_REGISTRY = [
      "paths": ["/watch-admin", "/api/v1/watch/admin"]},
     {"id": "itineraire",     "label": "Moteur d'itineraire", "icon": "alt_route",
      "paths": ["/admin/itineraire", "/api/admin/itineraire"]},
+    {"id": "gravite_fiches", "label": "Gravite des fiches", "icon": "priority_high",
+     "paths": ["/admin/gravite-fiches", "/api/gravite-fiches"]},
 ]
 ALL_ADMIN_PAGE_IDS = [p["id"] for p in ADMIN_PAGE_REGISTRY]
 
@@ -2734,6 +2737,9 @@ csrf.exempt(app.view_functions["routing.field_route"])
 # des scenarios du service valhalla-admin (relais signe par la cle API).
 # Toutes routes admin, CSRF conserve.
 app.register_blueprint(valhalla_admin_bp)
+# Gravite evaluee des fiches (pcorg_digest.py, lance hors Cockpit) : suivi et
+# controle par sondage sur /admin/gravite-fiches.
+app.register_blueprint(gravite_fiches_bp)
 # Fermetures publiees vers Waze for Cities : flux CIFS public relu par Waze
 # (/public/waze/closures.xml, Basic auth) + administration dans la page.
 app.register_blueprint(waze_feed_bp)

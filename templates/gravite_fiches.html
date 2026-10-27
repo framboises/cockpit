@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>COCKPIT &mdash; Gravite des fiches</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/gravite_fiches.css') }}">
+</head>
+
+<body>
+<div class="app-layout">
+
+    {% set sidebar_active = '/admin/gravite-fiches' %}
+    {% include '_sidebar.html' %}
+
+    <div class="app-main single-col-page">
+
+        <header class="app-header">
+            <div class="header-event-info">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">priority_high</span>
+                <span class="header-event-name">Gravite des fiches</span>
+                <span class="header-event-year" style="opacity:.6;">Modele local {{ model }} &middot; consignes {{ prompt_version }}</span>
+            </div>
+            <div class="header-spacer"></div>
+            <div class="header-actions" style="gap:10px;">
+                <button class="btn" id="gf-stop" hidden title="Arreter apres la fiche en cours">
+                    <span class="material-symbols-outlined" style="font-size:17px;vertical-align:middle;">stop_circle</span> Arreter le traitement
+                </button>
+                <button class="btn btn-primary" id="gf-refresh">
+                    <span class="material-symbols-outlined" style="font-size:17px;vertical-align:middle;">refresh</span> Actualiser
+                </button>
+            </div>
+        </header>
+
+        <div id="main-content">
+
+            <!-- Telephone : entree directe dans le controle -->
+            <div class="gf-mobile-start">
+                <button class="btn btn-primary" id="gf-mobile-sample" type="button">
+                    <span class="material-symbols-outlined">fact_check</span> Controler 20 fiches
+                </button>
+                <div class="gf-muted" id="gf-mobile-stats"></div>
+            </div>
+
+            <section class="widget-card gf-desktop-only-on-phone">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle;">monitoring</span> Avancement</h3>
+                    <div id="gf-run-state" class="gf-muted" style="margin-left:auto;">-</div>
+                </header>
+                <div class="widget-body">
+                    <div class="gf-launch">
+                        <span class="gf-launch-label">Lancer</span>
+                        <input type="number" id="gf-launch-batches" class="gf-select" min="1" max="50" value="1" style="width:64px;" title="Nombre de lots">
+                        <span>lot(s) de</span>
+                        <select id="gf-launch-size" class="gf-select">
+                            <option value="100" selected>100 fiches</option>
+                            <option value="50">50 fiches</option>
+                        </select>
+                        <button class="btn btn-primary" id="gf-launch">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">play_arrow</span> Lancer
+                        </button>
+                        <label class="gf-check" style="margin-left:auto;" title="La tache planifiee traite la suite chaque nuit entre 01:00 et 06:00">
+                            <input type="checkbox" id="gf-night"> Traitement automatique la nuit (01:00 - 06:00)
+                        </label>
+                    </div>
+                    <div id="gf-run-box" class="gf-run-box" hidden>
+                        <div class="gf-run-head">
+                            <strong id="gf-run-title">Traitement en cours</strong>
+                            <span class="gf-muted" id="gf-run-detail"></span>
+                        </div>
+                        <div class="gf-progress gf-progress-run"><div class="gf-progress-bar" id="gf-run-bar"></div></div>
+                    </div>
+                    <div class="gf-kpis" id="gf-kpis" style="margin-top:14px;"></div>
+                    <h4 class="gf-sub">Toutes les fiches</h4>
+                    <div class="gf-progress" style="margin-top:0;"><div class="gf-progress-bar" id="gf-progress-bar"></div></div>
+                    <div class="gf-progress-label gf-muted" id="gf-progress-label"></div>
+                    <h4 class="gf-sub">Repartition des gravites evaluees</h4>
+                    <div id="gf-gravites" class="gf-gravites"></div>
+                </div>
+            </section>
+
+            <section class="widget-card gf-desktop-only-on-phone" style="margin-top:16px;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle;">fact_check</span> Controle</h3>
+                    <div class="gf-muted" style="margin-left:auto;">Cliquez la bonne gravite : celle du modele = juste</div>
+                </header>
+                <div class="widget-body gf-control">
+                    <div id="gf-review-kpis" class="gf-kpis"></div>
+                    <div>
+                        <h4 class="gf-sub">Gravite du modele (lignes) &times; gravite validee (colonnes)</h4>
+                        <table class="gf-matrix" id="gf-matrix"></table>
+                    </div>
+                </div>
+            </section>
+
+            <section class="widget-card" style="margin-top:16px;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle;">inventory_2</span> Lots de {{ batch_size }} fiches</h3>
+                    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+                        <select id="gf-sample-grav" class="gf-select" title="Gravite evaluee">
+                            <option value="">Sondage : toutes gravites (4-5 renforcees)</option>
+                            <option value="5">Gravite 5</option>
+                            <option value="4">Gravite 4</option>
+                            <option value="3">Gravite 3</option>
+                            <option value="2">Gravite 2</option>
+                            <option value="1">Gravite 1</option>
+                        </select>
+                        <button class="btn" id="gf-sample">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">shuffle</span> Sondage de 20
+                        </button>
+                    </div>
+                </header>
+                <div class="widget-body">
+                    <table class="table table-striped table-hover gf-batches">
+                        <thead><tr>
+                            <th>Lot</th><th>Traite</th><th>Consignes</th><th class="gf-num">Fiches</th>
+                            <th class="gf-num">Echecs</th><th class="gf-num">Controlees</th><th class="gf-num">Justes</th>
+                        </tr></thead>
+                        <tbody id="gf-batches-body"><tr><td colspan="7" class="gf-muted">Chargement...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="widget-card" style="margin-top:16px;" id="gf-items-card" hidden>
+                <header class="widget-header">
+                    <h3 id="gf-items-title">Fiches</h3>
+                    <div class="gf-muted" style="margin-left:auto;">Clavier : 1 a 5 = gravite, R = resume inexact, fleches = fiche suivante / precedente</div>
+                </header>
+                <div class="widget-body" id="gf-items"></div>
+            </section>
+
+        </div>
+    </div>
+</div>
+
+<!-- Telephone : barre de reponse fixe, une fiche a la fois -->
+<div class="gf-mobile-bar" id="gf-mobile-bar" hidden>
+    <div class="gf-mb-top">
+        <button type="button" class="gf-mb-nav" id="gf-mb-prev" aria-label="Fiche precedente">
+            <span class="material-symbols-outlined">chevron_left</span>
+        </button>
+        <span class="gf-mb-count" id="gf-mb-count">-</span>
+        <label class="gf-mb-inexact"><input type="checkbox" id="gf-mb-inexact"> Resume inexact</label>
+        <button type="button" class="gf-mb-nav" id="gf-mb-next" aria-label="Fiche suivante">
+            <span class="material-symbols-outlined">chevron_right</span>
+        </button>
+    </div>
+    <div class="gf-mb-grav" id="gf-mb-grav">
+        <button type="button" data-g="1">1</button><button type="button" data-g="2">2</button><button type="button" data-g="3">3</button><button type="button" data-g="4">4</button><button type="button" data-g="5">5</button>
+    </div>
+    <div class="gf-mb-hint gf-muted">Touchez la bonne gravite (entouree = celle du modele)</div>
+</div>
+
+<div id="toast-container"></div>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/gravite_fiches.js') }}"></script>
+<script>
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
+</body>
+</html>
