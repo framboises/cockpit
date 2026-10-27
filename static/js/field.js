@@ -1753,6 +1753,10 @@
 
   function buildPoiSearchIndex() {
     _poiSearchIndex = [];
+    // Portes / portails / portillons : toujours indexes. Avant, ils etaient
+    // sautes quand l'evenement de la tablette (SAISON) n'avait aucun POI actif
+    // dans son parametrage : la recherche ne trouvait alors rien du tout.
+    index3pForSearch();
     if (!state.poiCategories.length || !state.poiBundle) return;
     // We need to fetch and index all POI features from all categories
     var remaining = state.poiCategories.length;
@@ -1842,8 +1846,10 @@
         .catch(function () {})
         .finally(function () { remaining--; });
     });
+  }
 
-    // Index 3P (Portes / Portails / Portillons)
+  // Index 3P (Portes / Portails / Portillons) de la recherche
+  function index3pForSearch() {
     fetch("/field/resources/3p", { headers: { "Accept": "application/json" } })
       .then(function (r) {
         if (r.status === 401) { handleSessionLost(); return null; }
@@ -4893,16 +4899,49 @@
       if (state.testFab) state.testFab.classList.add("active");
       toast("Touchez la carte a l'endroit voulu (deplacez-la d'abord si besoin)", "warn");
     }, "primary");
-    _actBtn(g2, "Chercher un lieu", "search", function () {
-      closeTestPanel();
-      state.simPickPoi = true;
-      var b = $("btn-poi-search");
-      if (b) b.click();
-      toast("Choisissez un lieu : il deviendra votre position", "warn");
-    }, "primary");
     _actBtn(g2, "Au Mans (Village)", "location_city", function () { setSimPosition([47.9558, 0.2079]); });
     _actBtn(g2, "Revenir au GPS reel", "my_location", function () { stopSimWalk(); setSimPosition(null); });
     body.appendChild(g2);
+    // Chercher un lieu (portails, sanitaires, tribunes, portes, postes de
+    // secours, points de patrouille, case du carroyage) : toucher un resultat
+    // pose la position simulee dessus
+    var srow = _n("div", "test-row");
+    var sin = _n("input", "test-select");
+    sin.type = "search";
+    sin.id = "test-place-q";
+    sin.placeholder = "Chercher un lieu : ACT 1, WC40, tribune 01, AJ17...";
+    srow.appendChild(sin);
+    body.appendChild(srow);
+    var sres = _n("div", "test-places");
+    body.appendChild(sres);
+    var sTimer = null;
+    sin.addEventListener("input", function () {
+      clearTimeout(sTimer);
+      var q = sin.value.trim();
+      if (q.length < 2) { sres.textContent = ""; return; }
+      sTimer = setTimeout(function () {
+        fetchWithTimeout("/field/test/places?q=" + encodeURIComponent(q), { cache: "no-store" }, 10000)
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (sin.value.trim() !== q) return;
+            sres.textContent = "";
+            var places = (d && d.places) || [];
+            if (!places.length) { sres.appendChild(_n("div", "test-muted", d && d.ok ? "Aucun lieu" : "Recherche indisponible : " + ((d && d.error) || "?"))); return; }
+            places.forEach(function (p) {
+              var b = _n("button", "test-place");
+              b.appendChild(_n("b", null, p.name));
+              b.appendChild(_n("span", null, p.where));
+              b.addEventListener("click", function () {
+                closeTestPanel();
+                setSimPosition([p.lat, p.lng]);
+                tlog("position", "lieu : " + p.name + " (" + p.where + ")");
+              });
+              sres.appendChild(b);
+            });
+          })
+          .catch(function () { sres.textContent = ""; sres.appendChild(_n("div", "test-muted", "Pas de reseau")); });
+      }, 300);
+    });
     var crow = _n("div", "test-row");
     var cin = _n("input", "test-select");
     cin.type = "text";

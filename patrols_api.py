@@ -642,6 +642,64 @@ def field_test_scenarios():
     return jsonify({"ok": True, "scenarios": out})
 
 
+_PLACES_CACHE = {"at": 0.0, "items": []}
+_PLACES_TTL_S = 300
+
+
+def _places_index(db):
+    """Lieux cherchables par les outils de test : objets de toutes les
+    couches Looker et points de patrouille (cache 5 min)."""
+    import time
+    now = time.monotonic()
+    if _PLACES_CACHE["items"] and now - _PLACES_CACHE["at"] < _PLACES_TTL_S:
+        return _PLACES_CACHE["items"]
+    out = []
+    for layer in P.available_layers(db):
+        # Riverains / cadastre : noms de particuliers, jamais sur une tablette
+        if layer["collection"].lower() in ("riverains", "cadastre"):
+            continue
+        try:
+            for it in P.layer_items(db, layer["collection"]) or []:
+                out.append({"name": it["name"], "where": layer["label"], "lat": it["lat"], "lng": it["lng"]})
+        except Exception as e:
+            logger.debug("lieux %s : %s", layer["collection"], e)
+    for p in db["patrol_points"].find({"active": {"$ne": False}}, {"name": 1, "lat": 1, "lng": 1}):
+        out.append({"name": p.get("name") or "?", "where": "Point de patrouille", "lat": p["lat"], "lng": p["lng"]})
+    _PLACES_CACHE.update(at=now, items=out)
+    return out
+
+
+@patrols_field_bp.route("/field/test/places", methods=["GET"])
+@field_token_required
+def field_test_places():
+    """Recherche de lieux pour se placer (position simulee) : couches
+    Looker, points de patrouille et case du carroyage (ex. AJ17)."""
+    if not _test_device():
+        return _err("mode_test_requis", 403)
+    import unicodedata
+
+    def norm(s):
+        s = unicodedata.normalize("NFKD", str(s or ""))
+        return "".join(c for c in s if not unicodedata.combining(c)).lower()
+
+    q = norm(request.args.get("q")).strip()
+    if len(q) < 2:
+        return jsonify({"ok": True, "places": []})
+    db = _db()
+    out = []
+    g = db["grid_ref"].find_one({"grid_ref": q.upper().replace(" ", "")}, {"latitude": 1, "longitude": 1, "grid_ref": 1})
+    if g and g.get("latitude") is not None:
+        out.append({"name": g["grid_ref"], "where": "Carroyage", "lat": float(g["latitude"]), "lng": float(g["longitude"])})
+    words = q.split()
+    for it in _places_index(db):
+        hay = norm(it["name"] + " " + it["where"])
+        if all(w in hay for w in words):
+            out.append(it)
+            if len(out) >= 40:
+                break
+    return jsonify({"ok": True, "places": out})
+
+
 @patrols_field_bp.route("/field/test/send", methods=["POST"])
 @field_token_required
 def field_test_send():
