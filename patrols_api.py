@@ -107,6 +107,7 @@ def _pub_device(d, groups, now, settings):
         if pos.get("lat") is not None else None,
         "competence_zones": d.get("competence_zones") or [],
         "active_patrol_run": d.get("active_patrol_run"),
+        "test_mode": bool(d.get("test_mode")),
         "proposal": bool(P._busy(d, now) == "proposition_en_cours"),
     }
 

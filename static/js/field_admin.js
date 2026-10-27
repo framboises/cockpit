@@ -636,6 +636,34 @@
       metBtn.addEventListener("click", function () { openMetiersModal(d); });
       metLine.appendChild(metBtn);
       tdCat.appendChild(metLine);
+
+      // Mode test : essais hors site (position simulee), jamais de vraie
+      // fiche proposee automatiquement, patrouilles marquees [TEST].
+      var testLine = document.createElement("label");
+      testLine.className = "field-dev-test";
+      testLine.title = "Essais hors site : position simulee sur la tablette, jamais de vraie fiche proposee automatiquement, patrouilles marquees [TEST]";
+      var testCb = document.createElement("input");
+      testCb.type = "checkbox";
+      testCb.checked = !!d.test_mode;
+      testLine.appendChild(testCb);
+      testLine.appendChild(document.createTextNode(" Mode test"));
+      testCb.addEventListener("change", function () {
+        testCb.disabled = true;
+        apiPost("/field/admin/devices/" + encodeURIComponent(d.id) + "/test-mode", { test_mode: testCb.checked })
+          .then(function (res) {
+            if (res.body && res.body.ok) {
+              _toast("success", d.name + (res.body.test_mode ? " : mode test active" : " : mode test coupe"));
+              loadDevices();
+            } else {
+              _toast("error", "Erreur : " + ((res.body && res.body.error) || "?"));
+              testCb.checked = !testCb.checked;
+              testCb.disabled = false;
+            }
+          })
+          .catch(function () { _toast("error", "Erreur reseau"); testCb.checked = !testCb.checked; testCb.disabled = false; });
+      });
+      tdCat.appendChild(testLine);
+      if (d.test_mode) tr.classList.add("field-dev-is-test");
       tr.appendChild(tdCat);
 
       var tdPos = document.createElement("td");

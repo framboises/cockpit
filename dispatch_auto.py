@@ -299,6 +299,8 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
             continue
         if F._device_declarant(db, d, groups):     # declarant : jamais une unite
             continue
+        if d.get("test_mode"):     # tablette d'essai (Field dispatch) : jamais une vraie fiche
+            continue
         if F._device_category(db, d, group_cats) != category:
             continue
         if (d.get("status") or "patrouille") != "patrouille":

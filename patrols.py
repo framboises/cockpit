@@ -678,6 +678,13 @@ def on_not_taken(db, run_id, now):
     except Exception:
         event, year = None, None
     text = "Patrouille non prise : %s (%s)" % (sc.get("name") or "?", origin)
+    ids = [_oid(a.get("device_id")) for a in run.get("attempts") or []]
+    if (run.get("target") or {}).get("device_id"):
+        ids.append(_oid(run["target"]["device_id"]))
+    is_test = bool(ids) and db["field_devices"].count_documents(
+        {"_id": {"$in": [i for i in ids if i]}, "test_mode": True}) > 0
+    if is_test:
+        text = "[TEST] " + text
     body = why + ((". Sollicitees : " + tried) if tried else "")
     fid = str(uuid.uuid5(uuid.NAMESPACE_URL, "patrol-not-taken|" + run_id))
     doc = {
@@ -700,7 +707,8 @@ def on_not_taken(db, run_id, now):
     try:
         db["cockpit_active_alerts"].insert_one({
             "definition_slug": ALERT_SLUG, "event": event, "year": str(year) if year is not None else None,
-            "title": "Patrouille non prise - " + (sc.get("name") or "?"), "message": body[:300],
+            "title": ("[TEST] " if is_test else "") + "Patrouille non prise - " + (sc.get("name") or "?"),
+            "message": body[:300],
             "timeStr": now.astimezone(PARIS).strftime("%H:%M"), "dedup_key": "patrol-not-taken-" + run_id,
             "triggeredAt": now, "expiresAt": now + timedelta(hours=2), "status": "active",
             "actionData": {"run_id": run_id, "plan_id": run.get("plan_id"), "pcorg_id": fid,
@@ -777,6 +785,8 @@ def _open_fiche(db, run, device, now):
     name = device.get("name") or "?"
     n = len(sc.get("points") or [])
     text = "Patrouille programmee : %s (%d point%s)" % (sc.get("name") or "?", n, "s" if n > 1 else "")
+    if device.get("test_mode"):        # tablette d'essai (Field dispatch)
+        text = "[TEST] " + text
     fid = str(uuid.uuid5(uuid.NAMESPACE_URL, "patrol-run|" + run["_id"]))
     first = (sc.get("points") or [{}])[0]
     cat = _fiche_category(db, device)
@@ -790,8 +800,9 @@ def _open_fiche(db, run, device, now):
         "gps": {"type": "Point", "coordinates": [first["lng"], first["lat"]]} if first.get("lat") is not None else None,
         "group": None,
         "content_category": {"patrouille": name, "patrol_run": run["_id"],
-                             "patrol_scenario": sc.get("id")},
-        "extracted": {"phones": None, "plates": None}, "tags": ["patrouille"],
+                             "patrol_scenario": sc.get("id"), "test": bool(device.get("test_mode")) or None},
+        "extracted": {"phones": None, "plates": None},
+        "tags": ["patrouille", "test"] if device.get("test_mode") else ["patrouille"],
         "synced_at": None, "sql_id": None, "guid": None, "server": "COCKPIT", "bounce_rev": 1,
     }
     try:

@@ -841,6 +841,11 @@
   .field-dev-metiers span.txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
   .field-dev-metiers button { border:none; background:transparent; cursor:pointer; padding:0; color:var(--muted); display:inline-flex; }
   .field-dev-metiers button:hover { color:var(--brand); }
+  /* Mode test (essais hors site) */
+  .field-dev-test { display:flex; align-items:center; gap:4px; margin-top:3px; font-size:11px; color:var(--muted); cursor:pointer; }
+  .field-dev-test input { margin:0; }
+  #field-devices-table tr.field-dev-is-test td { background:#fff7ed; }
+  #field-devices-table tr.field-dev-is-test .field-dev-test { color:#c2410c; font-weight:700; }
   /* Une ligne par tablette : texte coupe avec "..." (texte complet au survol) */
   #field-devices-table td { vertical-align:middle; }
   #field-devices-table td.fd-one-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

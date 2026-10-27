@@ -3450,3 +3450,12 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
   align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); box-sizing: border-box; }
 .patrol-num-marker.next span { width: 32px; height: 32px; font-size: 14px; box-shadow: 0 0 0 4px rgba(34,197,94,.45); }
 .patrol-prop-points { font-size: 13px; color: #cbd5e1; line-height: 1.5; }
+
+/* Mode test (case de Field dispatch) : essais hors site */
+.field-test-badge {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 660;
+  background: #ea580c; color: #fff; font-weight: 800; font-size: 12px; letter-spacing: 1px;
+  padding: 3px 12px; border-radius: 999px; box-shadow: 0 2px 6px rgba(0,0,0,.4); pointer-events: none;
+}
+.map-fab-test { color: #fb923c; }
+.map-fab-test.active { background: #ea580c !important; color: #fff !important; }

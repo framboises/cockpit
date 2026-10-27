@@ -324,3 +324,24 @@ class TestPlanifications:
         plan = _plan(db)
         assert P.set_plan_override(db, str(plan["_id"]), "off", 4, "op")
         assert not P.plan_active(db, db["patrol_plans"].find_one({"_id": plan["_id"]}), P._now())
+
+
+class TestModeTest:
+    def test_jamais_candidate_au_dispatch_auto(self, db):
+        a = _dev(db, "Essai")
+        db["field_devices"].update_one({"_id": a["_id"]}, {"$set": {"test_mode": True, "category": "PCO.Securite"}})
+        db["pcorg"].insert_one({"_id": "f1", "event": "SAISON", "year": 2026, "category": "PCO.Securite",
+                                "status_code": 0, "content_category": {},
+                                "gps": {"type": "Point", "coordinates": [LNG, LAT]}})
+        monkey = db["field_devices"].find_one({"_id": a["_id"]})
+        assert monkey["test_mode"] is True
+        assert DA.find_candidates(db, db["pcorg"].find_one({"_id": "f1"}), now=NOW) == []
+
+    def test_patrouille_marquee_test(self, db):
+        a = _dev(db, "Essai")
+        db["field_devices"].update_one({"_id": a["_id"]}, {"$set": {"test_mode": True}})
+        a = db["field_devices"].find_one({"_id": a["_id"]})
+        run, _, _ = P.create_run(db, str(_scenario(db)["_id"]), {"kind": "device", "device_id": str(a["_id"])}, "op")
+        assert P.accept(db, run["_id"], a)[0]
+        f = db["pcorg"].find_one({"_id": db["patrol_runs"].find_one({"_id": run["_id"]})["fiche_id"]})
+        assert f["text"].startswith("[TEST] Patrouille programmee") and "test" in f["tags"]

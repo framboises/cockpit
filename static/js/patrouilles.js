@@ -542,7 +542,7 @@
     var ds = $("pt-send-device");
     clear(ds);
     S.data.devices.filter(function (d) { return !d.declarant; }).forEach(function (d) {
-      ds.appendChild(new Option(d.name + " - " + (STATUS_LABELS[d.status] || d.status) + (d.recent ? "" : ", pas vue recemment") +
+      ds.appendChild(new Option((d.test_mode ? "[TEST] " : "") + d.name + " - " + (STATUS_LABELS[d.status] || d.status) + (d.recent ? "" : ", pas vue recemment") +
         (d.active_patrol_run ? ", deja en patrouille" : ""), d.id));
     });
     $("pt-send-result").hidden = true;
@@ -945,7 +945,7 @@
     S.data.devices.forEach(function (d) {
       var row = el("div", "pt-item pt-dev");
       var main = el("div", "pt-item-main");
-      main.appendChild(el("div", "pt-item-title", d.name));
+      main.appendChild(el("div", "pt-item-title", d.name + (d.test_mode ? " [TEST]" : "")));
       main.appendChild(el("div", "pt-item-sub", [d.group_label || "sans groupe", STATUS_LABELS[d.status] || d.status,
         d.recent ? "vue recemment" : "pas vue recemment", d.declarant ? "declarante (jamais de patrouille)" : ""].filter(Boolean).join(" - ")));
       var zbox = el("div", "pt-zone-chips");

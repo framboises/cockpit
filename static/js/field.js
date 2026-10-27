@@ -757,6 +757,8 @@
   }
 
   function onGpsUpdate(pos) {
+    // Mode test : une position simulee remplace le GPS reel tant qu'elle est posee
+    if (state.simPos && !pos._sim) return;
     setGpsStatus("ok");
     var latlng = [pos.coords.latitude, pos.coords.longitude];
     renderMeMarker(latlng, pos.coords.accuracy);
@@ -836,6 +838,7 @@
       battery: state.batteryPct || null,
       ts: now,
     };
+    if (pos._sim) body.simulated = true;     // mode test : position simulee
     if (!navigator.onLine) {
       bufferPosition(body);
       return;
@@ -3599,6 +3602,7 @@
         if (data.hasOwnProperty("route_piste")) state.routePiste = !!data.route_piste;
         state.selfClose = !!data.self_close;
         if (data.hasOwnProperty("proposal")) handleProposal(data.proposal);
+        if (data.hasOwnProperty("test_mode")) applyTestMode(!!data.test_mode);
         // Patrouille programmee : proposition puis carte de suivi (patrols.py)
         if (data.hasOwnProperty("patrol_proposal")) handlePatrolProposal(data.patrol_proposal);
         if (data.hasOwnProperty("patrol")) handlePatrol(data.patrol);
@@ -4224,6 +4228,10 @@
           function () { patrolDone(nx.step, "manual"); });
       btn("", "directions", "Itineraire", function () { _patrol.routeFor = null; routeToPatrolPoint(nx.step, true); });
       btn("", "skip_next", "Passer", function () { patrolSkip(nx.step); });
+      if (state.testMode) {
+        // Essai : se placer sur le point, comme un passage GPS reel
+        btn("", "pin_drop", "Aller au point", function () { setSimPosition([nx.step.lat, nx.step.lng]); });
+      }
     }
     btn("", "flag", nx ? "Terminer" : "Fermer", function () { patrolFinish(); });
     card.appendChild(acts);
@@ -4406,6 +4414,76 @@
     foot.appendChild(cancel);
     foot.appendChild(ok);
     document.body.appendChild(overlay);
+  }
+
+  // ---------------------------------------------------------------------
+  // Mode test (case de Field dispatch) : essais hors site. Bouton de
+  // position simulee (toucher la carte pour se placer, retoucher le bouton
+  // pour revenir au GPS reel), raccourci "Aller au point" sur la carte de
+  // patrouille. La position simulee part au serveur marquee `simulated`
+  // (refusee hors mode test, jamais dans les traces GPS).
+  // ---------------------------------------------------------------------
+  function applyTestMode(on) {
+    if (!!state.testMode === on && (state.testFab || !on)) return;
+    state.testMode = on;
+    document.body.classList.toggle("field-test", on);
+    var badge = $("field-test-badge");
+    var fab = state.testFab;
+    if (on) {
+      if (!badge) {
+        badge = document.createElement("div");
+        badge.id = "field-test-badge";
+        badge.className = "field-test-badge";
+        badge.textContent = "MODE TEST";
+        var wrap = document.querySelector(".field-map-wrap");
+        if (wrap) wrap.appendChild(badge);
+      }
+      if (!fab) {
+        var grp = document.querySelector(".map-fab-group-tr");
+        fab = document.createElement("button");
+        fab.className = "map-fab map-fab-test";
+        fab.setAttribute("aria-label", "Position simulee (mode test)");
+        fab.title = "Position simulee (mode test)";
+        fab.appendChild(_mkIcon("pin_drop"));
+        fab.addEventListener("click", function () {
+          if (state.simPos) { setSimPosition(null); return; }
+          state.simPick = !state.simPick;
+          fab.classList.toggle("active", state.simPick);
+          if (state.simPick) toast("Touchez la carte pour placer votre position simulee", "warn");
+        });
+        if (grp) grp.appendChild(fab);
+        state.testFab = fab;
+        state.map.on("click", function (e) {
+          if (!state.testMode || !state.simPick) return;
+          state.simPick = false;
+          setSimPosition([e.latlng.lat, e.latlng.lng]);
+        });
+      }
+    } else {
+      if (badge) badge.remove();
+      if (fab) { fab.remove(); state.testFab = null; }
+      if (state.simPos) setSimPosition(null);
+    }
+    renderPatrol();
+  }
+
+  function setSimPosition(latlng) {
+    if (state.simTimer) { clearInterval(state.simTimer); state.simTimer = null; }
+    state.simPos = latlng;
+    if (state.testFab) {
+      state.testFab.classList.toggle("active", !!latlng);
+      state.testFab.title = latlng ? "Position simulee : toucher pour revenir au GPS reel" : "Position simulee (mode test)";
+    }
+    if (!latlng) { toast("Retour au GPS reel", "ok"); return; }
+    function emit() {
+      // Forme d'une position GPS : meme chemin que le vrai GPS (carte, envoi,
+      // validation des points de patrouille)
+      onGpsUpdate({ _sim: true, coords: { latitude: state.simPos[0], longitude: state.simPos[1], accuracy: 5, speed: null, heading: null } });
+    }
+    state.lastPushedAt = 0;
+    emit();
+    state.simTimer = setInterval(function () { if (state.simPos) { state.lastPushedAt = 0; emit(); } }, 30000);
+    toast("Position simulee posee", "ok");
   }
 
   // Passage GPS : point valide a moins de son rayon (precision du GPS

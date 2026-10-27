@@ -58,6 +58,14 @@ Deux voies d'engagement coexistent. **Directe** : le PC Org (ou un responsable) 
 - **Planificateur** `DA.start_scheduler()` (tick 3 s, démarré dans le `__main__` d'`app.py` à côté d'Alfred et PMV) : propositions expirées (+ 4 s de grâce) → unité suivante. Suppose un seul process (waitress) ; les transitions restent atomiques (filtre sur l'état attendu).
 - Tests : `tests/test_dispatch_auto.py` contre un MongoDB **local réel** (base jetable `titan_test_dispatch_<pid>`, sautés sans Mongo) — les mises à jour conditionnelles et les pipelines de `pcorg_history` ne se simulent pas.
 
+### Mode test (27/10/2026)
+
+Case « Mode test » de la table de Field dispatch (`field_devices.test_mode`, `POST /field/admin/devices/<id>/test-mode`), pour essayer loin du site (le graphe Valhalla ne couvre que Le Mans). Effets :
+
+- **Position simulée** sur la tablette : bouton `pin_drop` dans les boutons de carte (toucher la carte pour se placer, retoucher le bouton pour revenir au GPS réel), réémise toutes les 30 s ; « Aller au point » sur la carte de patrouille. Elle suit le même chemin que le GPS (`onGpsUpdate` avec `_sim`, validation des points, ASL automatique) ; `/field/position` la reçoit avec `simulated: true`, la **refuse (403 `simulation_interdite`) hors mode test**, la marque `last_position.simulated` et ne l'écrit pas dans `anoloc_positions`.
+- **Jamais de vraie fiche proposée automatiquement** (`dispatch_auto.find_candidates`) : une tablette d'essai à Marseille ne doit pas recevoir une intervention réelle. Engagement manuel par le PC Org inchangé.
+- Patrouilles : fiche de main courante « [TEST] … » (`tags` + `content_category.test`), alerte « [TEST] Patrouille non prise ». Bandeau orange « MODE TEST » sur la carte.
+
 ### Patrouilles programmées (27/10/2026)
 
 Détail dans `patrouilles.md`. Côté tablette : `/field/my-fiches` renvoie `patrol` (patrouille en cours) et `patrol_proposal` ; la fiche de main courante d'une patrouille (`content_category.patrol_run`) n'apparaît jamais dans les missions. `field_devices.patrol_proposal` compte comme une proposition en attente pour le dispatch (une seule à la fois) ; passer en non-disponible avec une proposition de patrouille vaut refus, comme pour une fiche.

@@ -1013,6 +1013,7 @@ def _pub_device(device):
         # partout) et patrouille en cours
         "competence_zones": device.get("competence_zones") or [],
         "active_patrol_run": device.get("active_patrol_run"),
+        "test_mode": bool(device.get("test_mode")),
     }
 
 
@@ -1559,6 +1560,13 @@ def field_position():
         "ts": _now(),
     }
 
+    # Position simulee : reservee aux tablettes en mode test (Field dispatch)
+    simulated = bool(data.get("simulated"))
+    if simulated:
+        if not request.device.get("test_mode"):
+            return jsonify({"ok": False, "error": "simulation_interdite"}), 403
+        pos_doc["simulated"] = True
+
     db = _get_mongo_db()
     db["field_devices"].update_one(
         {"_id": request.device["_id"]},
@@ -1568,21 +1576,23 @@ def field_position():
         }},
     )
 
-    # -- Historique des positions (meme collection que les balises anoloc)
+    # -- Historique des positions (meme collection que les balises anoloc).
+    #    Une position simulee n'entre pas dans les traces GPS.
     try:
-        db["anoloc_positions"].insert_one({
-            "device_id": "field:" + str(request.device["_id"]),
-            "beacon_group": request.device.get("beacon_group_id", ""),
-            "label": request.device.get("name", "?"),
-            "lat": lat,
-            "lng": lng,
-            "speed": speed or 0,
-            "heading": heading or 0,
-            "status": "running",
-            "battery_pct": int(round(battery)) if battery is not None else None,
-            "gps_fix": 1,
-            "collected_at": _now(),
-        })
+        if not simulated:
+            db["anoloc_positions"].insert_one({
+                "device_id": "field:" + str(request.device["_id"]),
+                "beacon_group": request.device.get("beacon_group_id", ""),
+                "label": request.device.get("name", "?"),
+                "lat": lat,
+                "lng": lng,
+                "speed": speed or 0,
+                "heading": heading or 0,
+                "status": "running",
+                "battery_pct": int(round(battery)) if battery is not None else None,
+                "gps_fix": 1,
+                "collected_at": _now(),
+            })
     except Exception:
         pass  # non-bloquant
     # -- Auto-detection de proximite : si la tablette a une fiche assignee
@@ -3572,6 +3582,26 @@ def field_admin_device_delete(device_id):
     return jsonify({"ok": True})
 
 
+@field_bp.route("/field/admin/devices/<device_id>/test-mode", methods=["POST"])
+@admin_required
+def field_admin_device_test_mode(device_id):
+    """Mode test d'une tablette (essais hors du site, ex. depuis Marseille) :
+    position simulee autorisee, jamais de proposition automatique de vraie
+    fiche (dispatch_auto.find_candidates), fiches de patrouille marquees
+    [TEST]. Les autres regles restent celles d'une tablette normale."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    on = bool((request.get_json(silent=True) or {}).get("test_mode"))
+    res = _get_mongo_db()["field_devices"].update_one({"_id": oid}, {"$set": {"test_mode": on}})
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    logger.info("Field : mode test %s pour %s par %s", "active" if on else "coupe", device_id,
+                (getattr(request, "admin_user", None) or {}).get("email"))
+    return jsonify({"ok": True, "test_mode": on})
+
+
 @field_bp.route("/field/admin/device/<device_id>/tracking", methods=["POST"])
 @admin_required
 def field_admin_device_tracking(device_id):
@@ -4886,6 +4916,8 @@ def field_my_fiches():
         "closed": closed_list,
         "patrol": patrol,
         "patrol_proposal": patrol_proposal,
+        # Mode test (Field dispatch) : position simulee, raccourcis d'essai
+        "test_mode": bool(dev_fresh.get("test_mode")),
         "device_name": name,
         "device_category": device_category,
         "device_metiers": dev_fresh.get("metiers") or [],
