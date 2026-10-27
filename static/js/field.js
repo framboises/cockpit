@@ -4136,6 +4136,8 @@
     if ((run ? run.run_id : null) !== prevId || (run && run.state !== prevState)) {
       tlog("patrouille", run ? (run.run_id !== prevId ? "en cours : " + run.name + " (" + run.run_id + ")" : "etat " + prevState + " -> " + run.state)
                              : "terminee (" + prevId + ")");
+      // Patrouille en cours : ecran maintenu allume sans limite (recalcule apres mise a jour)
+      setTimeout(syncWakeLockWithStatus, 0);
     }
     if (!run) {
       if (prevId) {
@@ -4508,6 +4510,7 @@
       if (fab) { fab.remove(); state.testFab = null; }
       if (state.simPos) setSimPosition(null);
     }
+    syncWakeLockWithStatus();
     renderPatrol();
   }
 
@@ -4711,6 +4714,7 @@
       ["Dernier envoi position", state.lastPush ? _ago(state.lastPush.at) + (state.lastPush.sim ? " (simulee)" : "") : "jamais"],
       ["Intervalle d'envoi", Math.round(POSITION_PUSH_MS / 1000) + " s"],
       ["Acces piste", state.routePiste ? "oui" : "non"],
+      (function () { var w = wakeLockState(); return ["Ecran maintenu allume", (w.on ? "oui, " : "non, ") + w.why, w.on ? "ok" : "warn"]; })(),
       ["Service worker", swUrl.split("/").pop()],
     ]);
     body.appendChild(_n("div", "test-sec", "Serveur"));
@@ -9870,14 +9874,29 @@
   // Intervention / sur place : jamais relache tant que le statut dure.
   var WAKE_LOCK_IDLE_MS = 60 * 60 * 1000; // 1 heure
 
+  // Mode test (essais) : ecran toujours allume, quel que soit le statut.
   function wakeLockAllowedByStatus() {
+    if (state.testMode) return true;
     var s = state.patrolStatus;
     return s !== "pause" && s !== "fin_intervention";
   }
 
+  // Jamais relache sur inactivite : intervention, sur place, patrouille
+  // programmee en cours (ecran eteint = plus de GPS = points non valides),
+  // mode test.
   function wakeLockNeverIdle() {
     var s = state.patrolStatus;
+    if (state.testMode) return true;
+    if (typeof _patrol !== "undefined" && _patrol.run && _patrol.run.state === "running") return true;
     return s === "intervention" || s === "sur_place";
+  }
+
+  // Etat lisible pour les outils de test
+  function wakeLockState() {
+    if (!("wakeLock" in navigator)) return { on: false, why: "non pris en charge par ce navigateur (iPhone : iOS 16.4 minimum, 18.4 pour l'app sur l'ecran d'accueil)" };
+    if (_wakeLock) return { on: true, why: wakeLockNeverIdle() ? "sans limite" : "relache apres 1 h sans toucher l'ecran" };
+    if (!wakeLockAllowedByStatus()) return { on: false, why: "statut " + state.patrolStatus };
+    return { on: false, why: state.wakeLockError ? "refuse : " + state.wakeLockError : "relache (inactivite) : toucher l'ecran le reprend" };
   }
 
   function acquireWakeLock() {
@@ -9888,9 +9907,14 @@
     try {
       navigator.wakeLock.request("screen").then(function (lock) {
         _wakeLock = lock;
+        state.wakeLockError = null;
         lock.addEventListener("release", function () { _wakeLock = null; });
         scheduleWakeLockRelease();
-      }).catch(function () { _wakeLock = null; });
+      }).catch(function (e) {
+        _wakeLock = null;
+        state.wakeLockError = (e && (e.name || e.message)) || "?";
+        tlog("ecran", "maintien allume refuse : " + state.wakeLockError);
+      });
     } catch (e) { /* ignore */ }
   }
 
