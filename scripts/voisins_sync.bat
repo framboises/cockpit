@@ -1,7 +1,8 @@
 @echo off
 REM ============================================================================
 REM  Cockpit - Evenements voisins (Antares, MSB, Le Mans FC) -> MongoDB
-REM  Lance par tache planifiee Windows 2 fois par jour (06:15 et 13:15).
+REM  Lance par tache planifiee Windows 3 fois par jour (02:00, 06:15 et 13:15),
+REM  puis enchaine foot_sync.py de Groundmaster (matchs du Mans FC).
 REM  Sources publiques : antaresarena.com, lnb.fr, ESPN. Aucun identifiant.
 REM
 REM  Pre-requis :
@@ -29,5 +30,14 @@ if not exist "%COCKPIT_PYTHON%" (
 cd /d "%COCKPIT_DIR%"
 "%COCKPIT_PYTHON%" -X utf8 voisins_sync.py %* > nul 2>&1
 set "RC=%ERRORLEVEL%"
+
+REM Puis Groundmaster : preremplissage des matchs du Mans FC a partir de
+REM voisins_events (log : <GROUNDMASTER_DIR>\logs\foot_sync-YYYYMMDD.log).
+REM Son echec ne change pas le code retour de la synchro voisins.
+if "%GROUNDMASTER_DIR%"=="" set "GROUNDMASTER_DIR=E:\TITAN\production\groundmaster"
+if exist "%GROUNDMASTER_DIR%\foot_sync.py" (
+    cd /d "%GROUNDMASTER_DIR%"
+    "%COCKPIT_PYTHON%" -X utf8 foot_sync.py > nul 2>&1
+)
 
 endlocal & exit /b %RC%

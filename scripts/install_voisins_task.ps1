@@ -4,9 +4,10 @@
 #  A executer en tant qu'Administrateur :
 #    powershell -ExecutionPolicy Bypass -File install_voisins_task.ps1
 #
-#  La tache tourne 2 FOIS PAR JOUR (06:15 et 13:15) : programmes d'Antares,
-#  matchs a domicile du MSB et du Mans FC (horaires TV fixes quelques
-#  semaines avant), puis vignettes de la timeline SAISON.
+#  La tache tourne 3 FOIS PAR JOUR (02:00, 06:15 et 13:15) : programmes
+#  d'Antares, matchs a domicile du MSB et du Mans FC (horaires TV fixes
+#  quelques semaines avant), puis vignettes de la timeline SAISON, puis
+#  preremplissage Groundmaster des matchs du Mans FC (groundmaster\foot_sync.py).
 #
 #  Parametres optionnels :
 #    -BatPath   chemin du .bat (defaut : voisins_sync.bat a cote de ce .ps1)
@@ -44,43 +45,23 @@ Write-Host ""
 Write-Host "Installation de la tache planifiee Cockpit - Sync Voisins" -ForegroundColor Cyan
 Write-Host "  Nom         : $TaskName"
 Write-Host "  Script      : $BatPath"
-Write-Host "  Periode     : tous les jours a 06:15 et 13:15"
+Write-Host "  Periode     : tous les jours a 02:00, 06:15 et 13:15"
 Write-Host "  Execute par : $RunAsUser"
 Write-Host ""
 
-# Windows PowerShell 5.1 + ErrorActionPreference=Stop : le message d'erreur de
-# schtasks (tache absente) devient une erreur bloquante, meme redirige. On
-# passe par cmd pour ne lire que le code retour.
-cmd /c "schtasks /Query /TN `"$TaskName`" >nul 2>&1"
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "Tache existante detectee, suppression..." -ForegroundColor Yellow
-    schtasks /Delete /TN "$TaskName" /F | Out-Null
-}
-
-# Quotidienne a 06:15, repetee toutes les 7 h pendant 8 h (=> 06:15 et 13:15)
-$taskArgs = @(
-    "/Create",
-    "/TN", "$TaskName",
-    "/TR", "`"$BatPath`"",
-    "/SC", "DAILY",
-    "/ST", "06:15",
-    "/RI", "420",
-    "/DU", "08:00",
-    "/RL", "HIGHEST",
-    "/F"
-)
-
+# Plusieurs declencheurs quotidiens : schtasks /Create n'en pose qu'un, on
+# passe par Register-ScheduledTask (remplace la tache existante).
+$action = New-ScheduledTaskAction -Execute $BatPath
+$triggers = @("02:00", "06:15", "13:15") | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ }
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 1) -StartWhenAvailable
 if ($RunAsUser -ieq "SYSTEM") {
-    $taskArgs += @("/RU", "SYSTEM")
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Settings $settings `
+        -Principal $principal -Force | Out-Null
 } else {
-    $taskArgs += @("/RU", $RunAsUser)
-    Write-Host "Mot de passe pour $RunAsUser sera demande..." -ForegroundColor Yellow
-}
-
-& schtasks @taskArgs
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Echec de la creation de la tache (code $LASTEXITCODE)"
-    exit $LASTEXITCODE
+    $cred = Get-Credential -UserName $RunAsUser -Message "Mot de passe du compte d'execution"
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Settings $settings `
+        -User $RunAsUser -Password $cred.GetNetworkCredential().Password -RunLevel Highest -Force | Out-Null
 }
 
 Write-Host ""

@@ -70,6 +70,9 @@ LNB_TEAM_PATTERN = re.compile(r"\ble mans\b", re.IGNORECASE)
 ESPN_TEAM_ID = "2697"
 ESPN_LEAGUES = ("fra.1", "fra.2", "fra.coupe_de_france")
 ESPN_SCHEDULE = "https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/teams/{team}/schedule"
+ESPN_ROUNDS = {"Round of 128": "64es de finale", "Round of 64": "32es de finale", "Round of 32": "16es de finale",
+               "Round of 16": "8es de finale", "Quarterfinals": "Quarts de finale",
+               "Semifinals": "Demi-finales", "Final": "Finale"}
 
 VENUES = {"antares": "Antarès", "stade": "Stade MMArena"}
 SOURCES = ("antares", "msb", "fcmans")
@@ -225,10 +228,15 @@ def parse_lnb(calendar, team_external_id):
 
 
 def parse_espn(schedule, team_id=ESPN_TEAM_ID):
-    """Matchs A DOMICILE du Mans FC. `timeValid: false` = horaire non fixe."""
+    """Matchs A DOMICILE du Mans FC. `timeValid: false` = horaire non fixe.
+    Competition lue match par match (`ev.league`, le `league` du calendrier
+    est vide) ; pour une coupe, le tour (`seasonType`) va dans le sous-titre."""
     out = []
-    league = _txt(((schedule or {}).get("league") or {}).get("name") or "", 60)
+    default_league = _txt(((schedule or {}).get("league") or {}).get("name") or "", 60)
     for ev in (schedule or {}).get("events") or []:
+        league = _txt((ev.get("league") or {}).get("name") or "", 60) or default_league
+        rnd = _txt((ev.get("seasonType") or {}).get("name") or "", 40)
+        rnd = ESPN_ROUNDS.get(rnd, rnd) if re.search(r"(?i)coupe|cup", league) else ""
         comp = (ev.get("competitions") or [{}])[0]
         cs = comp.get("competitors") or []
         home = next((c for c in cs if c.get("homeAway") == "home"), None)
@@ -246,7 +254,7 @@ def parse_espn(schedule, team_id=ESPN_TEAM_ID):
         out.append({
             "_id": f"fcmans|{ev.get('id')}",
             "source": "fcmans", "venue": "stade",
-            "title": f"Le Mans FC - {opp}", "subtitle": league,
+            "title": f"Le Mans FC - {opp}", "subtitle": " · ".join(p for p in (league, rnd) if p),
             "kind": "Football", "date": loc.date().isoformat(), "time": "" if tbc else loc.strftime("%H:%M"),
             "time_tbc": tbc,
             "status": "annule" if st in ("STATUS_CANCELED", "STATUS_POSTPONED") else "prevu",

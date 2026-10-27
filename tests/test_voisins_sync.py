@@ -175,6 +175,16 @@ def test_espn_home_games_and_unconfirmed_time():
     assert docs[0]["venue"] == "stade" and docs[0]["title"] == "Le Mans FC - Toulouse"
 
 
+def test_espn_competition_per_match_and_cup_round():
+    cup = dict(_espn_ev("7", ("2697", "Le Mans"), ("4", "AS Nancy Lorraine"), "2026-01-11T17:00Z"),
+               league={"name": "Coupe de France"}, seasonType={"name": "Round of 32"})
+    lg1 = dict(_espn_ev("8", ("2697", "Le Mans"), ("6", "Lille"), "2026-11-28T19:45Z"),
+               league={"name": "French Ligue 1"}, seasonType={"name": "2026-27 Ligue 1"})
+    docs = VS.parse_espn({"league": None, "events": [cup, lg1]})
+    assert [(d["competition"], d["subtitle"]) for d in docs] == [
+        ("Coupe de France", "Coupe de France · 16es de finale"), ("French Ligue 1", "French Ligue 1")]
+
+
 # ---------------------------------------------------------------------------
 # Base : upsert et reconciliation
 # ---------------------------------------------------------------------------
