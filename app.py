@@ -36,7 +36,7 @@ from analyse_ops import analyse_ops_bp
 from scan_report import scan_report_bp
 from anoloc import anoloc_bp
 from anpr import anpr_bp
-from field import field_bp
+from field import field_bp, FIELD_CATEGORIES as FIELD_TABLET_CATEGORIES
 from vision_admin import vision_admin_bp
 from crise_auth import crise_auth_bp
 from routing import routing_bp
@@ -642,8 +642,12 @@ ADMIN_PAGE_REGISTRY = [
     {"id": "live_controle",  "label": "Controle acces",  "icon": "sensors",
      "paths": ["/live-controle", "/api/live-controle"]},
     {"id": "field_dispatch", "label": "Field dispatch",  "icon": "tablet_android",
-     "paths": ["/field-dispatch", "/field/admin", "/api/alfred", "/api/whatsapp",
-               "/api/dispatch/config"]},
+     "paths": ["/field-dispatch", "/field/admin", "/api/dispatch/config"]},
+    # Section Alfred de la console Field dispatch, accordee a part : Field
+    # dispatch seul ne donne plus la main sur l'agent WhatsApp. Sans
+    # field_dispatch, la console ne s'ouvre pas (la section y vit).
+    {"id": "alfred",         "label": "Alfred (dans Field dispatch)", "icon": "smart_toy",
+     "paths": ["/api/alfred", "/api/whatsapp"]},
     {"id": "scan_report",    "label": "Rapport scans",   "icon": "qr_code_scanner",
      "paths": ["/scan-report"]},
     {"id": "analyse_ops",    "label": "Analyse Ops",     "icon": "biotech",
@@ -653,7 +657,7 @@ ADMIN_PAGE_REGISTRY = [
     {"id": "alertes",        "label": "Alertes",         "icon": "notifications_active",
      "paths": ["/admin/alertes", "/api/alert-definitions", "/api/camera-event-types",
                "/api/cameras-list", "/api/anpr-watchlist", "/api/hik-events-stream",
-               ("GET", "/api/groups")]},
+               "/api/whatsapp", ("GET", "/api/groups")]},
     {"id": "wiki_admin",     "label": "Wiki (admin)",    "icon": "edit_note",
      "paths": ["/admin/wiki", "/api/wiki/admin"]},
     {"id": "cameras",        "label": "Cameras",         "icon": "videocam",
@@ -4799,6 +4803,8 @@ def field_dispatch_page():
     payload = getattr(request, 'user_payload', {})
     return render_template(
         'field_dispatch.html',
+        show_alfred=_admin_page_allowed_for_request("alfred"),
+        field_categories=FIELD_TABLET_CATEGORIES,
         user_roles=payload.get("roles", []),
         user_firstname=payload.get("firstname", ""),
         user_lastname=payload.get("lastname", ""),

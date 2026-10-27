@@ -2,7 +2,7 @@
 
 ## Intégration Vision (app externe `vision-a0f55.web.app`)
 
-L'app Vision (scan billets véhicule, repo voisin `../vision`) est **JWT-gated par Cockpit** mais **totalement dissociée de Field** : module Python séparé, collections MongoDB séparées, JS séparé, modales séparées. La page admin Cockpit (`field_dispatch.html`) regroupe les deux UIs (section Field + section Vision) pour la commodité opérationnelle, mais aucun code n'est partagé entre les deux apps.
+L'app Vision (scan billets véhicule, repo voisin `../vision`) est **JWT-gated par Cockpit** mais **totalement dissociée de Field** : module Python séparé, collections MongoDB séparées, JS séparé, modales séparées. La page admin Cockpit (`field_dispatch.html`) regroupe les deux UIs (section Field + section Vision) pour la commodité opérationnelle, mais aucun code n'est partagé entre les deux apps. La section Alfred de la même page relève d'une page d'administration distincte (`alfred`, `ADMIN_PAGE_REGISTRY`) : accorder Field dispatch à un groupe ne lui donne plus Alfred ni WhatsApp.
 
 ### Architecture
 

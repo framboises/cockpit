@@ -37,16 +37,9 @@
     else console.log("[toast]", type, msg);
   }
 
-  // Categories de fiche d'une tablette (miroir de FIELD_CATEGORIES, field.py).
-  var FIELD_CATEGORIES = [
-    { id: "PCO.Secours", label: "Secours" },
-    { id: "PCO.Securite", label: "Securite" },
-    { id: "PCO.Technique", label: "Technique" },
-    { id: "PCO.Flux", label: "Flux" },
-    { id: "PCO.Fourriere", label: "Fourriere" },
-    { id: "PCO.Information", label: "Information" },
-    { id: "PCO.MainCourante", label: "Main courante" },
-  ];
+  // Categories de fiche d'une tablette : source unique FIELD_CATEGORIES
+  // (field.py), injectee par field_dispatch.html.
+  var FIELD_CATEGORIES = window.FIELD_CATEGORIES || [];
 
   function categoryLabel(id) {
     var c = FIELD_CATEGORIES.find(function (x) { return x.id === id; });

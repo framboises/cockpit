@@ -2517,16 +2517,11 @@
   }
 
   // ----- Creation de fiche terrain -----
+  // Source unique : field.FIELD_CATEGORIES, injectee par field.html.
   // legacyOnly : non propose aux tablettes sans categorie (liste historique a 4).
-  var FICHE_CREATE_CATEGORIES = [
-    { id: "PCO.Secours", label: "Secours", icon: "medical_services", color: "#DC2626" },
-    { id: "PCO.Securite", label: "Securite", icon: "security", color: "#7C3AED" },
-    { id: "PCO.Technique", label: "Technique", icon: "build", color: "#FF8C00" },
-    { id: "PCO.Flux", label: "Flux", icon: "directions_car", color: "#2563EB" },
-    { id: "PCO.Fourriere", label: "Fourriere", icon: "local_shipping", color: "#0891B2", legacyOnly: true },
-    { id: "PCO.Information", label: "Information", icon: "info", color: "#64748B", legacyOnly: true },
-    { id: "PCO.MainCourante", label: "Main courante", icon: "edit_note", color: "#475569", legacyOnly: true },
-  ];
+  var FICHE_CREATE_CATEGORIES = (window.FIELD_CATEGORIES || []).map(function (c) {
+    return { id: c.id, label: c.label, icon: c.icon, color: c.color, legacyOnly: !c.legacy };
+  });
 
   // ----- Mode declarant (07/10/2026) -----
   // Drapeau du GROUPE de la tablette (Configuration > Anoloc). La tablette
@@ -5214,15 +5209,10 @@
   // ---------------------------------------------------------------------
   var CAM_MAX_PHOTOS = 5;
   var CAM_JPEG_QUALITY = 0.85;          // capture canvas (le serveur reencode 85)
-  var CAM_CATEGORIES = [
-    { id: "PCO.Secours",      label: "Secours",      icon: "medical_services" },
-    { id: "PCO.Securite",     label: "Securite",     icon: "security" },
-    { id: "PCO.Technique",    label: "Technique",    icon: "build" },
-    { id: "PCO.Flux",         label: "Flux",         icon: "directions_car" },
-    { id: "PCO.Fourriere",    label: "Fourriere",    icon: "local_shipping" },
-    { id: "PCO.Information",  label: "Information",  icon: "info" },
-    { id: "PCO.MainCourante", label: "Main courante", icon: "edit_note" },
-  ];
+  // Source unique : field.FIELD_CATEGORIES, injectee par field.html.
+  var CAM_CATEGORIES = (window.FIELD_CATEGORIES || []).map(function (c) {
+    return { id: c.id, label: c.label, icon: c.icon };
+  });
   var CAM_URGENCIES = [
     { id: "IMP", label: "IMP", color: "#6b7280" },
     { id: "UR",  label: "UR",  color: "#eab308" },

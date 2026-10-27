@@ -53,7 +53,8 @@ logger = logging.getLogger("field")
 # ---------------------------------------------------------------------------
 
 PAIRING_CODE_TTL_SECONDS = 15 * 60          # code valable 15 min
-DEVICE_TOKEN_TTL_SECONDS = 30 * 24 * 3600    # cookie valable 30 jours
+DEVICE_TOKEN_TTL_SECONDS = 30 * 24 * 3600    # cookie valable 30 jours, glissants
+DEVICE_COOKIE_RENEW_SECONDS = 24 * 3600      # cookie repose au plus 1 fois / jour
 INBOX_MESSAGE_TTL_SECONDS = 7 * 24 * 3600    # 7 jours dans l'inbox puis purge
 PAIR_RATE_LIMIT_WINDOW = 60                  # fenetre rate-limit en secondes
 PAIR_RATE_LIMIT_MAX = 10                     # max 10 tentatives / ip / fenetre
@@ -584,6 +585,48 @@ def _client_ip():
 # Decorateur : auth tablette par cookie field_token
 # ---------------------------------------------------------------------------
 
+def _set_device_cookie(resp, token):
+    """Pose le cookie field_token (HttpOnly, SameSite=Lax, Secure en prod)."""
+    is_prod = os.getenv("TITAN_ENV", "dev").strip().lower() in {"prod", "production"}
+    resp.set_cookie(
+        FIELD_COOKIE_NAME,
+        token,
+        max_age=DEVICE_TOKEN_TTL_SECONDS,
+        httponly=True,
+        secure=is_prod,
+        samesite="Lax",
+        path=FIELD_COOKIE_PATH,
+    )
+
+
+def _cookie_renewal_due(device):
+    """Vrai si le cookie de la tablette doit etre repose (30 jours glissants).
+    Avant, il n'etait pose qu'a l'appairage : une tablette SAISON (jamais
+    revoquee automatiquement) retombait sur /field/pair au bout de 30 jours
+    et sa fiche restait active en base, nom pris (name_conflict au
+    re-appairage)."""
+    last = device.get("cookie_renewed_at") or device.get("paired_at")
+    if not isinstance(last, datetime):
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return (_now() - last).total_seconds() >= DEVICE_COOKIE_RENEW_SECONDS
+
+
+def _renew_device_cookie(db, device, token, resp):
+    """Repose le cookie si c'est du (au plus une fois par jour) et le note."""
+    if not _cookie_renewal_due(device):
+        return resp
+    resp = make_response(resp)
+    _set_device_cookie(resp, token)
+    try:
+        db["field_devices"].update_one(
+            {"_id": device["_id"]}, {"$set": {"cookie_renewed_at": _now()}})
+    except Exception:
+        pass
+    return resp
+
+
 def _wants_json():
     """True si le client prefere JSON a HTML (XHR/fetch) ou si on est en POST."""
     if request.method != "GET":
@@ -629,21 +672,27 @@ def field_token_required(f):
                 return jsonify({"error": "event_ended"}), 401
             return redirect("/field/denied")
 
-        # Mettre a jour last_seen (best-effort)
+        # Mettre a jour last_seen (best-effort), et renouveler le cookie
+        # (30 jours glissants) au plus une fois par jour.
+        renew = _cookie_renewal_due(device)
+        sets = {
+            "last_seen": _now(),
+            "last_ip": _client_ip(),
+            "last_ua": (request.headers.get("User-Agent") or "")[:200],
+        }
+        if renew:
+            sets["cookie_renewed_at"] = _now()
         try:
-            db["field_devices"].update_one(
-                {"_id": device["_id"]},
-                {"$set": {
-                    "last_seen": _now(),
-                    "last_ip": _client_ip(),
-                    "last_ua": (request.headers.get("User-Agent") or "")[:200],
-                }},
-            )
+            db["field_devices"].update_one({"_id": device["_id"]}, {"$set": sets})
         except Exception:
             pass
 
         request.device = device
-        return f(*args, **kwargs)
+        if not renew:
+            return f(*args, **kwargs)
+        resp = make_response(f(*args, **kwargs))
+        _set_device_cookie(resp, token)
+        return resp
     return wrapper
 
 
@@ -652,15 +701,18 @@ def field_token_required(f):
 # ---------------------------------------------------------------------------
 
 # Categories de fiche qu'une tablette peut porter (une seule par tablette).
-# Meme liste que ALL_PCO_CATEGORIES dans app.py.
+# SOURCE UNIQUE cote Field : injectee dans field.html (window.FIELD_CATEGORIES,
+# lue par field.js) et field_dispatch.html (lue par field_admin.js).
+# Meme liste que ALL_PCO_CATEGORIES dans app.py. `legacy` : les quatre
+# proposees a une tablette sans categorie (historique).
 FIELD_CATEGORIES = [
-    {"id": "PCO.Secours", "label": "Secours", "icon": "medical_services", "color": "#DC2626"},
-    {"id": "PCO.Securite", "label": "Securite", "icon": "security", "color": "#7C3AED"},
-    {"id": "PCO.Technique", "label": "Technique", "icon": "build", "color": "#FF8C00"},
-    {"id": "PCO.Flux", "label": "Flux", "icon": "directions_car", "color": "#2563EB"},
-    {"id": "PCO.Fourriere", "label": "Fourriere", "icon": "local_shipping", "color": "#0891B2"},
-    {"id": "PCO.Information", "label": "Information", "icon": "info", "color": "#64748B"},
-    {"id": "PCO.MainCourante", "label": "Main courante", "icon": "edit_note", "color": "#475569"},
+    {"id": "PCO.Secours", "label": "Secours", "icon": "medical_services", "color": "#DC2626", "legacy": True},
+    {"id": "PCO.Securite", "label": "Securite", "icon": "security", "color": "#7C3AED", "legacy": True},
+    {"id": "PCO.Technique", "label": "Technique", "icon": "build", "color": "#FF8C00", "legacy": True},
+    {"id": "PCO.Flux", "label": "Flux", "icon": "directions_car", "color": "#2563EB", "legacy": True},
+    {"id": "PCO.Fourriere", "label": "Fourriere", "icon": "local_shipping", "color": "#0891B2", "legacy": False},
+    {"id": "PCO.Information", "label": "Information", "icon": "info", "color": "#64748B", "legacy": False},
+    {"id": "PCO.MainCourante", "label": "Main courante", "icon": "edit_note", "color": "#475569", "legacy": False},
 ]
 FIELD_CATEGORY_IDS = {c["id"] for c in FIELD_CATEGORIES}
 # Destinataires d'un SOS en plus de l'equipe de l'emetteur.
@@ -1180,15 +1232,53 @@ def field_manifest():
     return resp
 
 
+# Fichiers servis en cache-first par field-sw.js (APP_SHELL_URLS), plus les
+# templates des pages de l'app. Ajouter ici tout nouveau fichier de la coquille.
+_SHELL_FILES = (
+    ("static", "js", "field.js"),
+    ("static", "js", "field_install_hint.js"),
+    ("static", "css", "field.css"),
+    ("static", "css", "field_manuel.css"),
+    ("static", "img", "field-icon.svg"),
+    ("static", "img", "field-icon-192.png"),
+    ("templates", "field.html"),
+    ("templates", "field_manuel.html"),
+)
+
+
+def _shell_fingerprint(root):
+    """Empreinte courte (taille + date de modification) des fichiers de la
+    coquille. Un fichier absent compte comme tel, sans erreur."""
+    h = hashlib.sha1()
+    for parts in _SHELL_FILES:
+        path = os.path.join(root, *parts)
+        try:
+            st = os.stat(path)
+            h.update("{}:{}:{};".format("/".join(parts), st.st_size, st.st_mtime_ns).encode())
+        except OSError:
+            h.update("{}:absent;".format("/".join(parts)).encode())
+    return h.hexdigest()[:10]
+
+
 @field_bp.route("/field/sw.js", methods=["GET"])
 def field_service_worker():
     """Service worker : sert le fichier statique avec le bon scope. On pourrait
     pointer /static/js/field-sw.js directement, mais pour garder Service-Worker-Allowed
     = /field on passe par la route (sinon le navigateur restreint le scope au path
     du fichier statique)."""
-    from flask import current_app, send_from_directory
-    static_dir = os.path.join(current_app.root_path, "static", "js")
-    resp = make_response(send_from_directory(static_dir, "field-sw.js"))
+    from flask import current_app
+    root = current_app.root_path
+    with open(os.path.join(root, "static", "js", "field-sw.js"), encoding="utf-8") as fh:
+        source = fh.read()
+    # Version du cache = version ecrite dans field-sw.js + empreinte des
+    # fichiers de la coquille (cache-first). Modifier field.js, une feuille de
+    # style ou un template de l'app change le service worker servi, donc le
+    # navigateur l'installe et vide l'ancien cache : plus d'incrementation
+    # manuelle de SW_VERSION a oublier.
+    fp = _shell_fingerprint(root)
+    source = re.sub(r'(const SW_VERSION = "[^"]+)"', lambda m: m.group(1) + "-" + fp + '"',
+                    source, count=1)
+    resp = make_response(source)
     resp.headers["Content-Type"] = "application/javascript"
     resp.headers["Service-Worker-Allowed"] = "/field"
     resp.headers["Cache-Control"] = "no-cache"
@@ -1214,7 +1304,9 @@ def field_index():
     groups = _beacon_groups(db)
     pub["declarant"] = _device_declarant(db, device, groups)
     pub["route_piste"] = _device_route_piste(db, device, groups)
-    return render_template("field.html", device=pub)
+    return _renew_device_cookie(
+        db, device, token,
+        render_template("field.html", device=pub, categories=FIELD_CATEGORIES))
 
 
 @field_bp.route("/field/denied", methods=["GET"])
@@ -1249,7 +1341,9 @@ def field_denied_check():
     if not device:
         return jsonify({"status": "unknown"}), 401
     if device.get("revoked"):
-        return jsonify({"status": "revoked"})
+        # Garder le cookie vivant : une re-autorisation admin doit suffire,
+        # meme apres plus de 30 jours de revocation.
+        return _renew_device_cookie(db, device, token, jsonify({"status": "revoked"}))
     return jsonify({"status": "active"})
 
 
@@ -1312,6 +1406,7 @@ def field_pair_submit():
         "paired_ua": (request.headers.get("User-Agent") or "")[:200],
         "last_seen": _now(),
         "last_ip": ip,
+        "cookie_renewed_at": _now(),
         "revoked": False,
         "notes": pairing.get("notes", ""),
     }
@@ -1326,17 +1421,7 @@ def field_pair_submit():
         "device": _pub_device(device_doc),
         "redirect": "/field",
     }))
-    # Cookie HttpOnly, SameSite=Lax, Secure en prod
-    is_prod = os.getenv("TITAN_ENV", "dev").strip().lower() in {"prod", "production"}
-    resp.set_cookie(
-        FIELD_COOKIE_NAME,
-        token,
-        max_age=DEVICE_TOKEN_TTL_SECONDS,
-        httponly=True,
-        secure=is_prod,
-        samesite="Lax",
-        path=FIELD_COOKIE_PATH,
-    )
+    _set_device_cookie(resp, token)
     return resp
 
 
@@ -1962,8 +2047,7 @@ def field_pco_categories():
     if cat:
         cats = [c for c in FIELD_CATEGORIES if c["id"] == cat]
     else:
-        legacy = {"PCO.Secours", "PCO.Securite", "PCO.Technique", "PCO.Flux"}
-        cats = [c for c in FIELD_CATEGORIES if c["id"] in legacy]
+        cats = [c for c in FIELD_CATEGORIES if c["legacy"]]
     return jsonify({"categories": cats, "device_category": cat})
 
 

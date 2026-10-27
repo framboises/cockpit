@@ -10,6 +10,10 @@
      - app shell : correspondance EXACTE du chemin (plus de sous-chaine)
    ===================================================================== */
 
+// La route /field/sw.js ajoute a cette version l'empreinte des fichiers de la
+// coquille (field.py, _shell_fingerprint) : modifier field.js / field.css /
+// field.html suffit, plus besoin d'incrementer a la main. Un nouveau fichier
+// de la coquille s'ajoute a APP_SHELL_URLS ET a field._SHELL_FILES.
 const SW_VERSION = "field-sw-v51";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;

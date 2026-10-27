@@ -224,8 +224,10 @@
 
             <!-- ===================================================== -->
             <!-- Section Alfred : agent IA WhatsApp (VM Linux + WAHA)  -->
+            <!-- Page d'administration "alfred" accordee a part.        -->
             <!-- ===================================================== -->
 
+            {% if show_alfred %}
             <section class="widget-card" style="margin-top:24px; border-top:3px solid #059669;">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle; color:#059669;">smart_toy</span> Alfred &mdash; agent IA WhatsApp</h3>
@@ -318,11 +320,13 @@
                     </div>
                 </div>
             </section>
+            {% endif %}
 
         </div>
     </div>
 </div>
 
+{% if show_alfred %}
 <!-- CRUD Modal &mdash; Alfred ajout DM whitelist -->
 <div id="alfred-dm-modal" class="crud-modal" hidden>
     <div class="crud-modal-dialog" style="max-width:520px;">
@@ -400,6 +404,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <!-- CRUD Modal — Vision new pairing -->
 <div id="vision-pair-modal" class="crud-modal" hidden>
@@ -848,13 +853,17 @@
      via la case a cocher dans le header. -->
 <script>
   window.FIELD_ADMIN_ALL_SCOPES = true;
+  // Categories de fiche : source unique field.FIELD_CATEGORIES
+  window.FIELD_CATEGORIES = {{ field_categories | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/field_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dispatch_config_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vision_admin.js') }}"></script>
+{% if show_alfred %}
 <script src="{{ url_for('static', filename='js/alfred_admin.js') }}"></script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
 <script>

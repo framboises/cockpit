@@ -13,7 +13,11 @@ Chaque tablette porte **une** catégorie de fiche (`field_devices.category`), ch
 - `/anoloc/vehicles-by-category` range chaque tablette sous **sa** catégorie (plus celle du groupe) : le PC Org ne la voit proposée que sur ces fiches.
 - SOS (`_sos_recipients`) : diffusé aux catégories `PCO.Securite`/`PCO.Secours`, à la catégorie de l'émetteur et aux tablettes sans catégorie, sur tous les événements vus (voir « SAISON et épreuves simultanées ») ; jamais aux révoquées.
 
-⚠️ La liste des catégories existe en trois copies à garder alignées : `FIELD_CATEGORIES` (`field.py`), `FICHE_CREATE_CATEGORIES`/`CAM_CATEGORIES` (`field.js`) et `FIELD_CATEGORIES` (`field_admin.js`).
+Liste des catégories : **source unique** `FIELD_CATEGORIES` (`field.py`, drapeau `legacy` = les quatre proposées à une tablette sans catégorie), injectée en `window.FIELD_CATEGORIES` par `field.html` (lue par `FICHE_CREATE_CATEGORIES` / `CAM_CATEGORIES` de `field.js`) et par `field_dispatch.html` (lue par `field_admin.js`). Ne plus recopier de liste côté JS (avant le 27/10/2026 : trois copies à aligner à la main). `ALL_PCO_CATEGORIES` (`app.py`) et `pcorg_assist.py` gardent leur propre liste, à aligner.
+
+### Session de la tablette (cookie `field_token`)
+
+Jeton opaque 256 bits posé à l'appairage, seule son empreinte SHA-256 est en base. Cookie **30 jours glissants** (`DEVICE_TOKEN_TTL_SECONDS`) : `field_token_required` le repose au plus une fois par jour (`DEVICE_COOKIE_RENEW_SECONDS`, date dans `field_devices.cookie_renewed_at`, à défaut `paired_at`), comme l'ouverture de `/field` et `/field/denied/check` (une tablette révoquée reste réactivable sans nouvel appairage). ⚠️ Avant le 27/10/2026, le cookie n'était posé qu'à l'appairage : une tablette SAISON (jamais révoquée automatiquement) retombait sur `/field/pair` au bout de 30 jours, sa fiche restant active en base, nom pris (`name_conflict` au ré-appairage).
 
 ### Accès piste des itinéraires (13/10/2026)
 
@@ -110,7 +114,7 @@ Source unique : `event_courant.py` (SAISON reconnu par son NOM, épreuve active 
 
 `setRouteDestination(latlng, polyline, god, ficheId)` mémorise la fiche visée ; `reconcileRoute()` efface le tracé quand elle est close ou désaffectée, ou que l'agent passe en fin d'intervention / disponible. `/api/route/forward` transporte `fiche_id`. Bouton `#btn-route-clear` visible tant qu'un tracé est affiché. Avant, rien n'effaçait jamais un itinéraire.
 
-⚠️ `field-sw.js` sert `field.js` en **cache-first** : toute modification du JS tablette impose d'incrémenter `SW_VERSION`.
+⚠️ `field-sw.js` sert `field.js` en **cache-first**. Depuis le 27/10/2026, la route `/field/sw.js` ajoute à `SW_VERSION` une empreinte (taille + date) des fichiers de la coquille (`field._SHELL_FILES` : `field.js`, CSS, icônes, `field.html`, `field_manuel.html`) : toute modification de l'un d'eux installe un nouveau service worker et vide l'ancien cache, sans incrément manuel. Un nouveau fichier servi en cache-first s'ajoute à `APP_SHELL_URLS` (field-sw.js) **et** à `_SHELL_FILES`.
 
 ### Prise en charge partagée d'un SOS
 

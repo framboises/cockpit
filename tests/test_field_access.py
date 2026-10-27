@@ -396,3 +396,89 @@ class TestReactivationApresFinEvenement:
         dev["restoredAt"] = (fin - timedelta(days=1)).replace(tzinfo=None)
         assert not field._restored_after_event_end(None, dev)
         assert not field._restored_after_event_end(None, {"event": "E", "year": "2026"})
+
+
+def _cookie_pose(rep):
+    return [h for h in rep.headers.getlist("Set-Cookie")
+            if h.startswith(field.FIELD_COOKIE_NAME + "=")]
+
+
+class TestCookieGlissant:
+    """Cookie field_token : 30 jours glissants, repose au plus une fois par jour.
+    Avant, pose seulement a l'appairage : une tablette SAISON retombait sur
+    /field/pair au bout de 30 jours."""
+
+    def test_repose_quand_jamais_renouvele(self, env):
+        _as_tablet(env, "tok1")
+        rep = env.get("/field/pco-categories", headers=JSON)
+        assert rep.status_code == 200
+        poses = _cookie_pose(rep)
+        assert len(poses) == 1
+        assert "Max-Age=%d" % field.DEVICE_TOKEN_TTL_SECONDS in poses[0]
+        assert "tok1" in poses[0]
+        dev = env_fake_app["db"]["field_devices"].find_one({"_id": "dev1"})
+        assert dev.get("cookie_renewed_at") is not None
+
+    def test_pas_deux_fois_dans_la_journee(self, env):
+        _as_tablet(env, "tok1")
+        assert _cookie_pose(env.get("/field/pco-categories", headers=JSON))
+        assert not _cookie_pose(env.get("/field/pco-categories", headers=JSON))
+
+    def test_repose_apres_un_jour(self, env):
+        from datetime import timedelta
+        env_fake_app["db"]["field_devices"].update_one(
+            {"_id": "dev1"}, {"$set": {"cookie_renewed_at": field._now() - timedelta(days=2)}})
+        _as_tablet(env, "tok1")
+        assert _cookie_pose(env.get("/field/pco-categories", headers=JSON))
+
+    def test_tablette_revoquee_reste_reactivable(self, env):
+        _as_tablet(env, "tok3")
+        rep = env.get("/field/denied/check")
+        assert rep.get_json()["status"] == "revoked"
+        assert _cookie_pose(rep)
+
+
+class TestCategoriesSourceUnique:
+    def test_tablette_sans_categorie_voit_les_quatre_historiques(self, env):
+        _as_tablet(env, "tok6")
+        data = env.get("/field/pco-categories", headers=JSON).get_json()
+        assert [c["id"] for c in data["categories"]] == [
+            "PCO.Secours", "PCO.Securite", "PCO.Technique", "PCO.Flux"]
+
+    def test_tablette_categorisee_ne_voit_que_la_sienne(self, env):
+        _as_tablet(env, "tok1")
+        data = env.get("/field/pco-categories", headers=JSON).get_json()
+        assert [c["id"] for c in data["categories"]] == ["PCO.Technique"]
+
+    def test_chaque_categorie_porte_ce_que_lit_le_js(self):
+        for c in field.FIELD_CATEGORIES:
+            assert set(c) >= {"id", "label", "icon", "color", "legacy"}
+
+
+class TestVersionServiceWorker:
+    """SW_VERSION suit l'empreinte des fichiers de la coquille (cache-first)."""
+
+    def test_empreinte_change_avec_un_fichier(self, tmp_path):
+        import os
+        for parts in field._SHELL_FILES:
+            p = tmp_path.joinpath(*parts)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("v1")
+        avant = field._shell_fingerprint(str(tmp_path))
+        assert avant == field._shell_fingerprint(str(tmp_path))
+        js = tmp_path / "static" / "js" / "field.js"
+        js.write_text("v2 plus long")
+        os.utime(js, (1, 1))
+        assert field._shell_fingerprint(str(tmp_path)) != avant
+
+    def test_route_injecte_l_empreinte(self):
+        import os
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        app = Flask("sw", root_path=repo)
+        app.register_blueprint(field.field_bp)
+        rep = app.test_client().get("/field/sw.js")
+        assert rep.status_code == 200
+        assert rep.headers["Service-Worker-Allowed"] == "/field"
+        body = rep.get_data(as_text=True)
+        fp = field._shell_fingerprint(repo)
+        assert re.search(r'const SW_VERSION = "field-sw-v\d+-%s";' % fp, body)
