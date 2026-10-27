@@ -28,6 +28,7 @@ alertes d'urgence (pas de niveau d'urgence) ; /field/my-fiches l'ecarte.
 
 import logging
 import math
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -387,7 +388,9 @@ def _clean_scenario(db, data):
     missing = [i for i in ids if i not in by_id]
     if missing:
         return None, "point_inconnu"
-    color = str(data.get("color") or "#2563eb").strip()[:9]
+    color = str(data.get("color") or "").strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):     # injectee dans du HTML (carte)
+        color = "#2563eb"
     dominante = data.get("dominante") if data.get("dominante") in DOMINANTES else "generale"
     return {"name": name, "travel": travel, "loop": bool(data.get("loop")), "points": ids,
             "color": color, "dominante": dominante, "note": str(data.get("note") or "").strip()[:500]}, None

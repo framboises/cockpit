@@ -59,6 +59,14 @@
     return e;
   }
   function icon(name) { return el("span", "material-symbols-outlined", name); }
+  // Leaflet interprete en HTML le texte des infobulles et des divIcon : tout
+  // nom saisi (point, tablette) ou couleur passe par esc().
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function safeColor(c) { return /^#[0-9a-fA-F]{6}$/.test(c || "") ? c : "#2563eb"; }
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
   function fmtKm(m) { return m == null ? "-" : (m < 1000 ? m + " m" : (m / 1000).toFixed(1).replace(".", ",") + " km"); }
   function fmtMin(s) {
@@ -129,12 +137,12 @@
   function numberIcon(n, color, extra) {
     return L.divIcon({
       className: "pt-num-icon" + (extra ? " " + extra : ""),
-      html: '<span style="background:' + color + '">' + n + "</span>",
+      html: '<span style="background:' + safeColor(color) + '">' + esc(n) + "</span>",
       iconSize: [26, 26], iconAnchor: [13, 13],
     });
   }
   function dotIcon(color, title) {
-    return L.divIcon({ className: "pt-dot-icon", html: '<span style="background:' + color + '" title="' + (title || "") + '"></span>', iconSize: [14, 14], iconAnchor: [7, 7] });
+    return L.divIcon({ className: "pt-dot-icon", html: '<span style="background:' + safeColor(color) + '" title="' + esc(title) + '"></span>', iconSize: [14, 14], iconAnchor: [7, 7] });
   }
 
   function onMapClick(e) {
@@ -202,7 +210,7 @@
       var editing = S.pt && S.pt.id === p.id;
       if (editing) return;
       var m = L.marker([p.lat, p.lng], { icon: dotIcon(p.active ? "#2563eb" : "#94a3b8", p.name) })
-        .bindTooltip(p.name, { direction: "top", offset: [0, -6] });
+        .bindTooltip(esc(p.name), { direction: "top", offset: [0, -6] });
       L.circle([p.lat, p.lng], { radius: p.radius_m, color: "#2563eb", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(S.layers.points);
       m.on("click", function (e) {
         L.DomEvent.stopPropagation(e);
@@ -423,7 +431,7 @@
       var p = pointById(id);
       if (!p) return;
       L.marker([p.lat, p.lng], { icon: numberIcon(i + 1, color), zIndexOffset: 1000 })
-        .bindTooltip(p.name, { direction: "top", offset: [0, -12] }).addTo(S.layers.scenario);
+        .bindTooltip(esc(p.name), { direction: "top", offset: [0, -12] }).addTo(S.layers.scenario);
     });
     var est = S.sc.estimate;
     if (est && est.polyline) {
@@ -649,11 +657,11 @@
     r.steps.forEach(function (s, i) {
       if (s.lat == null) return;
       L.marker([s.lat, s.lng], { icon: numberIcon(i + 1, STEP_COLORS[s.state]) })
-        .bindTooltip(s.name + (s.at ? " - " + fmtTime(s.at) : ""), { direction: "top", offset: [0, -12] }).addTo(S.layers.live);
+        .bindTooltip(esc(s.name) + (s.at ? " - " + fmtTime(s.at) : ""), { direction: "top", offset: [0, -12] }).addTo(S.layers.live);
     });
     if (r.position && r.position.lat != null) {
-      L.marker([r.position.lat, r.position.lng], { icon: L.divIcon({ className: "pt-dev-icon", html: '<span class="material-symbols-outlined" style="color:' + color + '">navigation</span>', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 2000 })
-        .bindTooltip((r.device_name || "?") + " - position " + fmtTime(r.position.ts), { permanent: false }).addTo(S.layers.live);
+      L.marker([r.position.lat, r.position.lng], { icon: L.divIcon({ className: "pt-dev-icon", html: '<span class="material-symbols-outlined" style="color:' + safeColor(color) + '">navigation</span>', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 2000 })
+        .bindTooltip(esc(r.device_name || "?") + " - position " + fmtTime(r.position.ts), { permanent: false }).addTo(S.layers.live);
     }
   }
 
