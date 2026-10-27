@@ -4939,6 +4939,12 @@
     }, "danger");
     body.appendChild(g4);
     body.appendChild(_n("div", "test-muted", "Couper le reseau ne bloque que les envois (points, statuts, fin) : ils partent en file comme sans 4G, et repartent au retablissement. Les relectures continuent."));
+
+    body.appendChild(_n("div", "test-sec", "Application"));
+    var g5 = _n("div", "test-grid");
+    _actBtn(g5, "Mettre a jour maintenant", "system_update", forceAppUpdate, "primary");
+    body.appendChild(g5);
+    body.appendChild(_n("div", "test-muted", "Cherche la derniere version de Field et recharge l'application. Votre position simulee est gardee."));
   }
 
   function renderTestJournal(body) {
@@ -9764,6 +9770,33 @@
     scheduleInboxPoll();
     pollFiches();
     scheduleFichesPoll();
+    checkAppUpdate(false);
+  }
+
+  // Nouvelle version de l'app : une PWA iPhone reprend souvent sans
+  // redemarrer, le register() du chargement ne repasse pas. On redemande au
+  // retour dans l'app (au plus toutes les 5 min) ; le bandeau "Mise a jour
+  // disponible" fait le reste. force : bouton des outils de test.
+  var _lastUpdateCheck = 0;
+  function checkAppUpdate(force) {
+    if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+    if (!force && Date.now() - _lastUpdateCheck < 5 * 60 * 1000) return Promise.resolve(null);
+    _lastUpdateCheck = Date.now();
+    return navigator.serviceWorker.getRegistration("/field").then(function (reg) {
+      if (!reg) return null;
+      return reg.update().then(function () { return reg; });
+    }).catch(function () { return null; });
+  }
+
+  function forceAppUpdate() {
+    toast("Recherche d'une mise a jour...", "ok");
+    tlog("app", "mise a jour demandee");
+    checkAppUpdate(true).then(function (reg) {
+      var w = reg && (reg.waiting || reg.installing);
+      if (w) { try { w.postMessage({ type: "SKIP_WAITING" }); } catch (e) { /* ancien worker */ } }
+      // Recharger dans tous les cas : le nouveau worker (s'il y en a un) prend la main
+      setTimeout(function () { location.reload(); }, w ? 1500 : 300);
+    });
   }
 
   function initCatchUpTriggers() {
