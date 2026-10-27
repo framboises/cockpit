@@ -345,3 +345,74 @@ class TestModeTest:
         assert P.accept(db, run["_id"], a)[0]
         f = db["pcorg"].find_one({"_id": db["patrol_runs"].find_one({"_id": run["_id"]})["fiche_id"]})
         assert f["text"].startswith("[TEST] Patrouille programmee") and "test" in f["tags"]
+
+
+# ---------------------------------------------------------------------------
+# Routes tablette du mode test (Flask + MongoDB local)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def tablet(db, monkeypatch):
+    import sys, types
+    from flask import Flask
+    import patrols_api as PA
+    fake_app = types.ModuleType("app")
+    fake_app.db = db
+    monkeypatch.setitem(sys.modules, "app", fake_app)
+    monkeypatch.setattr(field, "_get_mongo_db", lambda: db)
+    monkeypatch.setattr(field, "_sweep_event_if_ended", lambda *a: False)
+    dev = _dev(db, "Essai")
+    db["field_devices"].update_one({"_id": dev["_id"]}, {"$set": {"token_hash": field._hash_token("tokT")}})
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(field.field_bp)
+    app.register_blueprint(PA.patrols_field_bp)
+    c = app.test_client()
+    c.set_cookie(field.FIELD_COOKIE_NAME, "tokT", path=field.FIELD_COOKIE_PATH)
+    return c, dev
+
+
+def _test_on(db, dev, on=True):
+    db["field_devices"].update_one({"_id": dev["_id"]}, {"$set": {"test_mode": on}})
+
+
+class TestOutilsTablette:
+    def test_position_simulee_reservee_au_mode_test(self, tablet, db):
+        c, dev = tablet
+        body = {"lat": 47.95, "lng": 0.21, "simulated": True}
+        assert c.post("/field/position", json=body).status_code == 403
+        _test_on(db, dev)
+        assert c.post("/field/position", json=body).status_code == 200
+        d = db["field_devices"].find_one({"_id": dev["_id"]})
+        assert d["last_position"]["simulated"] is True
+        assert db["anoloc_positions"].count_documents({}) == 0      # jamais dans les traces
+
+    def test_outils_refuses_hors_mode_test(self, tablet):
+        c, _ = tablet
+        for url in ("/field/test/state", "/field/test/scenarios"):
+            assert c.get(url).status_code == 403
+        for url in ("/field/test/send", "/field/test/expire", "/field/test/engine", "/field/test/cancel", "/field/test/report"):
+            assert c.post(url, json={}).status_code == 403
+
+    def test_se_proposer_puis_expirer(self, tablet, db):
+        c, dev = tablet
+        _test_on(db, dev)
+        sc = _scenario(db)
+        r = c.post("/field/test/send", json={"scenario_id": str(sc["_id"])})
+        assert r.status_code == 200 and r.get_json()["code"] == "proposed"
+        st = c.get("/field/test/state").get_json()
+        assert st["device"]["patrol_proposal"]["run_id"] == r.get_json()["run_id"]
+        assert st["engine"]["alive"] is False                      # aucune tache dans le test
+        assert c.post("/field/test/expire", json={}).get_json()["ok"]
+        run = db["patrol_runs"].find_one({"_id": r.get_json()["run_id"]})
+        assert run["state"] == "refused" and run["attempts"][0]["answer"] == "timeout"
+        al = db["cockpit_active_alerts"].find_one({"definition_slug": "patrol_not_taken"})
+        assert al["title"].startswith("[TEST]")
+
+    def test_rapport(self, tablet, db):
+        c, dev = tablet
+        _test_on(db, dev)
+        r = c.post("/field/test/report", json={"note": "point 2 pas valide", "log": [{"k": "gps", "m": "x"}],
+                                               "client": {"queue": 0}})
+        assert r.get_json()["ok"]
+        rep = db["field_test_reports"].find_one()
+        assert rep["note"] == "point 2 pas valide" and rep["log"][0]["k"] == "gps" and rep["server"]["device"]["name"] == "Essai"

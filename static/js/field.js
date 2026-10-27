@@ -277,7 +277,7 @@
 
     function flush() {
       if (_flushing) return Promise.resolve();
-      if (!navigator.onLine) return Promise.resolve();
+      if (!navigator.onLine || state.forceOffline) return Promise.resolve();
       _flushing = true;
       return all().then(function (records) {
         records.sort(function (a, b) { return a.id - b.id; });
@@ -316,12 +316,14 @@
                     try { pollFiches(); } catch (e) { /* noop */ }
                     return;
                   }
+                  tlog("file", "abandon " + rec.url + " : HTTP " + r.status);
                   toast("Action abandonnee (" + (rec.label || "?") + " : " + r.status + ")", "err");
                 });
               }
               if (r.status === 401) { throw new Error("auth"); }
               if (!r.ok) throw new Error("server");
               return remove(rec.id).then(function () {
+                if (rec.url.indexOf("/field/patrol/") === 0) tlog("file", "envoye (differe) " + rec.url);
                 if (rec.url === "/field/status") {
                   try { pollFiches(); } catch (e) { /* noop */ }
                 }
@@ -347,6 +349,12 @@
 
     function count() { return _count; }
     function addListener(fn) { _listeners.push(fn); fn(_count); }
+    // Outils du mode test : liste et vidage de la file
+    function clearAll() {
+      return all().then(function (records) {
+        return Promise.all(records.map(function (r) { return remove(r.id); }));
+      }).then(refreshCount);
+    }
 
     function start() {
       refreshCount();
@@ -359,6 +367,8 @@
     return {
       enqueue: enqueue,
       flush: flush,
+      all: all,
+      clearAll: clearAll,
       count: count,
       addListener: addListener,
       start: start,
@@ -418,8 +428,18 @@
         });
       });
     }
-    if (!navigator.onLine) return enqueue();
+    // Reseau coupe "pour de faux" (outils du mode test) : tout part en file
+    if (!navigator.onLine || state.forceOffline) return enqueue();
     return attemptFetch().catch(function () { return enqueue(); });
+  }
+
+  // Journal d'evenements (outils du mode test, rapports de bug) : en memoire,
+  // 300 dernieres lignes, tenu meme hors mode test (aucun envoi automatique).
+  function tlog(kind, msg) {
+    var log = state.testLog || (state.testLog = []);
+    log.push({ t: new Date().toISOString(), k: kind, m: String(msg) });
+    if (log.length > 300) log.splice(0, log.length - 300);
+    if (state.testPanelRefresh) state.testPanelRefresh(true);
   }
 
   function updateOfflineBadge() {
@@ -757,6 +777,8 @@
   }
 
   function onGpsUpdate(pos) {
+    // Dernier GPS reel connu (outils du mode test), meme masque par une simulation
+    if (!pos._sim) state.realGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy, at: Date.now() };
     // Mode test : une position simulee remplace le GPS reel tant qu'elle est posee
     if (state.simPos && !pos._sim) return;
     setGpsStatus("ok");
@@ -829,6 +851,7 @@
     if (elapsed < POSITION_PUSH_MS && moved < POSITION_MIN_MOVE_M) return;
     state.lastPushedAt = now;
     state.lastPushedPos = latlng;
+    state.lastPush = { at: now, sim: !!pos._sim };
     var body = {
       lat: latlng[0],
       lng: latlng[1],
@@ -3584,6 +3607,7 @@
       })
       .then(function (data) {
         if (!data) return;
+        state.lastPoll = { at: Date.now(), ms: Date.now() - pollStartedAt, ok: true };
         // Reponse partie avant un changement de statut local : elle decrit
         // l'etat d'avant, on n'en retient pas le statut (le prochain poll,
         // declenche juste apres le POST, portera le bon).
@@ -3658,7 +3682,10 @@
         var psr = data.pending_stream_request;
         handleStreamRequestPoll(psr);
       })
-      .catch(function () { /* silent */ });
+      .catch(function (e) {
+        state.lastPoll = { at: Date.now(), ms: Date.now() - pollStartedAt, ok: false, err: String(e && e.message || e) };
+        tlog("poll", "erreur : " + state.lastPoll.err);
+      });
   }
 
   function detectNewFiches(open) {
@@ -3967,6 +3994,7 @@
       return;
     }
     if (p.run_id === _pp.id && _pp.overlay) return;
+    tlog("proposition", "recue : " + (p.name || "?") + " (" + (p.points || []).length + " points, " + p.remaining_s + " s, run " + p.run_id + ")");
     closePatrolProposal();
     _pp.id = p.run_id;
     _pp.answered = false;
@@ -4071,6 +4099,7 @@
         return r.json().catch(function () { return { ok: r.ok }; });
       }).then(function (data) {
         if (!data) return;
+        tlog("proposition", kind + " -> " + (data.ok ? "ok" : "refus serveur " + (data.error || data.code || "?")));
         closePatrolProposal();
         if (kind === "accept") {
           if (data.ok) { toast("Patrouille acceptee", "ok"); _patrol.routeFor = null; }
@@ -4079,7 +4108,8 @@
           toast("Patrouille refusee", "ok");
         }
         pollFiches();
-      }).catch(function () {
+      }).catch(function (e) {
+        tlog("proposition", kind + " : echec reseau " + (e && e.message || e));
         _pp.answered = false;
         btnAccept.disabled = Date.now() >= _pp.deadline;
         btnRefuse.disabled = false;
@@ -4102,6 +4132,11 @@
 
   function handlePatrol(run) {
     var prevId = _patrol.run ? _patrol.run.run_id : null;
+    var prevState = _patrol.run ? _patrol.run.state : null;
+    if ((run ? run.run_id : null) !== prevId || (run && run.state !== prevState)) {
+      tlog("patrouille", run ? (run.run_id !== prevId ? "en cours : " + run.name + " (" + run.run_id + ")" : "etat " + prevState + " -> " + run.state)
+                             : "terminee (" + prevId + ")");
+    }
     if (!run) {
       if (prevId) {
         toast("Patrouille terminee", "ok");
@@ -4270,7 +4305,10 @@
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ from: [me.lat, me.lng], point_id: step.point_id }),
     }, 12000).then(function (r) { return r.json(); }).then(function (d) {
+      tlog("itineraire", "vers " + step.name + " : " + (d && d.ok ? _fmtDistance(d.distance_m) + ", " + Math.round(d.duration_s / 60) + " min (" + d.travel + ")"
+                                                                  : "echec " + ((d && d.error) || "?") + ", trait direct"));
       if (!_patrol.run || _patrol.routeFor !== step.point_id) return;
+      state.lastPatrolRoute = d && d.ok ? d.polyline : null;
       setRouteDestination(latlng, d && d.ok ? d.polyline : null, false, null);
       if (manual && d && d.ok) toast("Itineraire : " + _fmtDistance(d.distance_m) + ", " + Math.max(1, Math.round(d.duration_s / 60)) + " min", "ok");
     }).catch(function () { setRouteDestination(latlng, null, false, null); });
@@ -4282,6 +4320,8 @@
     renderPatrol();
     return queuedJsonPost("/field/patrol/" + encodeURIComponent(run.run_id) + "/step",
       Object.assign({ point_id: step.point_id, at: Date.now() }, body), label).then(function (res) {
+      tlog("point", step.name + " " + body.action + (body.method ? " (" + body.method + ")" : "") + " -> " +
+        (res && res.queued ? "mis en file" : res && res.ok === false ? "refus " + (res.error || res._status) : "ok " + ((res && res.code) || "")));
       if (res && res.queued) toast(label + " : enregistre, envoi au retour du reseau", "warn");
       else if (res && res.ok === false) {
         delete _patrol.sent[step.point_id];
@@ -4333,9 +4373,11 @@
         var fd = new FormData();
         Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
         fd.append("photo", blob, "patrouille.jpg");
-        var p = navigator.onLine
+        tlog("point", step.name + " photo " + Math.round((blob.size || 0) / 1024) + " ko");
+        var p = navigator.onLine && !state.forceOffline
           ? fetchWithTimeout(url, { method: "POST", body: fd }, 30000).then(function (r) {
               return r.json().then(function (d) {
+                tlog("point", step.name + " photo -> " + (d.ok ? "ok" : "refus " + (d.error || r.status)));
                 if (d.ok) toast("Point fait avec photo : " + step.name, "ok");
                 else { delete _patrol.sent[step.point_id]; toast("Point refuse : " + (d.error || r.status), "err"); }
               });
@@ -4431,10 +4473,12 @@
     var fab = state.testFab;
     if (on) {
       if (!badge) {
-        badge = document.createElement("div");
+        badge = document.createElement("button");
         badge.id = "field-test-badge";
         badge.className = "field-test-badge";
-        badge.textContent = "MODE TEST";
+        badge.textContent = "MODE TEST - outils";
+        badge.title = "Outils de test : etat, patrouille, actions, journal";
+        badge.addEventListener("click", openTestPanel);
         var wrap = document.querySelector(".field-map-wrap");
         if (wrap) wrap.appendChild(badge);
       }
@@ -4467,23 +4511,407 @@
     renderPatrol();
   }
 
-  function setSimPosition(latlng) {
+  // quiet : appel repete du trajet simule (ni message, ni journal)
+  function setSimPosition(latlng, quiet) {
     if (state.simTimer) { clearInterval(state.simTimer); state.simTimer = null; }
+    if (!latlng && !quiet) stopSimWalk();
     state.simPos = latlng;
     if (state.testFab) {
       state.testFab.classList.toggle("active", !!latlng);
       state.testFab.title = latlng ? "Position simulee : toucher pour revenir au GPS reel" : "Position simulee (mode test)";
     }
-    if (!latlng) { toast("Retour au GPS reel", "ok"); return; }
+    if (!quiet) tlog("position", latlng ? "simulee " + latlng[0].toFixed(5) + ", " + latlng[1].toFixed(5) : "retour au GPS reel");
+    if (!latlng) { if (!quiet) toast("Retour au GPS reel", "ok"); return; }
     function emit() {
       // Forme d'une position GPS : meme chemin que le vrai GPS (carte, envoi,
       // validation des points de patrouille)
       onGpsUpdate({ _sim: true, coords: { latitude: state.simPos[0], longitude: state.simPos[1], accuracy: 5, speed: null, heading: null } });
     }
-    state.lastPushedAt = 0;
+    if (!quiet) state.lastPushedAt = 0;     // trajet simule : envoi au rythme normal
     emit();
     state.simTimer = setInterval(function () { if (state.simPos) { state.lastPushedAt = 0; emit(); } }, 30000);
-    toast("Position simulee posee", "ok");
+    if (!quiet) toast("Position simulee posee", "ok");
+  }
+
+  // ---------------------------------------------------------------------
+  // Trajet simule (outils du mode test) : la position simulee avance le long
+  // de l'itineraire du moteur vers le prochain point, a la vitesse choisie,
+  // une position par seconde ; "toute la patrouille" enchaine les points.
+  // ---------------------------------------------------------------------
+  function stopSimWalk() {
+    if (state.simWalk && state.simWalk.timer) clearInterval(state.simWalk.timer);
+    if (state.simWalk) tlog("trajet", "arrete");
+    state.simWalk = null;
+  }
+
+  function startSimWalk(speedKmh, all) {
+    if (state.simWalk && state.simWalk.timer) clearInterval(state.simWalk.timer);
+    state.simWalk = null;
+    var run = _patrol.run, nx = patrolNextStep();
+    if (!run || !nx) { toast("Pas de point a rejoindre", "warn"); return; }
+    if (run.state !== "running") { toast("Patrouille en pause : trajet impossible", "warn"); return; }
+    var from = state.simPos || (state.meMarker ? [state.meMarker.getLatLng().lat, state.meMarker.getLatLng().lng] : null);
+    var target = [nx.step.lat, nx.step.lng];
+    state.simWalk = { label: "vers " + nx.step.name, all: all, speed: speedKmh };
+    function go(pts) {
+      if (!state.simWalk) return;
+      var cum = [0];
+      for (var i = 1; i < pts.length; i++) cum.push(cum[i - 1] + haversine(pts[i - 1], pts[i]));
+      var total = cum[cum.length - 1], done = 0, mps = speedKmh / 3.6;
+      tlog("trajet", "vers " + nx.step.name + " : " + _fmtDistance(Math.round(total)) + " a " + speedKmh + " km/h");
+      state.simWalk.total = total;
+      state.simWalk.timer = setInterval(function () {
+        done = Math.min(total, done + mps);
+        state.simWalk.done = done;
+        var k = 1;
+        while (k < cum.length - 1 && cum[k] < done) k++;
+        var seg = cum[k] - cum[k - 1] || 1, f = Math.max(0, Math.min(1, (done - cum[k - 1]) / seg));
+        var p = [pts[k - 1][0] + (pts[k][0] - pts[k - 1][0]) * f, pts[k - 1][1] + (pts[k][1] - pts[k - 1][1]) * f];
+        setSimPosition(p, true);
+        if (done >= total) {
+          clearInterval(state.simWalk.timer);
+          var keepAll = state.simWalk.all;
+          state.simWalk = null;
+          tlog("trajet", "arrive " + nx.step.name);
+          if (!keepAll) return;
+          setTimeout(function () {
+            var nn = patrolNextStep();
+            if (!nn) { tlog("trajet", "patrouille complete"); return; }
+            if (nn.step.photo_required) { tlog("trajet", "arret : photo exigee a " + nn.step.name + ", a faire a la main"); return; }
+            startSimWalk(speedKmh, true);
+          }, 2500);
+        }
+      }, 1000);
+    }
+    if (!from) { go([target, target]); return; }
+    fetchWithTimeout("/field/patrol/" + encodeURIComponent(run.run_id) + "/route", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: from, point_id: nx.step.point_id }),
+    }, 12000).then(function (r) { return r.json(); }).then(function (d) {
+      var pts = d && d.ok ? _decodePolyline6(d.polyline) : [];
+      if (pts.length < 2) { tlog("trajet", "pas d'itineraire (" + ((d && d.error) || "?") + ") : ligne droite"); pts = [from, target]; }
+      pts.push(target);
+      go(pts);
+    }).catch(function () { tlog("trajet", "itineraire injoignable : ligne droite"); go([from, target]); });
+  }
+
+  // ---------------------------------------------------------------------
+  // Panneau "Outils de test" (mode test) : Etat (tablette + serveur),
+  // Patrouille (calculs de validation), Actions (raccourcis d'essai),
+  // Journal (evenements, rapport de bug envoye au serveur).
+  // ---------------------------------------------------------------------
+  var _tp = { overlay: null, tab: "etat", timer: null, server: null, serverAt: 0, scenarios: null };
+
+  function _n(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = String(text);
+    return e;
+  }
+  function _ago(ms) {
+    if (!ms) return "jamais";
+    var s = Math.round((Date.now() - ms) / 1000);
+    return s < 60 ? "il y a " + s + " s" : "il y a " + Math.round(s / 60) + " min";
+  }
+  function _agoIso(iso) { return iso ? _ago(new Date(iso).getTime()) : "-"; }
+
+  function openTestPanel() {
+    if (_tp.overlay) return;
+    var overlay = _n("div", "field-modal");
+    var box = _n("div", "field-modal-box test-panel");
+    var head = _n("div", "test-panel-head");
+    head.appendChild(_n("b", null, "Outils de test"));
+    var close = _n("button", "test-panel-close");
+    close.appendChild(_mkIcon("close"));
+    close.addEventListener("click", closeTestPanel);
+    head.appendChild(close);
+    box.appendChild(head);
+    var tabs = _n("div", "test-panel-tabs");
+    [["etat", "Etat"], ["patrouille", "Patrouille"], ["actions", "Actions"], ["journal", "Journal"]].forEach(function (t) {
+      var b = _n("button", null, t[1]);
+      b.dataset.tab = t[0];
+      b.addEventListener("click", function () { _tp.tab = t[0]; renderTestPanel(); });
+      tabs.appendChild(b);
+    });
+    box.appendChild(tabs);
+    var body = _n("div", "test-panel-body");
+    box.appendChild(body);
+    overlay.appendChild(box);
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeTestPanel(); });
+    document.body.appendChild(overlay);
+    _tp.overlay = overlay;
+    _tp.body = body;
+    _tp.tabs = tabs;
+    state.testPanelRefresh = function (logOnly) { if (!logOnly || _tp.tab === "journal") renderTestPanel(); };
+    _tp.timer = setInterval(function () {
+      if (_tp.tab === "etat" || _tp.tab === "patrouille") {
+        if (Date.now() - _tp.serverAt > 4000) loadTestServer();
+        renderTestPanel();
+      }
+    }, 2000);
+    loadTestServer();
+    renderTestPanel();
+  }
+
+  function closeTestPanel() {
+    if (_tp.timer) clearInterval(_tp.timer);
+    if (_tp.overlay) _tp.overlay.remove();
+    _tp.overlay = null;
+    state.testPanelRefresh = null;
+  }
+
+  function loadTestServer() {
+    _tp.serverAt = Date.now();
+    return fetchWithTimeout("/field/test/state", { headers: { "Accept": "application/json" }, cache: "no-store" }, 10000)
+      .then(function (r) { return r.json(); })
+      .then(function (d) { _tp.server = d; if (_tp.overlay && _tp.tab !== "actions") renderTestPanel(); })
+      .catch(function (e) { _tp.server = { ok: false, error: String(e && e.message || e) }; });
+  }
+
+  function _kv(box, rows) {
+    var t = _n("div", "test-kv");
+    rows.forEach(function (r) {
+      if (!r) return;
+      t.appendChild(_n("span", "k", r[0]));
+      var v = _n("span", "v" + (r[2] ? " " + r[2] : ""), r[1] == null || r[1] === "" ? "-" : r[1]);
+      t.appendChild(v);
+    });
+    box.appendChild(t);
+  }
+
+  function renderTestPanel() {
+    if (!_tp.overlay) return;
+    Array.prototype.forEach.call(_tp.tabs.children, function (b) { b.classList.toggle("active", b.dataset.tab === _tp.tab); });
+    var body = _tp.body;
+    var keepScroll = body.scrollTop;
+    body.textContent = "";
+    if (_tp.tab === "etat") renderTestEtat(body);
+    else if (_tp.tab === "patrouille") renderTestPatrol(body);
+    else if (_tp.tab === "actions") renderTestActions(body);
+    else renderTestJournal(body);
+    body.scrollTop = keepScroll;
+  }
+
+  function renderTestEtat(body) {
+    var dev = window.FIELD_DEVICE || {};
+    body.appendChild(_n("div", "test-sec", "Tablette (vu par l'application)"));
+    var lp = state.lastPoll || {};
+    var g = state.realGps;
+    var swUrl = navigator.serviceWorker && navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : "aucun";
+    _kv(body, [
+      ["Nom", dev.name || "-"],
+      ["Statut", state.patrolStatus || "-"],
+      ["Fiche active", state.activeFicheId || "-"],
+      ["Reseau", state.forceOffline ? "COUPE pour le test" : (navigator.onLine ? "en ligne" : "hors ligne"), state.forceOffline || !navigator.onLine ? "bad" : "ok"],
+      ["File hors ligne", OfflineQueue.count() + " envoi(s) en attente", OfflineQueue.count() ? "warn" : ""],
+      ["Dernier rafraichissement", lp.at ? _ago(lp.at) + " (" + lp.ms + " ms)" + (lp.ok ? "" : " ERREUR " + (lp.err || "")) : "jamais", lp.ok === false ? "bad" : ""],
+      ["GPS reel", g ? g.lat.toFixed(5) + ", " + g.lng.toFixed(5) + " +/-" + Math.round(g.acc || 0) + " m, " + _ago(g.at) : "aucun"],
+      ["Position simulee", state.simPos ? state.simPos[0].toFixed(5) + ", " + state.simPos[1].toFixed(5) : "non", state.simPos ? "warn" : ""],
+      ["Trajet simule", state.simWalk ? state.simWalk.label + " " + Math.round(state.simWalk.done || 0) + "/" + Math.round(state.simWalk.total || 0) + " m" : "non"],
+      ["Dernier envoi position", state.lastPush ? _ago(state.lastPush.at) + (state.lastPush.sim ? " (simulee)" : "") : "jamais"],
+      ["Intervalle d'envoi", Math.round(POSITION_PUSH_MS / 1000) + " s"],
+      ["Acces piste", state.routePiste ? "oui" : "non"],
+      ["Service worker", swUrl.split("/").pop()],
+    ]);
+    body.appendChild(_n("div", "test-sec", "Serveur"));
+    var s = _tp.server;
+    if (!s) { body.appendChild(_n("div", "test-muted", "Chargement...")); return; }
+    if (!s.ok) { body.appendChild(_n("div", "test-bad", "Etat serveur indisponible : " + (s.error || "?"))); return; }
+    var d = s.device || {}, pp = d.patrol_proposal || {}, fp = d.pending_proposal || {}, pos = d.last_position || {};
+    _kv(body, [
+      ["Moteur (tache planifiee)", s.engine.alive ? "actif, dernier passage " + s.engine.age_s + " s" : (s.engine.last_at ? "ARRETE depuis " + _agoIso(s.engine.last_at) : "JAMAIS LANCE (tache a creer)"), s.engine.alive ? "ok" : "bad"],
+      ["Statut serveur", d.status || "patrouille", (d.status || "patrouille") !== state.patrolStatus ? "warn" : ""],
+      ["Categorie effective", s.category_effective || "aucune (toutes)"],
+      ["Zones de competence", (d.competence_zones || []).length ? d.competence_zones.length + " zone(s)" : "partout"],
+      ["Patrouille en cours", d.active_patrol_run || "non"],
+      ["Proposition patrouille", pp.run_id ? pp.run_id + " (expire " + _agoIso(pp.expires_at).replace("il y a", "il y a") + ")" : "non"],
+      ["Proposition fiche", fp.fiche_id ? fp.fiche_id : "non"],
+      ["Position connue", pos.lat != null ? pos.lat.toFixed(5) + ", " + pos.lng.toFixed(5) + (pos.simulated ? " (simulee)" : "") + ", " + _agoIso(pos.ts) : "aucune"],
+      ["Vue par le serveur", _agoIso(d.last_seen)],
+      ["Reglages", "rayon " + s.settings.radius_m + " m, delai " + s.settings.accept_timeout_s + " s, vue < " + s.settings.seen_window_min + " min"],
+    ]);
+    if (s.run) {
+      _kv(body, [["Patrouille (serveur)", s.run.state + (s.run.fiche_id ? ", fiche " + s.run.fiche_id.slice(0, 8) : "")],
+                 ["Pauses", String((s.run.pauses || []).length)]]);
+    }
+  }
+
+  function renderTestPatrol(body) {
+    var run = _patrol.run;
+    if (!run) {
+      body.appendChild(_n("div", "test-muted", "Aucune patrouille en cours." + (_pp.id ? " Proposition en attente : " + _pp.id : "")));
+      return;
+    }
+    var nx = patrolNextStep();
+    var me = state.simPos || (state.meMarker ? [state.meMarker.getLatLng().lat, state.meMarker.getLatLng().lng] : null);
+    var rows = [["Patrouille", run.name + " (" + run.run_id.slice(0, 8) + ")"], ["Etat", run.state, run.state === "paused" ? "warn" : "ok"],
+                ["Deplacement", run.travel === "pedestrian" ? "a pied" : "vehicule"]];
+    if (nx) {
+      var dist = me ? Math.round(haversine(me, [nx.step.lat, nx.step.lng])) : null;
+      var acc = state.simPos ? 5 : (state.realGps ? state.realGps.acc : 0);
+      var tol = (nx.step.radius_m || 25) + Math.min(15, Math.max(0, (acc || 0) / 2));
+      rows.push(["Point suivant", (nx.index + 1) + ". " + nx.step.name]);
+      rows.push(["Distance", dist != null ? dist + " m" : "position inconnue", dist != null && dist <= tol ? "ok" : ""]);
+      rows.push(["Validation a", Math.round(tol) + " m (rayon " + nx.step.radius_m + " + precision)"]);
+      if (_patrol.near && _patrol.near.pid === nx.step.point_id) rows.push(["Dans le rayon depuis", _ago(_patrol.near.since)]);
+      rows.push(["Photo exigee", nx.step.photo_required ? "oui (pas de validation GPS seule)" : "non"]);
+      rows.push(["Itineraire affiche", _patrol.routeFor === nx.step.point_id ? "oui" : "non"]);
+    } else rows.push(["Point suivant", "aucun (tout est fait ou envoye)"]);
+    _kv(body, rows);
+    body.appendChild(_n("div", "test-sec", "Points (tablette / serveur)"));
+    var srv = (_tp.server && _tp.server.run_steps) || [];
+    var t = _n("div", "test-steps");
+    run.steps.forEach(function (s, i) {
+      var r = _n("div", "test-step");
+      var sent = _patrol.sent[s.point_id];
+      var sv = srv[i] || {};
+      r.appendChild(_n("span", "n", String(i + 1)));
+      r.appendChild(_n("span", "name", s.name));
+      r.appendChild(_n("span", "st st-" + (sent ? "sent" : s.state), sent ? "envoi..." : s.state));
+      r.appendChild(_n("span", "st st-" + (sv.state || "?"), sv.state ? sv.state + (sv.method ? " " + sv.method : "") : "?"));
+      if (sv.state && sv.state !== s.state && !sent) r.classList.add("diff");
+      t.appendChild(r);
+    });
+    body.appendChild(t);
+  }
+
+  function _actBtn(box, label, iconName, fn, cls) {
+    var b = _n("button", "test-act" + (cls ? " " + cls : ""));
+    b.appendChild(_mkIcon(iconName));
+    b.appendChild(document.createTextNode(" " + label));
+    b.addEventListener("click", fn);
+    box.appendChild(b);
+    return b;
+  }
+
+  function _testPost(url, body, label) {
+    tlog("test", label + "...");
+    return fetchWithTimeout(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }, 15000)
+      .then(function (r) { return r.json().then(function (d) { d._status = r.status; return d; }); })
+      .then(function (d) {
+        tlog("test", label + " -> " + (d.ok ? "ok" : "echec " + (d.error || d.code || d._status)) + (d.done ? " : " + d.done.join(", ") : ""));
+        toast(label + (d.ok ? " : ok" : " : " + (d.error || d.code || "echec")), d.ok ? "ok" : "warn");
+        pollFiches();
+        loadTestServer();
+        return d;
+      })
+      .catch(function (e) { tlog("test", label + " : erreur " + (e && e.message || e)); toast("Erreur reseau", "err"); });
+  }
+
+  function renderTestActions(body) {
+    body.appendChild(_n("div", "test-sec", "Patrouille"));
+    var row = _n("div", "test-row");
+    var sel = _n("select", "test-select");
+    if (_tp.scenarios) {
+      _tp.scenarios.forEach(function (s) { sel.appendChild(new Option(s.name + " (" + s.points + " pts)", s.id)); });
+    } else {
+      sel.appendChild(new Option("Chargement des scenarios...", ""));
+      fetchWithTimeout("/field/test/scenarios", { cache: "no-store" }, 10000).then(function (r) { return r.json(); })
+        .then(function (d) { _tp.scenarios = d.scenarios || []; if (_tp.tab === "actions") renderTestPanel(); });
+    }
+    row.appendChild(sel);
+    _actBtn(row, "Me proposer", "send", function () {
+      if (!sel.value) return;
+      _testPost("/field/test/send", { scenario_id: sel.value }, "Me proposer la patrouille");
+    }, "primary");
+    body.appendChild(row);
+    var g = _n("div", "test-grid");
+    _actBtn(g, "Expirer la proposition", "timer_off", function () { _testPost("/field/test/expire", {}, "Expiration de la proposition"); });
+    _actBtn(g, "Passer le moteur", "settings_backup_restore", function () { _testPost("/field/test/engine", {}, "Passage du moteur"); });
+    _actBtn(g, "Annuler ma patrouille", "cancel", function () { _testPost("/field/test/cancel", {}, "Annulation"); }, "danger");
+    _actBtn(g, "Relire maintenant", "refresh", function () { pollFiches(); loadTestServer(); toast("Relecture", "ok"); });
+    body.appendChild(g);
+
+    body.appendChild(_n("div", "test-sec", "Position"));
+    var g2 = _n("div", "test-grid");
+    _actBtn(g2, "Au point suivant", "pin_drop", function () {
+      var nx = patrolNextStep();
+      if (!nx) { toast("Pas de point suivant", "warn"); return; }
+      setSimPosition([nx.step.lat, nx.step.lng]);
+    });
+    _actBtn(g2, "Revenir au GPS reel", "my_location", function () { stopSimWalk(); setSimPosition(null); });
+    body.appendChild(g2);
+    var row2 = _n("div", "test-row");
+    var sp = _n("select", "test-select");
+    [["5", "A pied 5 km/h"], ["25", "A pied accelere x5"], ["30", "Vehicule 30 km/h"], ["150", "Vehicule accelere x5"]].forEach(function (o) { sp.appendChild(new Option(o[1], o[0])); });
+    if (_patrol.run && _patrol.run.travel !== "pedestrian") sp.value = "30";
+    row2.appendChild(sp);
+    body.appendChild(row2);
+    var g3 = _n("div", "test-grid");
+    _actBtn(g3, "Trajet jusqu'au point", "directions_walk", function () { startSimWalk(+sp.value, false); renderTestPanel(); });
+    _actBtn(g3, "Toute la patrouille", "route", function () { startSimWalk(+sp.value, true); renderTestPanel(); });
+    if (state.simWalk) _actBtn(g3, "Arreter le trajet", "stop_circle", function () { stopSimWalk(); renderTestPanel(); }, "danger");
+    body.appendChild(g3);
+
+    body.appendChild(_n("div", "test-sec", "Reseau et file hors ligne (" + OfflineQueue.count() + " en attente)"));
+    var g4 = _n("div", "test-grid");
+    _actBtn(g4, state.forceOffline ? "Retablir le reseau" : "Couper le reseau", state.forceOffline ? "wifi" : "wifi_off", function () {
+      state.forceOffline = !state.forceOffline;
+      tlog("reseau", state.forceOffline ? "coupe pour le test (envois mis en file)" : "retabli");
+      if (!state.forceOffline) OfflineQueue.flush();
+      renderTestPanel();
+    }, state.forceOffline ? "warn" : "");
+    _actBtn(g4, "Envoyer la file", "upload", function () { tlog("file", "envoi force"); OfflineQueue.flush().then(function () { renderTestPanel(); }); });
+    _actBtn(g4, "Vider la file", "delete_sweep", function () {
+      OfflineQueue.all().then(function (recs) {
+        tlog("file", "vidage de " + recs.length + " envoi(s) : " + recs.map(function (r) { return r.url; }).join(", "));
+        return OfflineQueue.clearAll();
+      }).then(function () { renderTestPanel(); });
+    }, "danger");
+    body.appendChild(g4);
+    body.appendChild(_n("div", "test-muted", "Couper le reseau ne bloque que les envois (points, statuts, fin) : ils partent en file comme sans 4G, et repartent au retablissement. Les relectures continuent."));
+  }
+
+  function renderTestJournal(body) {
+    var row = _n("div", "test-row");
+    _actBtn(row, "Envoyer le rapport", "bug_report", sendTestReport, "primary");
+    _actBtn(row, "Effacer", "delete", function () { state.testLog = []; renderTestPanel(); });
+    body.appendChild(row);
+    var log = (state.testLog || []).slice().reverse();
+    if (!log.length) body.appendChild(_n("div", "test-muted", "Journal vide."));
+    var list = _n("div", "test-log");
+    log.forEach(function (l) {
+      var r = _n("div", "test-log-line k-" + l.k);
+      r.appendChild(_n("span", "t", new Date(l.t).toLocaleTimeString("fr-FR")));
+      r.appendChild(_n("span", "k", l.k));
+      r.appendChild(_n("span", "m", l.m));
+      list.appendChild(r);
+    });
+    body.appendChild(list);
+  }
+
+  function sendTestReport() {
+    var overlay = _n("div", "field-modal");
+    var box = _n("div", "field-modal-box test-panel");
+    box.appendChild(_n("b", null, "Rapport de test"));
+    box.appendChild(_n("div", "test-muted", "Decrivez ce qui ne va pas : le journal et l'etat complet de la tablette et du serveur partent avec."));
+    var ta = _n("textarea", "test-note");
+    ta.rows = 4;
+    ta.placeholder = "Ex. le point 2 ne s'est pas valide alors que j'etais dessus";
+    box.appendChild(ta);
+    var row = _n("div", "test-row");
+    _actBtn(row, "Annuler", "close", function () { overlay.remove(); });
+    _actBtn(row, "Envoyer", "send", function () {
+      var client = {
+        status: state.patrolStatus, active_fiche_id: state.activeFicheId, online: navigator.onLine, force_offline: !!state.forceOffline,
+        queue: OfflineQueue.count(), last_poll: state.lastPoll || null, real_gps: state.realGps || null, sim_pos: state.simPos || null,
+        sim_walk: state.simWalk ? { label: state.simWalk.label, done: state.simWalk.done, total: state.simWalk.total } : null,
+        patrol: _patrol.run, patrol_sent: _patrol.sent, near: _patrol.near, route_for: _patrol.routeFor, proposal_id: _pp.id,
+        push_ms: POSITION_PUSH_MS, screen: window.innerWidth + "x" + window.innerHeight,
+      };
+      fetchWithTimeout("/field/test/report", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: ta.value, log: state.testLog || [], client: client }) }, 20000)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          overlay.remove();
+          if (d.ok) { tlog("rapport", "envoye (" + d.id + ")"); toast("Rapport envoye : " + d.id.slice(-6), "ok"); }
+          else toast("Rapport refuse : " + (d.error || "?"), "err");
+        }).catch(function () { toast("Pas de reseau : rapport non envoye", "err"); });
+    }, "primary");
+    box.appendChild(row);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    ta.focus();
   }
 
   // Passage GPS : point valide a moins de son rayon (precision du GPS
@@ -4501,7 +4929,10 @@
       return;
     }
     var now = Date.now();
-    if (!_patrol.near || _patrol.near.pid !== s.point_id) _patrol.near = { pid: s.point_id, since: now, asked: false };
+    if (!_patrol.near || _patrol.near.pid !== s.point_id) {
+      _patrol.near = { pid: s.point_id, since: now, asked: false };
+      tlog("gps", "dans le rayon de " + s.name + " : " + Math.round(d) + " m (tolerance " + Math.round(tol) + " m, arret " + (s.dwell_s || 0) + " s)");
+    }
     var dwell = (s.dwell_s || 0) * 1000;
     if (now - _patrol.near.since < dwell) return;
     if (s.photo_required) {

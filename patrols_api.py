@@ -525,6 +525,184 @@ def field_patrol_finish(run_id):
     return jsonify({"ok": True, "code": code})
 
 
+# ---------------------------------------------------------------------------
+# Outils de test de la tablette (mode test de Field dispatch uniquement)
+# ---------------------------------------------------------------------------
+# Panneau "Outils de test" de field.js : etat vu par le serveur, raccourcis
+# (se proposer une patrouille, faire expirer, passer le moteur pour SA
+# patrouille, annuler) et rapports de bug (`field_test_reports`, 30 jours),
+# lus ensuite par les developpeurs. Tout est refuse hors mode test.
+
+TEST_REPORTS_TTL_DAYS = 30
+
+
+def _test_device():
+    d = request.device
+    fresh = _db()["field_devices"].find_one({"_id": d["_id"]}) or d
+    return fresh if fresh.get("test_mode") else None
+
+
+def _plain(v):
+    """Document Mongo -> JSON (dates ISO, ObjectId en texte)."""
+    if isinstance(v, dict):
+        return {k: _plain(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_plain(x) for x in v]
+    if isinstance(v, datetime):
+        return P._iso(v)
+    if type(v).__name__ == "ObjectId":
+        return str(v)
+    return v
+
+
+@patrols_field_bp.route("/field/test/state", methods=["GET"])
+@field_token_required
+def field_test_state():
+    """Ce que voit le serveur : tablette, patrouille, propositions, moteur."""
+    d = _test_device()
+    if not d:
+        return _err("mode_test_requis", 403)
+    db = _db()
+    now = P._now()
+    run = db["patrol_runs"].find_one({"_id": d.get("active_patrol_run")}) if d.get("active_patrol_run") else None
+    prop_run = None
+    pp = d.get("patrol_proposal") or {}
+    if pp.get("run_id"):
+        prop_run = db["patrol_runs"].find_one({"_id": pp["run_id"]}, {"state": 1, "current": 1, "attempts": 1, "scenario.name": 1})
+    lock = db["cockpit_settings"].find_one({"_id": "patrol_engine_lock"}) or {}
+    last = P._aware(lock.get("at"))
+    import field as F
+    return jsonify({
+        "ok": True, "now": P._iso(now),
+        "device": _plain({k: d.get(k) for k in (
+            "_id", "name", "event", "year", "beacon_group_id", "category", "status", "status_since",
+            "active_fiche_id", "active_patrol_run", "patrol_proposal", "pending_proposal", "last_seen",
+            "last_position", "competence_zones", "test_mode", "metiers")}),
+        "category_effective": F._device_category(db, d),
+        "route_piste": F._device_route_piste(db, d),
+        "run": _plain({k: (run or {}).get(k) for k in ("_id", "state", "fiche_id", "started_at", "pauses",
+                                                     "attempts", "current", "end_reason")}) if run else None,
+        "run_steps": [{"name": s.get("name"), "state": s.get("state"), "method": s.get("method"),
+                       "at": P._iso(s.get("at"))} for s in (run or {}).get("steps") or []],
+        "proposal_run": _plain(prop_run) if prop_run else None,
+        "engine": {"last_at": P._iso(last),
+                   "age_s": round((now - last).total_seconds()) if isinstance(last, datetime) else None,
+                   "alive": bool(isinstance(last, datetime) and (now - last).total_seconds() < 90)},
+        "settings": P.get_settings(db),
+    })
+
+
+@patrols_field_bp.route("/field/test/scenarios", methods=["GET"])
+@field_token_required
+def field_test_scenarios():
+    if not _test_device():
+        return _err("mode_test_requis", 403)
+    db = _db()
+    out = [{"id": str(s["_id"]), "name": s.get("name"), "points": len(s.get("points") or []),
+            "travel": s.get("travel")} for s in db["patrol_scenarios"].find({"archived": {"$ne": True}}).sort("name", 1)]
+    return jsonify({"ok": True, "scenarios": out})
+
+
+@patrols_field_bp.route("/field/test/send", methods=["POST"])
+@field_token_required
+def field_test_send():
+    """Se proposer une patrouille a soi-meme (cible = cette tablette)."""
+    d = _test_device()
+    if not d:
+        return _err("mode_test_requis", 403)
+    sid = (request.get_json(silent=True) or {}).get("scenario_id")
+    run, code, skipped = P.create_run(_db(), sid, {"kind": "device", "device_id": str(d["_id"])},
+                                      "Test tablette " + (d.get("name") or "?"))
+    if not run:
+        return _err(code)
+    return jsonify({"ok": code == "proposed", "code": code, "run_id": run["_id"],
+                    "skipped": [dict(s, label=_reason_label(s["reason"])) for s in skipped]})
+
+
+@patrols_field_bp.route("/field/test/expire", methods=["POST"])
+@field_token_required
+def field_test_expire():
+    """Fait expirer tout de suite la proposition de patrouille en attente
+    (comme un silence de l'agent : tablette suivante ou non prise)."""
+    d = _test_device()
+    if not d:
+        return _err("mode_test_requis", 403)
+    rid = (d.get("patrol_proposal") or {}).get("run_id")
+    if not rid:
+        return _err("aucune_proposition")
+    P.refuse(_db(), rid, d["_id"], answer="timeout")
+    return jsonify({"ok": True, "run_id": rid})
+
+
+@patrols_field_bp.route("/field/test/engine", methods=["POST"])
+@field_token_required
+def field_test_engine():
+    """Un passage du moteur limite a CETTE tablette (proposition expiree,
+    pause / reprise de sa patrouille) : utile tant que la tache planifiee
+    n'est pas creee. Rien d'autre n'est traite (ni planifications, ni autres
+    tablettes)."""
+    d = _test_device()
+    if not d:
+        return _err("mode_test_requis", 403)
+    db = _db()
+    now = P._now()
+    done = []
+    pp = d.get("patrol_proposal") or {}
+    exp = P._aware(pp.get("expires_at"))
+    if pp.get("run_id") and isinstance(exp, datetime) and exp + timedelta(seconds=P.ANSWER_GRACE_S) < now:
+        P.refuse(db, pp["run_id"], d["_id"], now=now, answer="timeout")
+        done.append("proposition expiree traitee")
+    if d.get("active_patrol_run"):
+        run = db["patrol_runs"].find_one({"_id": d["active_patrol_run"]})
+        before = (run or {}).get("state")
+        after = (P.sync_pause(db, run, now=now) or {}).get("state")
+        done.append("patrouille %s -> %s" % (before, after))
+    return jsonify({"ok": True, "done": done or ["rien a faire"]})
+
+
+@patrols_field_bp.route("/field/test/cancel", methods=["POST"])
+@field_token_required
+def field_test_cancel():
+    d = _test_device()
+    if not d:
+        return _err("mode_test_requis", 403)
+    db = _db()
+    rid = d.get("active_patrol_run") or (d.get("patrol_proposal") or {}).get("run_id")
+    if not rid:
+        return _err("aucune_patrouille")
+    ok, code = P.finish(db, rid, reason="annulee depuis les outils de test", by="Test " + (d.get("name") or "?"))
+    return jsonify({"ok": ok, "code": code})
+
+
+@patrols_field_bp.route("/field/test/report", methods=["POST"])
+@field_token_required
+def field_test_report():
+    """Rapport de bug : note, journal de la tablette et etat complet."""
+    d = _test_device()
+    if not d:
+        return _err("mode_test_requis", 403)
+    data = request.get_json(silent=True) or {}
+    db = _db()
+    now = P._now()
+    log = data.get("log") if isinstance(data.get("log"), list) else []
+    doc = {
+        "device_id": str(d["_id"]), "device_name": d.get("name"), "at": now,
+        "purge_at": now + timedelta(days=TEST_REPORTS_TTL_DAYS),
+        "note": str(data.get("note") or "")[:2000], "log": log[-400:],
+        "client": data.get("client") if isinstance(data.get("client"), dict) else {},
+        "server": {"device": _plain(d), "run": _plain(db["patrol_runs"].find_one({"_id": d.get("active_patrol_run")}))
+                   if d.get("active_patrol_run") else None},
+        "user_agent": request.headers.get("User-Agent", "")[:300],
+    }
+    try:
+        db["field_test_reports"].create_index("purge_at", expireAfterSeconds=0, name="purge_ttl")
+    except Exception:
+        pass
+    res = db["field_test_reports"].insert_one(doc)
+    logger.info("Rapport de test %s de %s : %s", res.inserted_id, d.get("name"), doc["note"][:120])
+    return jsonify({"ok": True, "id": str(res.inserted_id)})
+
+
 @patrols_field_bp.route("/field/patrol/<run_id>/route", methods=["POST"])
 @field_token_required
 def field_patrol_route(run_id):
