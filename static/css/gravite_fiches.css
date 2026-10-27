@@ -93,51 +93,122 @@
 .gf-qrow { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; padding: 2px 0;
     border-bottom: 1px solid #f1f5f9; }
 
-/* ===== Telephone : une fiche a la fois, barre de reponse fixe ===== */
+/* ===== Telephone (iPhone portrait ET paysage) =====
+   Mode telephone = ecran etroit OU ecran tactile de faible hauteur : en
+   paysage un iPhone fait 844-932 px de large et basculait sur la version PC.
+   La meme requete est reprise dans gravite_fiches.js (PHONE_QUERY). */
 .gf-mobile-start, .gf-mobile-bar { display: none; }
 .gf-mobile-bar[hidden] { display: none !important; }
-@media (max-width: 760px) {
-  #sidebar { display: none !important; }
-  .app-layout { height: auto; min-height: 100vh; overflow: visible; }
-  .app-main { margin-left: 0 !important; }
-  .app-header { padding: 8px 12px; }
-  .app-header .header-event-year, #gf-refresh, #gf-stop { display: none !important; }
-  #main-content { padding: 10px !important; overflow: visible !important; display: block !important; }
-  .gf-desktop-only-on-phone { display: none !important; }
+.gf-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.gf-mb-done { display: none; }
 
-  .gf-mobile-start { display: block; margin-bottom: 12px; }
-  .gf-mobile-start .btn { width: 100%; height: 48px; font-size: 16px; display: flex; align-items: center;
+@media (max-width: 760px), (pointer: coarse) and (max-height: 540px) {
+  #sidebar { display: none !important; }
+  html, body { overflow-x: hidden; }
+  .app-layout { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+  .app-main { margin-left: 0 !important; }
+  .app-header { padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+      padding-top: max(6px, env(safe-area-inset-top)); min-height: 0; }
+  .app-header .header-event-year { display: none !important; }
+  .app-header .header-event-name { font-size: 16px; }
+  .app-header .btn { height: 38px; padding: 0 10px; font-size: 13px; }
+  #main-content { display: block !important; overflow: visible !important;
+      padding: 10px max(10px, env(safe-area-inset-right)) 16px max(10px, env(safe-area-inset-left)) !important; }
+  .widget-card { margin-top: 12px !important; }
+  .widget-header { flex-wrap: wrap; gap: 6px; }
+  .widget-header > div { margin-left: 0 !important; width: 100%; }
+  .widget-header h3 { font-size: 15px; }
+
+  /* Tactile : cibles >= 40 px, champs 16 px (sinon iOS zoome au focus), pas de zoom au double appui */
+  button, .btn, .gf-chip, select, input, a { touch-action: manipulation; }
+  .btn { min-height: 40px; }
+  .gf-select, .gf-note, input[type="number"] { font-size: 16px; min-height: 40px; }
+  .gf-chip { min-height: 36px; padding: 6px 12px; font-size: 13px; }
+  .gf-gbtn { min-width: 40px; height: 40px; }
+
+  /* Tableau de bord empile */
+  .gf-mobile-start { display: block; margin-bottom: 4px; }
+  .gf-mobile-start .btn { width: 100%; height: 50px; font-size: 16px; display: flex; align-items: center;
       justify-content: center; gap: 8px; }
   .gf-mobile-start .gf-muted { text-align: center; margin-top: 6px; }
-
+  .gf-launch { gap: 8px; }
+  .gf-launch .btn { flex: 1 1 auto; justify-content: center; }
+  .gf-launch .gf-check { margin-left: 0 !important; width: 100%; min-height: 36px; font-size: 13px; }
+  .gf-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .gf-kpi { padding: 8px 10px; }
+  .gf-kpi-value { font-size: 19px; }
+  .gf-grav-row { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 52px; gap: 6px; font-size: 12px; }
+  .gf-control { grid-template-columns: 1fr; gap: 12px; }
+  .gf-quality-grid { grid-template-columns: 1fr; gap: 10px; }
+  .gf-sample-ctl { flex-wrap: wrap; }
+  .gf-sample-ctl .gf-select { flex: 1 1 100%; }
+  .gf-sample-ctl .btn { flex: 1 1 100%; justify-content: center; }
+  .gf-batches { font-size: 13px; }
   .gf-batches th:nth-child(2), .gf-batches td:nth-child(2),
   .gf-batches th:nth-child(3), .gf-batches td:nth-child(3),
   .gf-batches th:nth-child(5), .gf-batches td:nth-child(5) { display: none; }
-  .widget-header { flex-wrap: wrap; gap: 6px; }
-  .widget-header > div { margin-left: 0 !important; }
+  .gf-batches td { padding-top: 10px; padding-bottom: 10px; }
+  .gf-item { grid-template-columns: 1fr; gap: 10px; padding: 10px; }
+  .gf-facts { grid-template-columns: 92px 1fr; }
 
-  /* Controle : seule la fiche courante, sans ses boutons (barre en bas) */
+  /* Controle plein ecran : seule la fiche courante, le tableau de bord est masque */
+  body.gf-reviewing .gf-dash { display: none !important; }
+  body.gf-reviewing #gf-items-card { margin-top: 0 !important; }
+  body.gf-reviewing #gf-items-card .widget-header > div { display: none; }
   body.gf-reviewing .gf-item:not(.gf-focus) { display: none; }
-  body.gf-reviewing .gf-item { box-shadow: none; padding: 10px; margin-bottom: 170px; gap: 10px; }
+  body.gf-reviewing .gf-item { box-shadow: none; }
   body.gf-reviewing .gf-actions .gf-gbtn,
   body.gf-reviewing .gf-actions .gf-check,
   body.gf-reviewing .gf-actions > .gf-muted { display: none; }
-  body.gf-reviewing .gf-deroule { max-height: 40vh; font-size: 13px; }
-  body.gf-reviewing #gf-items-card .widget-header > div { display: none; }
+  body.gf-reviewing .gf-deroule { max-height: none; font-size: 13.5px; }
 
+  /* Barre de reponse : en bas en portrait */
   body.gf-reviewing .gf-mobile-bar { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
       background: #fff; border-top: 1px solid var(--border); box-shadow: 0 -4px 14px rgba(15, 23, 42, .08);
-      padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
-  .gf-mb-top { display: flex; align-items: center; gap: 8px; }
-  .gf-mb-count { font-weight: 700; font-size: 14px; }
-  .gf-mb-inexact { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
-  .gf-mb-inexact input { width: 20px; height: 20px; }
-  .gf-mb-nav { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: #fff;
-      display: inline-flex; align-items: center; justify-content: center; }
+      padding: 8px max(10px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
+  body.gf-reviewing #main-content { padding-bottom: 190px !important; }
+  .gf-mb-top { display: flex; align-items: center; gap: 6px; }
+  .gf-mb-count { font-weight: 700; font-size: 13px; flex: 1; min-width: 0; }
+  .gf-mb-inexact { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .gf-mb-inexact input { width: 22px; height: 22px; }
+  .gf-mb-nav { width: 42px; height: 42px; border-radius: 10px; border: 1px solid var(--border); background: #fff;
+      display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .gf-mb-done { display: inline-block; height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: #f8fafc; font: inherit; font-size: 13px; font-weight: 600; }
   .gf-mb-grav { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 8px; }
-  .gf-mb-grav button { height: 54px; border-radius: 12px; border: 1px solid var(--border); background: #fff;
-      font-size: 22px; font-weight: 800; color: var(--text); }
+  .gf-mb-grav button { height: 56px; border-radius: 12px; border: 1px solid var(--border); background: #fff;
+      font-size: 24px; font-weight: 800; color: var(--text); }
   .gf-mb-grav button.gf-model-val { border: 3px solid var(--text); }
   .gf-mb-grav button.gf-chosen { color: #fff; border-color: transparent; }
-  .gf-mb-hint { text-align: center; margin-top: 4px; }
+  .gf-mb-grav button:disabled { opacity: .35; }
+  .gf-mb-hint { text-align: center; margin-top: 4px; font-size: 11px; }
+}
+
+/* Portrait etroit : la ligne du haut de la barre passe sur deux lignes */
+@media (max-width: 420px) {
+  .gf-mb-top { flex-wrap: wrap; }
+  .gf-mb-count { order: -1; flex-basis: 100%; text-align: center; }
+  .gf-mb-inexact { margin-left: auto; }
+}
+
+/* Paysage (telephone couche) : barre verticale a droite, fiche et analyse cote a cote */
+@media (pointer: coarse) and (max-height: 540px) and (orientation: landscape) {
+  body.gf-reviewing .gf-mobile-bar { top: 0; bottom: 0; left: auto; right: 0;
+      width: calc(156px + env(safe-area-inset-right)); border-top: 0; border-left: 1px solid var(--border);
+      box-shadow: -4px 0 14px rgba(15, 23, 42, .08); display: flex; flex-direction: column; gap: 6px;
+      padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) 8px; }
+  body.gf-reviewing #main-content { padding-bottom: 16px !important;
+      padding-right: calc(166px + env(safe-area-inset-right)) !important; }
+  body.gf-reviewing .app-header { padding-right: calc(166px + env(safe-area-inset-right)); }
+  .gf-mb-top { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .gf-mb-count { grid-column: 1 / -1; text-align: center; order: 0; flex-basis: auto; }
+  .gf-mb-nav { width: 100%; height: 36px; }
+  .gf-mb-inexact { grid-column: 1 / -1; justify-content: center; margin-left: 0; }
+  .gf-mb-done { grid-column: 1 / -1; height: 34px; }
+  .gf-mb-grav { flex: 1; grid-template-columns: 1fr; grid-auto-rows: 1fr; margin-top: 0; gap: 5px; min-height: 0; }
+  .gf-mb-grav button { height: auto; min-height: 34px; font-size: 20px; }
+  .gf-mb-hint { display: none; }
+  body.gf-reviewing .gf-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .gf-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .gf-quality-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

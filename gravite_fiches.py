@@ -7,6 +7,7 @@
 # (juste / trop haut / trop bas, resume inexact). Une gravite validee prime
 # partout et fige la fiche (jamais reevaluee). Voir docs/claude/patrouilles.md.
 import logging
+import os
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -74,11 +75,24 @@ def _with_fiches(digests):
     return [_pub_digest(d, fiches.get(d["_id"], {})) for d in digests]
 
 
+def _asset_version():
+    """Version des JS / CSS de la page (date de modification) : Safari iOS
+    garde longtemps les fichiers statiques, l'URL change a chaque deploiement."""
+    from flask import current_app
+    v = 0
+    for parts in (("js", "gravite_fiches.js"), ("css", "gravite_fiches.css")):
+        try:
+            v = max(v, int(os.path.getmtime(os.path.join(current_app.static_folder, *parts))))
+        except OSError:
+            pass
+    return v
+
+
 @gravite_fiches_bp.route("/admin/gravite-fiches")
 @_role_required("admin")
 def gravite_fiches_page():
     payload = getattr(request, "user_payload", {}) or {}
-    return render_template("gravite_fiches.html",
+    return render_template("gravite_fiches.html", asset_v=_asset_version(),
                            user_roles=payload.get("roles", []),
                            user_firstname=payload.get("firstname", ""),
                            user_lastname=payload.get("lastname", ""),

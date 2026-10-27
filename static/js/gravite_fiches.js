@@ -562,12 +562,23 @@
       else {
         updateMobileBar();
         toast("success", "Toutes les fiches de la liste sont controlees");
+        if (isPhone()) setTimeout(exitReview, 1200);
       }
       loadSummary();
     }).catch(function (e) { toast("error", "Controle non enregistre : " + e.message); });
   }
 
-  function isPhone() { return window.matchMedia("(max-width: 760px)").matches; }
+  // Meme requete que gravite_fiches.css : ecran etroit OU tactile de faible
+  // hauteur (iPhone en paysage, 844-932 px de large).
+  var PHONE_QUERY = "(max-width: 760px), (pointer: coarse) and (max-height: 540px)";
+  function isPhone() { return window.matchMedia(PHONE_QUERY).matches; }
+
+  function exitReview() {
+    document.body.classList.remove("gf-reviewing");
+    document.getElementById("gf-mobile-bar").hidden = true;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    loadSummary();
+  }
 
   function setFocus(idx, scroll) {
     var cards = document.querySelectorAll(".gf-item");
@@ -625,6 +636,11 @@
     });
     document.getElementById("gf-mb-prev").addEventListener("click", function () { setFocus(state.focus - 1, true); });
     document.getElementById("gf-mb-next").addEventListener("click", function () { setFocus(state.focus + 1, true); });
+    document.getElementById("gf-mb-done").addEventListener("click", exitReview);
+    // Rotation du telephone : on recale la fiche courante (la barre change de cote)
+    window.addEventListener("orientationchange", function () {
+      setTimeout(function () { if (state.items.length) setFocus(state.focus, true); }, 300);
+    });
     document.getElementById("gf-mobile-sample").addEventListener("click", function () {
       document.getElementById("gf-sample-grav").value = "";
       openSample();
