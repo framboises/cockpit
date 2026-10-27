@@ -76,6 +76,12 @@
 .gf-gbtn.gf-model-val::after, .gf-mb-grav button.gf-model-val::after { content: "IA"; position: absolute; top: -7px; right: -5px;
     background: var(--text); color: #fff; font-size: 9px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 6px; }
 .gf-ia-label { font-size: 12px; margin-right: 2px; }
+.gf-ignore { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px dashed var(--border); background: #f8fafc;
+    font: inherit; font-size: 12px; cursor: pointer; color: var(--text); }
+.gf-ignore.gf-on { background: #475569; color: #fff; border-style: solid; border-color: #475569; }
+.gf-mb-ignore { margin-left: 6px; padding: 3px 8px; border-radius: 8px; border: 1px dashed var(--border); background: #f8fafc;
+    font: inherit; font-size: 11px; color: var(--text); }
+.gf-comp-path { font-weight: 600; }
 .gf-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; margin-left: 8px; cursor: pointer; }
 .gf-note { flex: 1; min-width: 160px; font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; }
 .gf-verdict { font-size: 12px; font-weight: 600; margin-left: auto; }
@@ -198,6 +204,7 @@ body.gf-reviewing .gf-batch-toggle { width: 100%; }
   body.gf-reviewing .gf-item:not(.gf-focus) { display: none; }
   body.gf-reviewing .gf-item { box-shadow: none; }
   body.gf-reviewing .gf-actions .gf-gbtn,
+  body.gf-reviewing .gf-actions .gf-ignore,
   body.gf-reviewing .gf-actions .gf-check,
   body.gf-reviewing .gf-actions > .gf-muted { display: none; }
   body.gf-reviewing .gf-deroule { max-height: none; font-size: 13.5px; }

@@ -268,7 +268,7 @@
     // Marge d'erreur a 95 % sur la justesse (approximation normale)
     var p = count ? (v.ok || 0) / count : 0;
     var marge = count ? Math.round(196 * Math.sqrt((p * (1 - p)) / count)) : null;
-    k.appendChild(kpi("Fiches controlees", fmtInt(count)));
+    k.appendChild(kpi("Fiches controlees", fmtInt(count), r.ignorees ? r.ignorees + " ignoree(s) en plus (tests, essais)" : ""));
     k.appendChild(kpi("Justes", fmtPct(v.ok || 0, count), marge !== null ? "marge +/- " + marge + " points" : ""));
     var al = r.aleatoire || {};
     var pa = al.n ? al.ok / al.n : 0;
@@ -486,6 +486,11 @@
     note.placeholder = "Note (facultatif)";
     note.addEventListener("click", function (ev) { ev.stopPropagation(); });
     act.appendChild(note);
+    var ign = el("button", "gf-ignore", "Ignorer");
+    ign.type = "button";
+    ign.title = "Fiche de test ou d'essai : ni jugee, ni retraitee, hors statistiques";
+    ign.addEventListener("click", function (ev) { ev.stopPropagation(); review(idx, IGNORE); });
+    act.appendChild(ign);
     var verdict = el("span", "gf-verdict");
     act.appendChild(verdict);
     right.appendChild(act);
@@ -519,7 +524,22 @@
       lieu.appendChild(el("span", "gf-tag gf-warn", "non localisee"));
     }
     row("Lieu", lieu);
-    if (it.zone) row("Zone", it.zone.name);
+    var cp = it.competence;
+    if (cp) {
+      var comp = el("span");
+      comp.appendChild(el("span", "gf-comp-path", [cp.departement, cp.zone, cp.secteur].filter(Boolean).join(" > ") || "-"));
+      if (cp.lot) comp.appendChild(el("span", "gf-tag", cp.lot));
+      if ((cp.postes || []).length) comp.appendChild(el("div", "gf-muted", "postes du secteur : " + cp.postes.join(", ")));
+      row("Competence", comp);
+    } else if (it.zone) {
+      row("Zone", it.zone.name);
+    }
+    if ((it.dans || []).length) {
+      row("Dans", tags(it.dans.map(function (x) { return x.label + " : " + x.name; })));
+    }
+    if ((it.pres || []).length) {
+      row("A proximite", tags(it.pres.map(function (x) { return x.label + " " + x.name + " (" + x.dist_m + " m)"; })));
+    }
     var et = it.etapes || {}, de = it.delais || {};
     var heures = ["signalement", "engagement", "sur_place", "fin"].filter(function (k) { return et[k]; }).map(function (k) {
       var lab = { signalement: "signal.", engagement: "engag.", sur_place: "sur place", fin: "fin" }[k];
@@ -646,6 +666,8 @@
       btns[i].classList.remove("gf-chosen", "gf-g1", "gf-g2", "gf-g3", "gf-g4", "gf-g5");
       if (rv && rv.gravite_validee === g) btns[i].classList.add("gf-chosen", "gf-g" + g);
     }
+    var ignb = card.querySelector(".gf-ignore");
+    if (ignb) ignb.classList.toggle("gf-on", !!(rv && rv.verdict === IGNORE));
     var cb = card.querySelector(".gf-inexact");
     var note = card.querySelector(".gf-note");
     var verdict = card.querySelector(".gf-verdict");
@@ -661,19 +683,21 @@
     if (verdict) {
       if (!rv) { verdict.textContent = ""; verdict.className = "gf-verdict"; }
       else {
-        var txt = { ok: "Juste", trop_haut: "Trop haut", trop_bas: "Trop bas" }[rv.verdict] || rv.verdict;
+        var txt = { ok: "Juste", trop_haut: "Trop haut", trop_bas: "Trop bas", ignoree: "Ignoree (test / essai)" }[rv.verdict] || rv.verdict;
         verdict.textContent = txt + " - " + (rv.by || "");
-        verdict.className = "gf-verdict " + (rv.verdict === "ok" ? "ok" : "ko");
+        verdict.className = "gf-verdict " + (rv.verdict === "ok" ? "ok" : (rv.verdict === "ignoree" ? "" : "ko"));
       }
     }
     card.classList.toggle("gf-done", !!rv);
   }
 
+  var IGNORE = "ignoree";     // fiche de test / essai (gravite_fiches.IGNORE)
+
   function review(idx, g) {
     var it = state.items[idx];
     if (!it || it.error) return;
     var card = document.querySelector('.gf-item[data-idx="' + idx + '"]');
-    var verdict = g === it.gravite ? "ok" : (g < it.gravite ? "trop_haut" : "trop_bas");
+    var verdict = g === IGNORE ? IGNORE : (g === it.gravite ? "ok" : (g < it.gravite ? "trop_haut" : "trop_bas"));
     var champs = [];
     var doublon = null;
     if (card) {
@@ -824,6 +848,7 @@
     document.getElementById("gf-mb-prev").addEventListener("click", function () { setFocus(state.focus - 1, true); });
     document.getElementById("gf-mb-next").addEventListener("click", function () { setFocus(state.focus + 1, true); });
     document.getElementById("gf-mb-done").addEventListener("click", exitReview);
+    document.getElementById("gf-mb-ignore").addEventListener("click", function () { review(state.focus, IGNORE); });
     initTabbar();
     // Rotation du telephone : on recale la fiche courante (la barre change de cote)
     window.addEventListener("orientationchange", function () {

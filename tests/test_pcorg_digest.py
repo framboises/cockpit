@@ -65,6 +65,9 @@ class TestAReprendre:
         assert PD.needs_work(FICHE, self._digest(prompt_version="v0", review={"verdict": "ok"}))
         assert not PD.needs_work(FICHE, self._digest(src_hash="autre", review={"verdict": "ok"}))
 
+    def test_fiche_ignoree_jamais_retraitee(self):
+        assert not PD.needs_work(FICHE, self._digest(prompt_version="v0", review={"verdict": "ignoree"}))
+
 
 def test_fenetre_de_nuit():
     from datetime import datetime

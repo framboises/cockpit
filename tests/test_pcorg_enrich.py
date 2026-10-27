@@ -61,6 +61,32 @@ class TestPosition:
         assert g.zone_of(47.95, 0.2)["name"] == "Secteur Test"
         assert g.zone_of(48.5, 0.2) is None
 
+    def test_zone_la_plus_fine_et_voisinage(self):
+        def sq(a, b, c, d):
+            return {"type": "Polygon", "coordinates": [[[b, a], [d, a], [d, c], [b, c], [b, a]]]}
+        g = _gaz()
+        big, small = sq(47.90, 0.15, 48.00, 0.30), sq(47.94, 0.19, 47.96, 0.21)
+        g.zones = [
+            {"id": "d", "name": "Departement Sud-Est", "level": "departement", "geom": big, "bbox": PE._bbox(big)},
+            {"id": "s", "name": "Secteur Houx", "level": "secteur", "postes": "Porte Houx\nEpinettes",
+             "geom": small, "bbox": PE._bbox(small)},
+            {"id": "z", "name": "Zone Est", "level": "zone", "geom": big, "bbox": PE._bbox(big)},
+            {"id": "l", "name": "Lot 5 - X", "level": "lot", "geom": small, "bbox": PE._bbox(small)},
+        ]
+        g.polys = [{"layer": "terrains", "label": "Terrain / parking", "name": "HOUX", "geom": small, "bbox": PE._bbox(small)}]
+        g.near = [
+            {"layer": "portes", "label": "Porte", "name": "PORTE HOUX", "lat": 47.9505, "lng": 0.2},
+            {"layer": "portes", "label": "Porte", "name": "PORTE LOIN", "lat": 47.9600, "lng": 0.2},
+            {"layer": "tribunes", "label": "Tribune", "name": "T12 FORD", "lat": 47.9510, "lng": 0.2},
+        ]
+        assert g.zone_of(47.95, 0.2)["name"] == "Secteur Houx"            # pas le departement
+        s = g.surroundings(47.95, 0.2, "gps")
+        assert s["competence"] == {"departement": "Departement Sud-Est", "zone": "Zone Est", "secteur": "Secteur Houx",
+                                   "postes": ["Porte Houx", "Epinettes"], "lot": "Lot 5 - X"}
+        assert s["dans"] == [{"layer": "terrains", "label": "Terrain / parking", "name": "HOUX"}]
+        assert [(p["name"], p["dist_m"]) for p in s["pres"]] == [("PORTE HOUX", 56), ("T12 FORD", 111)]
+        assert [p["name"] for p in g.surroundings(47.95, 0.2, "lieu")["pres"]] == ["PORTE HOUX"]   # rayon 100 m
+
 
 class TestDelais:
     def test_delais_depuis_le_signalement(self):

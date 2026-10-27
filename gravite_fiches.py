@@ -20,6 +20,7 @@ gravite_fiches_bp = Blueprint("gravite_fiches", __name__)
 logger = logging.getLogger("gravite_fiches")
 
 VERDICTS = ("ok", "trop_haut", "trop_bas")   # jugement porte sur la gravite du modele
+IGNORE = "ignoree"      # fiche de test / essai : ni jugee, ni retraitee, hors statistiques
 # Champs que l'admin peut signaler faux (controle par sondage des faits extraits)
 CHAMPS = ("lieu", "position", "heures", "equipement", "moyens", "services", "causes", "issue", "resume",
           "nature", "ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service",
@@ -61,7 +62,8 @@ def _pub_digest(d, fiche=None):
                                   "doublon_probable", "nature", "activite", "ronde", "alarme",
                                   "dysfonctionnement", "jalon", "secours", "prise_service",
                                   "sous_classification_proposee", "taxo", "area", "relances",
-                                  "doublon_declare", "alarme_non_remise", "a_controler")}
+                                  "doublon_declare", "alarme_non_remise", "a_controler",
+                                  "competence", "dans", "pres", "ignoree")}
     out["id"] = d["_id"]
     out["at"] = _iso(d.get("at"))
     out["ms"] = (d.get("meta") or {}).get("ms")
@@ -153,6 +155,9 @@ def gravite_fiches_summary():
     # Controles : justesse et matrice gravite JUGEE (au moment du controle) x validee
     reviews = list(col.find({"review": {"$ne": None}},
                             {"gravite": 1, "review": 1, "prompt_version": 1, "a_controler": 1}))
+    # Fiches ignorees (test, essai) : hors de toute mesure de justesse
+    ignored = sum(1 for d in reviews if (d.get("review") or {}).get("verdict") == IGNORE)
+    reviews = [d for d in reviews if (d.get("review") or {}).get("verdict") != IGNORE]
     # Justesse sur les seules fiches tirees AU HASARD : les autres sont choisies
     # parce qu'elles sont delicates, leur justesse sous-estime le modele.
     rand = [d for d in reviews if "aleatoire" in ((d.get("a_controler") or {}).get("raisons") or [])]
@@ -230,7 +235,7 @@ def gravite_fiches_summary():
         "by_gravite": by_grav, "batches": batches, "run": run, "request": request_info,
         "night_enabled": bool(settings.get("night_enabled")), "batch_sizes": list(PD.BATCH_SIZES),
         "max_request_batches": PD.MAX_REQUEST_BATCHES,
-        "reviews": {"count": len(reviews), "verdicts": verdicts, "resume_inexact": inexact,
+        "reviews": {"count": len(reviews), "ignorees": ignored, "verdicts": verdicts, "resume_inexact": inexact,
                     "matrix": matrix, "champs_faux": champs_faux, "doublons": doublons_rev,
                     "by_version": by_version, "aleatoire": {"n": len(rand), "ok": rand_ok}},
         "quality": quality,
@@ -436,8 +441,17 @@ def gravite_fiches_review(fiche_id):
     if not digest:
         return jsonify({"error": "not_found"}), 404
     if verdict is None:                                  # annuler le controle
-        col.update_one({"_id": fiche_id}, {"$set": {"review": None}})
+        col.update_one({"_id": fiche_id}, {"$set": {"review": None, "ignoree": False}})
         return jsonify({"ok": True, "review": None})
+    if verdict == IGNORE:
+        review = {"verdict": IGNORE, "gravite_validee": None, "gravite_modele": digest.get("gravite"),
+                  "prompt_version": digest.get("prompt_version"), "champs_faux": [], "doublon": None,
+                  "resume_inexact": False, "note": str(data.get("note") or "").strip()[:500],
+                  "by": (getattr(request, "admin_user", None) or {}).get("email", "?"),
+                  "at": datetime.now(timezone.utc)}
+        col.update_one({"_id": fiche_id}, {"$set": {"review": review, "ignoree": True}})
+        review["at"] = _iso(review["at"])
+        return jsonify({"ok": True, "review": review})
     if verdict not in VERDICTS:
         return jsonify({"error": "invalid_verdict"}), 400
     grav = digest.get("gravite")

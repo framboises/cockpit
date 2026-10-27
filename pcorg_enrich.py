@@ -13,6 +13,7 @@
 # Couches EXCLUES du referentiel : cadastre et riverains (noms de proprietaires,
 # donnees personnelles), cameras (noms techniques), sifflets.
 import difflib
+import math
 import re
 import unicodedata
 from datetime import datetime, timedelta
@@ -33,7 +34,22 @@ MIN_NAME_CHARS = 4          # un nom plus court n'est rapproche que par motif de
 GENERIC_WORDS = {"nord", "sud", "est", "ouest", "village", "paddock", "piste", "circuit", "parking", "acces",
                  "entree", "sortie", "porte", "portail", "tribune", "musee", "concert", "annexe", "family",
                  "service", "accueil", "parc", "zone", "poste", "secteur", "aire", "camping"}
-DUP_WINDOW_MIN = 45         # doublons : ecart maximal entre deux fiches
+# Voisinage d'une position : couche -> (champ du nom, libelle)
+NEAR_LAYERS = {
+    "portes": ("Name", "Porte"), "tribunes": ("NUMERO 2026", "Tribune"), "Virages": ("NAME", "Virage"),
+    "giratoires": ("name", "Giratoire"), "passerelles": ("Nom", "Passerelle"),
+    "postesecours": ("Nom", "Poste de secours"), "hospitalites": ("NOM", "Hospitalite"),
+    "mp": ("name", "Poste commissaires"), "3p": ("Nom", "Portail 3P"),
+}
+AREA_LAYERS = {
+    "terrains": ("Name", "Terrain / parking"), "fanzone": ("Nom", "Fan zone"),
+    "campements_commissaires": ("Name", "Campement commissaires"), "batiment": ("name", "Batiment"),
+}
+# Rayon de recherche des points proches selon l'origine de la position : un
+# carreau de carroyage fait ~100 m, un lieu cite est le point de la couche
+NEAR_RADIUS_M = {"gps": 150, "carroyage": 150, "lieu": 100, "titre": 100}
+ZONE_RANK = {"departement": 1, "zone": 2, "secteur": 3}
+DUP_WINDOW_MIN = 45        # doublons : ecart maximal entre deux fiches
 DUP_THRESHOLD = 0.72        # doublons : score minimal (0-1)
 
 
@@ -81,6 +97,47 @@ def _in_ring(lat, lng, ring):
             inside = not inside
         j = i
     return inside
+
+
+def _bbox(geom):
+    """(min_lat, min_lng, max_lat, max_lng) d'un (Multi)Polygon : filtre rapide."""
+    t, c = (geom or {}).get("type"), (geom or {}).get("coordinates")
+    polys = [c] if t == "Polygon" else (c if t == "MultiPolygon" else [])
+    pts = [p for poly in polys or [] for ring in poly or [] for p in ring or []
+           if isinstance(p, (list, tuple)) and len(p) >= 2]
+    if not pts:
+        return None
+    return (min(p[1] for p in pts), min(p[0] for p in pts), max(p[1] for p in pts), max(p[0] for p in pts))
+
+
+def _in_bbox(lat, lng, bb):
+    return bb is None or (bb[0] <= lat <= bb[2] and bb[1] <= lng <= bb[3])
+
+
+def dist_m(lat1, lng1, lat2, lng2):
+    """Distance approchee en metres (equirectangulaire, suffisant a l'echelle du circuit)."""
+    x = math.radians(lng2 - lng1) * math.cos(math.radians((lat1 + lat2) / 2))
+    y = math.radians(lat2 - lat1)
+    return 6371000 * math.hypot(x, y)
+
+
+def _zone_level(p):
+    """Niveau d'une zone de competence d'apres ses proprietes Looker."""
+    name = str(p.get("Nom") or p.get("name") or "")
+    if name.lower().startswith("lot "):
+        return "lot"
+    if not p.get("Département"):
+        return "departement"
+    return "secteur" if p.get("Zone") else "zone"
+
+
+def _feature_name(coll, p, key):
+    name = p.get(key)
+    if not name or str(name) == "None":
+        return None
+    if coll == "tribunes":       # « T12 FORD » : numero de l'annee + nom
+        return ("T" + str(name).strip() + " " + str(p.get("NOM") or "")).strip()
+    return str(name)
 
 
 def point_in_geom(lat, lng, geom):
@@ -134,13 +191,58 @@ class Gazetteer:
             p = f.get("properties") or {}
             if f.get("geometry"):
                 self.zones.append({"id": p.get("_id_feature"), "name": p.get("Nom") or p.get("name"),
-                                   "geom": f["geometry"]})
+                                   "level": _zone_level(p), "postes": p.get("Poste") or "",
+                                   "geom": f["geometry"], "bbox": _bbox(f["geometry"])})
+        # Ce qui entoure un point : surfaces qui le contiennent, points proches
+        self.near, self.polys = [], []
+        for coll, (key, label) in NEAR_LAYERS.items():
+            for f in (db[coll].find_one({}) or {}).get("features") or []:
+                p = f.get("properties") or {}
+                name = _feature_name(coll, p, key)
+                pt = point_of(f.get("geometry"))
+                if name and pt is not None:
+                    self.near.append({"layer": coll, "label": label, "name": name, "lat": pt[0], "lng": pt[1]})
+        for coll, (key, label) in AREA_LAYERS.items():
+            for f in (db[coll].find_one({}) or {}).get("features") or []:
+                name = (f.get("properties") or {}).get(key)
+                if name and str(name) != "None" and f.get("geometry"):
+                    self.polys.append({"layer": coll, "label": label, "name": str(name),
+                                       "geom": f["geometry"], "bbox": _bbox(f["geometry"])})
 
     def zone_of(self, lat, lng):
+        """Zone de competence la plus FINE contenant le point (secteur > zone >
+        departement) ; les lots de prestataires ne comptent pas ici."""
+        best = None
         for z in self.zones:
-            if point_in_geom(lat, lng, z["geom"]):
-                return {"id": z["id"], "name": z["name"]}
-        return None
+            if z.get("level") == "lot" or not _in_bbox(lat, lng, z.get("bbox")) or not point_in_geom(lat, lng, z["geom"]):
+                continue
+            if best is None or ZONE_RANK.get(z.get("level"), 0) > ZONE_RANK.get(best.get("level"), 0):
+                best = z
+        return {"id": best["id"], "name": best["name"]} if best else None
+
+    def surroundings(self, lat, lng, source):
+        """Competence complete (departement / zone / secteur / lot), surfaces qui
+        contiennent le point (terrain, parking, batiment, fan zone, campement) et
+        point le plus proche de chaque couche (porte, tribune, portail...) dans un
+        rayon qui depend de la precision de la position."""
+        comp = {}
+        for z in self.zones:
+            if _in_bbox(lat, lng, z.get("bbox")) and point_in_geom(lat, lng, z["geom"]):
+                lvl = z.get("level") or "zone"
+                if lvl not in comp:
+                    comp[lvl] = z["name"]
+                    if lvl == "secteur" and z.get("postes"):
+                        comp["postes"] = [x.strip() for x in z["postes"].splitlines() if x.strip()]
+        dans = [{"layer": p["layer"], "label": p["label"], "name": p["name"]} for p in self.polys
+                if _in_bbox(lat, lng, p["bbox"]) and point_in_geom(lat, lng, p["geom"])]
+        radius = NEAR_RADIUS_M.get(source, NEAR_RADIUS_M["lieu"])
+        best = {}
+        for e in self.near:
+            dm = dist_m(lat, lng, e["lat"], e["lng"])
+            if dm <= radius and (e["layer"] not in best or dm < best[e["layer"]]["dist_m"]):
+                best[e["layer"]] = {"layer": e["layer"], "label": e["label"], "name": e["name"], "dist_m": int(round(dm))}
+        pres = sorted(best.values(), key=lambda x: x["dist_m"])
+        return {"competence": comp or None, "dans": dans, "pres": pres}
 
     def match_text(self, text):
         """Lieu du referentiel cite dans un texte : (entry, confiance) ou (None, None)."""
@@ -320,7 +422,9 @@ def _relances(fiche):
 def enrich(gaz, fiche, d, taxo=None):
     """Champs calcules a stocker dans le digest."""
     geo = gaz.locate(fiche, d.get("lieu"))
+    around = gaz.surroundings(geo["lat"], geo["lng"], geo["source"]) if geo and hasattr(gaz, "near") else {}
     out = {"geo": geo, "zone": gaz.zone_of(geo["lat"], geo["lng"]) if geo else None,
+           "competence": around.get("competence"), "dans": around.get("dans") or [], "pres": around.get("pres") or [],
            "delais": delays(d.get("etapes")), "completude": completeness(d, geo),
            "lieu_norm": norm(geo["name"]) if geo and geo.get("name") else norm(d.get("lieu")),
            "area": area_levels(fiche), "relances": _relances(fiche),

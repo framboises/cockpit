@@ -414,6 +414,8 @@ def needs_work(doc, digest):
     if digest is None:
         return True
     if digest.get("review"):
+        if digest["review"].get("verdict") == "ignoree":     # fiche de test / essai
+            return False
         return digest.get("prompt_version") != PROMPT_VERSION
     same = digest.get("src_hash") == src_hash(doc) and digest.get("prompt_version") == PROMPT_VERSION
     if not same:
