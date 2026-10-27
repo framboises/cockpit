@@ -27,7 +27,7 @@
 .pt-tabs button.active .pt-tab-count { background: var(--brand, #2563eb); color: #fff; }
 
 /* ---------- Espace de travail ---------- */
-.pt-work { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 380px 1fr; gap: 12px; }
+.pt-work { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 380px 1fr; grid-template-rows: minmax(0, 1fr); gap: 12px; }
 .pt-work.nomap { grid-template-columns: 1fr; }
 .pt-work.nomap .pt-map-wrap { display: none; }
 .pt-side { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
@@ -90,7 +90,10 @@
 .pt-empty { padding: 18px; text-align: center; color: #94a3b8; font-size: 13.5px; border: 1px dashed #e2e8f0; border-radius: 9px; list-style: none; }
 
 .pt-editor-head { display: flex; gap: 8px; align-items: center; }
-.pt-editor-head input[type=color] { width: 40px; height: 36px; border: 0; background: none; padding: 0; flex: none; }
+.pt-editor-head input[type=color] { -webkit-appearance: none; appearance: none; width: 38px; height: 38px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 3px; flex: none; cursor: pointer; }
+.pt-editor-head input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+.pt-editor-head input[type=color]::-webkit-color-swatch { border: 0; border-radius: 6px; }
+.pt-editor-head input[type=color]::-moz-color-swatch { border: 0; border-radius: 6px; }
 .pt-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .pt-step { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; cursor: grab; }
 .pt-step.dragging { opacity: .4; }
@@ -217,8 +220,8 @@
 
 /* Couleurs habituelles */
 .pt-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
-.pt-swatch-btn { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #cbd5e1; cursor: pointer; padding: 0; }
-.pt-swatch-btn.on { box-shadow: 0 0 0 2px #1e293b; }
+.pt-swatch-btn { width: 24px; height: 24px; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1px rgba(15,23,42,.15); cursor: pointer; padding: 0; }
+.pt-swatch-btn.on { outline: 2px solid #1e293b; outline-offset: 2px; }
 
 /* Selecteur de points */
 .pt-pick-tools { gap: 12px; }
