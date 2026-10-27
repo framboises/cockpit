@@ -626,6 +626,7 @@ PAGE_REGISTRY = [
     {"id": "portes_mur",   "label": "Mur portes",         "icon": "door_sliding",    "role": "manager", "paths": ["/portes-mur"]},
     {"id": "intrusions_mur", "label": "Mur intrusions",   "icon": "shield_person",   "role": "manager", "paths": ["/intrusions-mur", "/api/intrusions"]},
     {"id": "balises_mur",  "label": "Mur suivi GPS",      "icon": "share_location",  "role": "manager", "paths": ["/balises-mur", "/api/balises/mur"]},
+    {"id": "suivi_gps",    "label": "Suivi GPS",          "icon": "my_location",     "role": "user",    "paths": ["/suivi-gps", "/api/balises/suivi"]},
     {"id": "pmv",          "label": "PMV",                "icon": "signpost",        "role": "manager", "paths": ["/pmv", "/api/pmv"]},
 ]
 ALL_PAGE_IDS = [p["id"] for p in PAGE_REGISTRY]
@@ -4348,14 +4349,45 @@ def balises_mur_page():
 @role_required("manager")
 def api_balises_mur():
     import balises_mur
+    return jsonify(_balises_etat(balises_mur.lire_groupes(request.args.get("groupes", ""))))
+
+
+@app.route('/suivi-gps', methods=['GET'])
+@role_required("user")
+def suivi_gps_page():
+    """Suivi GPS operateur (Surveillance) : version poste de travail du mur
+    /balises-mur. Tous les groupes visibles (choix dans la page, ?groupes=),
+    liste detaillee par groupe avec recherche et filtres, carte interactive,
+    fiche de l'unite (activite Field / PC Org, batterie, derniere trame).
+    Consomme /api/balises/suivi toutes les 5 s."""
+    payload = getattr(request, 'user_payload', {})
+    return render_template("suivi_gps.html", user_roles=payload.get("roles", []),
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""))
+
+
+@app.route('/api/balises/suivi', methods=['GET'])
+@role_required("user")
+def api_balises_suivi():
+    import balises_mur
+    brut = request.args.get("groupes")
+    demandes = None if brut is None else balises_mur.lire_groupes(brut, balises_mur.SUIVI_MAX_GROUPES)
+    return jsonify(_balises_etat(demandes, balises_mur.SUIVI_MAX_GROUPES))
+
+
+def _balises_etat(demandes, maxi=None):
+    """Etat du mur / du suivi operateur pour les groupes demandes (None =
+    tous les groupes visibles), visibilite de l'utilisateur appliquee."""
+    import balises_mur
     import anoloc as _anoloc
-    demandes = balises_mur.lire_groupes(request.args.get("groupes", ""))
+    maxi = maxi or balises_mur.MAX_GROUPES
     cfg = db["anoloc_config"].find_one({"_id": "global"}) or {}
     visibles = _anoloc._get_user_visible_groups(cfg)
     # Tablettes Field (statut libre / engagee / sur place) : evenement de
     # l'adresse, sinon l'evenement courant ; fiches des evenements actifs
     tablettes, paires = {}, []
-    if demandes:
+    if demandes or demandes is None:
         event, year = request.args.get("event"), request.args.get("year")
         if not (event and year):
             event, year = EC.current_event(db)
@@ -4367,7 +4399,7 @@ def api_balises_mur():
                 paires.append((event, int(year)))
         except (TypeError, ValueError):
             pass
-    return jsonify(balises_mur.etat_mur(db, demandes, visibles=visibles, tablettes=tablettes, paires=paires))
+    return balises_mur.etat_mur(db, demandes, visibles=visibles, tablettes=tablettes, paires=paires, maxi=maxi)
 
 
 @app.route('/portes-mur', methods=['GET'])

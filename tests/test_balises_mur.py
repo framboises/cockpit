@@ -135,3 +135,16 @@ def test_activite_libre_engagee_sur_place(db):
     assert (sur["field:t1"]["activite"], sur["field:t1"]["fiche_texte"]) == ("engagee", "Chute")
     assert "statut_field" not in sur["field:t1"] and "fiche_id" not in sur["field:t1"]
     assert (d["groupes"][0]["engagees"], d["groupes"][1]["engagees"], d["groupes"][1]["libres"]) == (2, 1, 1)
+
+
+def test_suivi_operateur_tous_les_groupes_visibles(db):
+    _config(db)
+    # demandes=None : tous les groupes actifs visibles, dans l'ordre de la configuration
+    d = M.etat_mur(db, None, now=MAINTENANT, maxi=M.SUIVI_MAX_GROUPES)
+    assert [g["id"] for g in d["groupes"]] == ["med", "sur", "dep", "fou"]
+    d = M.etat_mur(db, None, visibles={"sur", "fou"}, now=MAINTENANT, maxi=M.SUIVI_MAX_GROUPES)
+    assert [g["id"] for g in d["groupes"]] == ["sur", "fou"]
+    # Au-dela de 3 groupes demandes : servis par la page operateur, pas par le mur
+    ids = M.lire_groupes("med,sur,dep,fou", M.SUIVI_MAX_GROUPES)
+    assert len(M.etat_mur(db, ids, now=MAINTENANT, maxi=M.SUIVI_MAX_GROUPES)["groupes"]) == 4
+    assert len(M.etat_mur(db, M.lire_groupes("med,sur,dep,fou"), now=MAINTENANT)["groupes"]) == 3

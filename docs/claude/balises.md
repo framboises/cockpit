@@ -162,6 +162,23 @@ Mis en place le 26/10/2026. Page manager, aussi ouverte aux afficheurs TV du por
   pastille sur le marqueur + anneau si engagee, badge dans l'etiquette, ligne pleine largeur en tete
   du bloc (objet de la fiche, duree) ; libre = puce verte ; totaux engagees / libres en en-tete.
 
+### Suivi GPS operateur `/suivi-gps` (Surveillance)
+
+Version poste de travail du mur, role user (comme la carte GPS de l'accueil), page `suivi_gps`
+de `PAGE_REGISTRY`. Template `suivi_gps.html`, `static/js/suivi_gps.js`, `static/css/suivi_gps.css`.
+- API `/api/balises/suivi` : meme `etat_mur` (via `app._balises_etat`, partage avec le mur) avec
+  `maxi=SUIVI_MAX_GROUPES` (30) ; sans `?groupes=` : tous les groupes actifs visibles.
+- Gauche : puces des groupes (choix dans `?groupes=` et localStorage `suiviGps.groupes`, vide =
+  tous), recherche (nom ou objet de fiche, touche `/`), filtres Toutes / Engagees / Libres / En
+  mouvement / Hors ligne, liste par groupe repliable (engagees d'abord, objet de la fiche, vitesse,
+  batterie, derniere trame ; muettes depuis plus de 12 h repliees).
+- Centre : carte interactive (OSM ou satellite IGN, noms, trainees, recadrer, centrer un groupe).
+- Droite : fiche de l'unite (activite et sa source, liaison, vitesse et cap, batterie, GPS,
+  derniere trame, reseau GSM Teltonika, position, Centrer / Suivre / Google Maps), sinon synthese
+  par groupe et "A surveiller" (engagee muette, batterie faible, decrochage < 1 h).
+- Lien profond `?unite=<id>` : selectionne et centre l'unite. Bouton Mur TV : `/balises-mur` avec
+  les 3 premiers groupes et le fond choisis.
+
 ### Choix publies pour le portail : collection partagee `tv_choix`
 
 Le portail TITAN (meme base Mongo) propose les groupes a l'affectation d'un ecran et remplit la

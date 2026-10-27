@@ -23,6 +23,7 @@ import time
 import balises_core as B
 
 MAX_GROUPES = 3
+SUIVI_MAX_GROUPES = 30    # page operateur /suivi-gps
 TRAINEE_MIN = 10          # trainee affichee derriere chaque balise
 TRAINEE_MAX_POINTS = 60   # par balise
 EN_MOUVEMENT_KMH = B.MOVING_SPEED_KMH
@@ -68,14 +69,14 @@ def groupes_actifs(db):
     return cfg, out
 
 
-def lire_groupes(brut):
-    """'a,b,c' -> ['a', 'b', 'c'] sans doublon, MAX_GROUPES au plus."""
+def lire_groupes(brut, maxi=MAX_GROUPES):
+    """'a,b,c' -> ['a', 'b', 'c'] sans doublon, maxi au plus."""
     out = []
     for x in (brut or "").split(","):
         x = x.strip()
         if x and x not in out:
             out.append(x)
-    return out[:MAX_GROUPES]
+    return out[:maxi]
 
 
 _COULEUR = re.compile(r"^#[0-9a-fA-F]{3,8}$")
@@ -211,6 +212,7 @@ def _balise(dev_id, doc, grp, tlt_devices, tlt_settings, now):
         "cap": doc.get("heading") or 0,
         "batterie": doc.get("battery_pct"),
         "charge": doc.get("charging"),
+        "gsm": doc.get("gsm_level"),
         "vu_a": _iso(st["last_at"]),
         "age_s": round(st["age_s"]) if st["age_s"] is not None else None,
         "source": B.source_of(dev_id),
@@ -235,13 +237,15 @@ def _traces(db, ids, now):
     return {k: v[-TRAINEE_MAX_POINTS:] for k, v in out.items()}
 
 
-def etat_mur(db, demandes, visibles=None, tablettes=None, now=None, paires=None):
+def etat_mur(db, demandes, visibles=None, tablettes=None, now=None, paires=None, maxi=MAX_GROUPES):
     """Etat du mur pour les groupes `demandes` (ids, ordre conserve).
 
     visibles : ensemble des groupes visibles de l'utilisateur (None = tous,
     anoloc._get_user_visible_groups). tablettes : {group_id: [devices au
     format _balise]} des tablettes Field (facultatif, event/year). paires :
-    [(event, year)] actives, pour les fiches qui engagent une balise.
+    [(event, year)] actives, pour les fiches qui engagent une balise. maxi :
+    nombre de groupes servis (3 pour le mur, SUIVI_MAX_GROUPES pour la page
+    operateur ; demandes=None = tous les groupes visibles).
     Retour : {maintenant, actif, dispo, groupes, ignores}."""
     now = now or datetime.now(timezone.utc)
     try:
@@ -253,7 +257,9 @@ def etat_mur(db, demandes, visibles=None, tablettes=None, now=None, paires=None)
         groupes = [g for g in groupes if g["id"] in visibles]
     par_id = {g["id"]: g for g in groupes}
     dispo = [_option(g) for g in groupes]
-    retenus = [par_id[g] for g in demandes if g in par_id][:MAX_GROUPES]
+    if demandes is None:
+        demandes = [g["id"] for g in groupes]
+    retenus = [par_id[g] for g in demandes if g in par_id][:maxi]
     ignores = [g for g in demandes if g not in par_id]
     if not cfg.get("enabled"):
         return {"maintenant": now.isoformat(), "actif": False, "dispo": dispo,

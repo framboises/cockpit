@@ -147,7 +147,7 @@
         {% endset %}
         {{ nav_group('terrain', 'groups', 'Terrain', _g_terrain) }}
 
-        {# --- Surveillance : portes, acces, video, detection, plaques.
+        {# --- Surveillance : portes, acces, video, detection, suivi GPS, plaques.
            Portes : analyse operateur (direct, rejeu, bilan, une porte), ouverte
            dans un onglet parametre par l'evenement courant (sidebar.js). --- #}
         {% set _g_surv %}
@@ -166,6 +166,10 @@
         {% if _adm or (admin_page_allowed is defined and admin_page_allowed('detection')) %}<a href="/detection" class="{{ nav_class('/detection') }}" data-nav-item>
             <span class="material-symbols-outlined">psychology</span>
             <span class="label">IA</span>
+        </a>{% endif %}
+        {% if page_allowed is not defined or page_allowed('suivi_gps') %}<a href="/suivi-gps" class="{{ nav_class('/suivi-gps') }}" title="Suivi GPS des balises et tablettes (libre / engagee / sur place)" data-nav-item>
+            <span class="material-symbols-outlined">my_location</span>
+            <span class="label">Suivi GPS</span>
         </a>{% endif %}
         {% if _adm or (admin_page_allowed is defined and admin_page_allowed('lapi')) %}<a href="/anpr" class="{{ nav_class('/anpr') }}" data-nav-item>
             <span class="material-symbols-outlined">directions_car</span>
