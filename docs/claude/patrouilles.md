@@ -228,8 +228,21 @@ fiche, stockee en base et relue directement par le moteur.
   differentes ne sont jamais doublons, une plaque commune = doublon (fiches fourriere au meme texte).
 - Fiche de test / essai : bouton « Ignorer » (`review.verdict == "ignoree"`, `ignoree`) : jamais retraitee,
   hors justesse.
-- A prendre en compte en **v4** : une fourriere pour simple gene au stationnement = gravite 1 (correction
-  recurrente de l'admin).
+- Consignes **v4** (27/10/2026) : echelle v3 + agression / menace / insultes visant un agent = 4, agression
+  sexuelle = 5, fausse alerte levee = 1, la conclusion du deroule prime sur le signalement. La zone de saisie
+  (`area`) est envoyee raccourcie et nommee « approximative, ce n'est pas le lieu » (fiche du Village saisie
+  en Grand Paddock, GPS et carroye concordants). Age / sante d'un anonyme ne sont pas des donnees
+  personnelles (filtre en code). ⚠️ Mesure : TOUJOURS rejouer l'ancienne ET la nouvelle consigne sur les
+  fiches controlees (le modele varie d'un passage a l'autre, ~2 fiches sur 85) avant de changer de version.
+  Rejeu sur 85 controles v3 : v3 72, v4 72 ; des echelles 3 / 4 plus detaillees (conduite dangereuse,
+  altercation, douleur avec ambulance = 3...) faisaient 66 a 71 : chaque regle corrige un cas limite et en
+  decale un autre. Erreurs restantes : altercations, conduite dangereuse sans accident, intrusion sans suite
+  (modele 4, PC 3).
+  Nouveaux blocs : `agression_agent` (cible accueil / securite / autre_personnel, forme verbale / menace /
+  physique ; pas les disputes entre personnels) et `chaleur` (impact personne / materiel / organisation ;
+  pose d'office sur un `secours.nature == coup_de_chaleur`), marques « a controler » en priorite.
+- Les notes libres des controles ne sont PAS lues par le modele : elles servent a ecrire la version suivante
+  des consignes (relire toutes les notes, y compris sur les gravites justes).
 - ⚠️ Pour les propositions de patrouilles (6.1) : ne retenir que `nature == "incident"`, sinon les foyers sont
   noyes sous les rondes RAS et les prises de service.
 

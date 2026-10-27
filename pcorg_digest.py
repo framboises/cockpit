@@ -69,7 +69,12 @@ OLLAMA_TIMEOUT = int(os.getenv("PCORG_DIGEST_TIMEOUT", "180"))
 # de la base est le PC Surete, surtout des rondes), blocs ronde, alarme,
 # dysfonctionnement, jalon, secours, prise de service, et sous-classification
 # choisie dans la liste officielle de la categorie (pcorg_config).
-PROMPT_VERSION = "v3"
+# v4 (27/10/2026) : echelle v3 + agression / menace visant un agent = 4,
+# agression sexuelle = 5, fausse alerte levee = 1, conclusion du deroule
+# prioritaire ; zone de saisie marquee approximative ; blocs agression_agent et
+# chaleur. Rejouee sur 85 controles : 72 justes, autant que la v3 rejouee (des
+# echelles 3 / 4 plus detaillees faisaient 66 a 71 : le modele oscille).
+PROMPT_VERSION = "v4"
 CAUSES = ("alcool", "meteo", "affluence", "travaux", "panne_materiel", "signaletique",
           "conduite_dangereuse", "malveillance", "accident", "sante", "stationnement", "autre")
 ISSUES = ("resolu", "transmis", "sans_suite", "en_attente", "non_precise")
@@ -92,44 +97,56 @@ BLOCS = {
                 "prise_en_charge": ("cms", "evacuation", "laisse_sur_place", "refus", "non_precise")},
     "prise_service": {"type": ("prise", "fin", "prise_et_fin"), "poste": "text", "debut": "hh", "fin": "hh",
                       "materiel": "list"},
+    "agression_agent": {"cible": ("accueil", "securite", "autre_personnel"), "forme": ("verbale", "menace", "physique"),
+                        "description": "text"},
+    "chaleur": {"impact": ("personne", "materiel", "organisation"), "description": "text"},
 }
 NUM_PREDICT = 1200          # le modele alfred est regle a 500 en sortie : trop court pour la v3
 PROMPT = """Tu analyses une fiche de main courante du PC Organisation du circuit des 24 Heures du Mans
 (securite, secours, technique, flux, fourriere, information) pendant un evenement.
 
-1. GRAVITE REELLE d'apres le deroule, pas d'apres le niveau d'urgence saisi (presque toujours absent ou faux) :
+1. GRAVITE REELLE d'apres le deroule, pas d'apres le niveau d'urgence saisi (presque toujours absent ou faux).
+La CONCLUSION du deroule prime sur le premier signalement (« vu avec X, juste agression verbale » = verbale ;
+« pas d'appel suspect » = fausse alerte).
 1 = routine, information, logistique ou dispositif preventif, sans incident : ouverture, pose de materiel,
     renfort ou deploiement preventif, consigne, enlevement de fourriere ou stationnement genant traite sans
-    incident, essai ou fiche de test (texte incoherent)
+    incident, fausse alerte levee, essai ou fiche de test (texte incoherent)
 2 = gene ou anomalie sans risque pour les personnes : panne, congestion, objet trouve ou perdu, demande de
     service, personnel bloque ou en attente (portail encore ferme), materiel tombe ou deplace (barrieres),
     vol simple sans violence ni menace (velo, objet)
 3 = incident demandant une intervention, risque modere : TOUT DEPART DE FEU meme vite eteint, malaise pris en
-    charge sans gravite, chute sans blessure grave, conflit verbal, intrusion sans suite, chute d'arbre sans
-    victime, personne ou enfant egare, engin ou materiel dangereux (grue deployee, charge instable)
+    charge sans gravite, chute sans blessure grave, conflit verbal entre personnes du public ou entre
+    personnels, intrusion sans suite, chute d'arbre sans victime, personne ou enfant egare, engin ou materiel
+    dangereux (grue deployee, charge instable)
 4 = atteinte aux personnes ou aux biens, ou risque serieux : bagarre, blesse (saignement abondant, ambulance),
-    vol avec violence ou menaces, degradation volontaire, conduite dangereuse, feu demandant des moyens importants
-5 = danger vital ou crise : arret cardiaque, blesse grave, incendie non maitrise, FUITE DE GAZ ou RISQUE
-    D'EXPLOSION, mouvement de foule, evacuation
+    AGRESSION, MENACE OU INSULTES VISANT UN AGENT (accueil, securite, controle), vol avec violence ou menaces,
+    degradation volontaire, conduite dangereuse, feu demandant des moyens importants
+5 = danger vital ou crise : arret cardiaque, blesse grave, AGRESSION SEXUELLE, incendie non maitrise, FUITE DE
+    GAZ ou RISQUE D'EXPLOSION, mouvement de foule, evacuation
 Exemples corriges par le PC : « Enlevement fourriere Bd des Italiens, termine, paiement carte » = 1 ;
-« Porte Nord, renfort filtrage, ouverture de couloirs supplementaires » = 1 ; « Personnel arrive en poste mais
-portail encore ferme » = 2 ; « Vol de velo au paddock » = 2 ; « Barrieres tombees chemin aux Boeufs » = 2 ;
-« Feu de poubelle eteint a l'extincteur par la patrouille » = 3 ; « Grue deployee sur un parking » = 3 ;
-« Femme, saignement abondant, prise en charge CMS puis ambulance » = 4 ; « Fuite sur bouteille de gaz,
-panache, non maitrisable » = 5.
+« Porte Nord, renfort filtrage, ouverture de couloirs supplementaires » = 1 ; « Appel suspect au stand, puis :
+PAS APPEL SUSPECT » = 1 ; « Personnel arrive en poste mais portail encore ferme » = 2 ; « Vol de velo au
+paddock » = 2 ; « Barrieres tombees chemin aux Boeufs » = 2 ; « Feu de poubelle eteint a l'extincteur par la
+patrouille » = 3 ; « Grue deployee sur un parking » = 3 ; « Agent d'accueil insulte par un spectateur » = 4 ;
+« Femme, saignement abondant, prise en charge CMS puis ambulance » = 4 ; « Agression sexuelle sur une agente
+d'accueil » = 5 ; « Fuite sur bouteille de gaz, panache, non maitrisable » = 5.
 
 2. FAITS (n'invente rien ; ce qui n'est pas ecrit vaut "non precise", null ou une liste vide) :
-- lieu : le lieu cite, tel qu'ecrit (ex. "T34", "Porte Nord", "P4D", "giratoire Antares", "Welcome")
+- lieu : le lieu cite, tel qu'ecrit (ex. "T34", "Porte Nord", "P4D", "giratoire Antares", "Welcome") ;
+  "non precise" si aucun lieu n'est ecrit dans le titre ou le deroule. La "zone de saisie" n'est PAS le lieu :
+  ne la reprends ni dans lieu ni dans le resume. Un carroye seul ("AJ 17") n'est pas un nom de lieu.
 - etapes : heures HH:MM lues dans le deroule pour signalement, engagement des moyens, arrivee sur place, fin
 - equipement : l'equipement ou materiel en cause (ex. "pompe a essence", "ecran geant", "barriere"), sinon "aucun"
 - moyens_engages : liste des EQUIPES ou moyens internes cites (ex. "S3M", "PS Nord", "patrouille 4", "Tangos",
-  "CMS") ; JAMAIS un nom de personne ni l'auteur d'une ligne du deroule
+  "CMS", "SERI" (parfois ecrit "siri")) ; JAMAIS un nom de personne ni l'auteur d'une
+  ligne du deroule
 - services_exterieurs : liste des services exterieurs sollicites (ex. "SDIS", "SAMU", "gendarmerie", "police",
   "ENEDIS", "depanneuse"), sinon []
 - causes : liste parmi alcool, meteo, affluence, travaux, panne_materiel, signaletique, conduite_dangereuse,
   malveillance, accident, sante, stationnement, autre (vide si rien n'est dit)
 - issue_code : resolu, transmis, sans_suite, en_attente ou non_precise
-- donnees_personnelles : types presents dans le texte parmi nom, telephone, plaque, age, sante, adresse
+- donnees_personnelles : types REELLEMENT ecrits parmi nom, telephone, plaque, age, sante, adresse ; "sante"
+  seulement si la personne est identifiee (nommee), un malaise d'un anonyme n'est pas une donnee personnelle
 
 3. NATURE de la fiche :
 - "incident" : evenement anormal qui demande une action (meme mineur)
@@ -155,6 +172,15 @@ activite : ronde, ouverture_fermeture, prise_service, prestation, consigne, cont
   "refus" ou "non_precise"}
 - prise_service : {"type": "prise", "fin" ou "prise_et_fin", "poste": "poste ou porte, sans nom de personne",
   "debut": "HH:MM", "fin": "HH:MM", "materiel": [materiel remis ou rendu]}
+- agression_agent (un membre du PERSONNEL de l'organisation est agresse, insulte ou menace dans son travail) :
+  {"cible": "accueil" (agent d'accueil, placier, controle billets), "securite" (agent de securite, filtrage,
+  patrouille, societe de securite) ou "autre_personnel" (chef de paddock, technicien, benevole...),
+  "forme": "verbale", "menace" ou "physique", "description": "une phrase, sans nom de personne"}.
+  null si seul le public est concerne ou si deux personnels se disputent entre eux.
+- chaleur (la CHALEUR ou la canicule a un impact) : {"impact": "personne" (coup de chaleur, malaise,
+  deshydratation), "materiel" (surchauffe, panne, depart de feu lie a la chaleur) ou "organisation"
+  (distribution d'eau, brumisation, horaires adaptes), "description": "une phrase"}. null si la chaleur
+  n'est pas citee ou clairement en cause.
 - sous_classification : la valeur EXACTE de la liste fournie avec la fiche qui correspond le mieux, ou null
 
 Reponds UNIQUEMENT par un objet JSON :
@@ -166,8 +192,10 @@ Reponds UNIQUEMENT par un objet JSON :
  "issue": "...", "issue_code": "...", "donnees_personnelles": [...],
  "nature": "...", "activite": "..." ou null, "ronde": {...} ou null, "alarme": {...} ou null,
  "dysfonctionnement": {...} ou null, "jalon": {...} ou null, "secours": {...} ou null,
- "prise_service": {...} ou null, "sous_classification": "..." ou null,
- "resume": "deux phrases maximum, sans nom de personne, telephone ni plaque"}
+ "prise_service": {...} ou null, "agression_agent": {...} ou null, "chaleur": {...} ou null,
+ "sous_classification": "..." ou null,
+ "resume": "deux phrases maximum, sans nom de personne, telephone ni plaque ; dis si la victime est un
+ membre du personnel (agent d'accueil, agent de securite...)"}
 
 Fiche :
 """
@@ -232,7 +260,10 @@ def source_text(doc, sc_list=None):
         if cc.get(key):
             lines.append("%s : %s" % (label, cc[key]))
     if area and str(area).strip() not in ("_MC PCS", "_MC PCO"):    # zones generiques : pas un lieu
-        lines.append("Zone : %s" % area)
+        # « _MC PCO/Interieur Dep./01-Grand Paddock » -> « Grand Paddock » : secteur
+        # choisi a la saisie, souvent approximatif (fiche du Village saisie en Grand Paddock)
+        short = re.sub(r"^\d+\s*-\s*", "", str(area).split("/")[-1]).strip()
+        lines.append("Zone de saisie (approximative, ce n'est pas le lieu) : %s" % (short or area))
     lines.append("Titre : %s" % (doc.get("text") or "").strip())
     lines.append("Deroule :\n%s" % (doc.get("comment") or "").strip())
     body = "\n".join(lines)[:SOURCE_MAX_CHARS]
@@ -366,6 +397,12 @@ def parse_reply(raw, sc_allowed=None):
     out["activite"] = act if act in ACTIVITES else None
     for bloc, spec in BLOCS.items():
         out[bloc] = _clean_bloc(data.get(bloc), spec)
+    # Un coup de chaleur est toujours un impact de la chaleur
+    if not out["chaleur"] and (out["secours"] or {}).get("nature") == "coup_de_chaleur":
+        out["chaleur"] = {"impact": "personne", "description": "coup de chaleur"}
+    # Age et sante d'un anonyme ne sont pas des donnees personnelles (controle du 27/10)
+    if not set(out["donnees_personnelles"]) & {"nom", "telephone", "adresse"}:
+        out["donnees_personnelles"] = [x for x in out["donnees_personnelles"] if x not in ("age", "sante")]
     # Sous-classification : seulement une valeur EXACTE de la liste officielle (accents pres)
     sc = str(data.get("sous_classification") or "").strip()
     match = None

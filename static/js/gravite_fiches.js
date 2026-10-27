@@ -18,9 +18,10 @@
                 ["equipement", "Equipement"], ["moyens", "Moyens"], ["services", "Services ext."], ["causes", "Causes"],
                 ["issue", "Issue"], ["sous_classification", "Sous-classif."], ["ronde", "Ronde"], ["alarme", "Alarme"],
                 ["dysfonctionnement", "Dysfonct."], ["jalon", "Jalon"], ["secours", "Secours"],
-                ["prise_service", "Prise de service"]];
-  // Puces des blocs v3 : affichees seulement si le bloc est present sur la fiche
-  var CHAMPS_BLOCS = ["ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service"];
+                ["prise_service", "Prise de service"], ["agression_agent", "Agression d'agent"], ["chaleur", "Chaleur"]];
+  // Puces des blocs v3 / v4 : affichees seulement si le bloc est present sur la fiche
+  var CHAMPS_BLOCS = ["ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service",
+                      "agression_agent", "chaleur"];
   var NATURE_LABELS = { incident: "Incident", routine: "Routine", information: "Information" };
   var POS_LABELS = { gps: "GPS d'origine", carroyage: "Carroyage", lieu: "Lieu cite", titre: "Titre", aucune: "Aucune" };
   var ISSUE_LABELS = { resolu: "Resolu", transmis: "Transmis", sans_suite: "Sans suite", en_attente: "En attente", non_precise: "Non precise" };
@@ -246,6 +247,13 @@
     grid.appendChild(qbox("Bilan secours (" + fmtInt(sc.n) + ")", pairs(sc.nature)
       .concat(pairs(sc.tranche_age).map(function (r) { return ["Age " + r[0], r[1]]; }))
       .concat(pairs(sc.prise_en_charge).map(function (r) { return ["Prise en charge : " + r[0], r[1]]; }))));
+    var ag = q.agressions || {};
+    grid.appendChild(qbox("Agressions du personnel (" + fmtInt(ag.n) + ")", pairs(ag.cibles)
+      .concat(pairs(ag.formes).map(function (r) { return ["Forme : " + r[0], r[1]]; }))
+      .concat((ag.derniers || []).slice(0, 8).map(function (x) { return [x.quand + " - " + lab(x.cible), x.description || lab(x.forme)]; }))));
+    var ch = q.chaleur || {};
+    grid.appendChild(qbox("Impacts de la chaleur (" + fmtInt(ch.n) + ")", pairs(ch.impacts)
+      .concat((ch.derniers || []).slice(0, 8).map(function (x) { return [x.quand + " - " + lab(x.impact), x.description || "-"]; }))));
     var pr = q.presences || {};
     grid.appendChild(qbox("Prises de service (" + fmtInt(pr.n) + ")", pairs(pr.postes)));
     grid.appendChild(qbox("Reactivite des services", (q.reactivite || []).map(function (x) {
@@ -400,10 +408,14 @@
     }
     items.forEach(function (it, i) { box.appendChild(renderItem(it, i)); });
     document.body.classList.add("gf-reviewing");
-    var first = 0;
+    // Directement sur la premiere fiche encore a controler (sinon en tete de liste)
+    var first = -1;
     for (var i = 0; i < items.length; i++) { if (!items[i].review && !items[i].error) { first = i; break; } }
-    setFocus(first, false);
-    document.getElementById("gf-items-card").scrollIntoView({ behavior: "smooth", block: "start" });
+    if (first > 0) setFocus(first, true);
+    else {
+      setFocus(0, false);
+      document.getElementById("gf-items-card").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   function renderItem(it, idx) {
@@ -689,6 +701,12 @@
       row("Prise de service", [p2.type, p2.poste, p2.debut && p2.fin ? p2.debut + " - " + p2.fin : (p2.debut || p2.fin),
         (p2.materiel || []).length ? "materiel : " + p2.materiel.join(", ") : null].filter(Boolean).join(" - "));
     }
+    if (it.agression_agent) {
+      var ag = it.agression_agent;
+      row("Agression d'agent", el("span", "gf-tag gf-warn", [ag.cible ? ag.cible.replace(/_/g, " ") : null, ag.forme,
+        ag.description].filter(Boolean).join(" - ")));
+    }
+    if (it.chaleur) row("Chaleur", [it.chaleur.impact, it.chaleur.description].filter(Boolean).join(" - "));
     if ((it.plaques || []).length) row("Plaques", tags(it.plaques));
     if (it.doublon_declare) {
       var dd = el("span", null, "de la fiche n " + it.doublon_declare.sql_id + " ");

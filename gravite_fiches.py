@@ -24,7 +24,7 @@ IGNORE = "ignoree"      # fiche de test / essai : ni jugee, ni retraitee, hors s
 # Champs que l'admin peut signaler faux (controle par sondage des faits extraits)
 CHAMPS = ("lieu", "position", "heures", "equipement", "moyens", "services", "causes", "issue", "resume",
           "nature", "ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service",
-          "sous_classification")
+          "sous_classification", "agression_agent", "chaleur")
 FICHE_FIELDS = {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1,
                 "event": 1, "year": 1, "date_local": 1, "time_local": 1}
 
@@ -63,7 +63,8 @@ def _pub_digest(d, fiche=None):
                                   "dysfonctionnement", "jalon", "secours", "prise_service",
                                   "sous_classification_proposee", "taxo", "area", "relances",
                                   "doublon_declare", "alarme_non_remise", "a_controler",
-                                  "competence", "dans", "pres", "ignoree", "plaques")}
+                                  "competence", "dans", "pres", "ignoree", "plaques",
+                                  "agression_agent", "chaleur")}
     out["id"] = d["_id"]
     out["at"] = _iso(d.get("at"))
     out["ms"] = (d.get("meta") or {}).get("ms")
@@ -385,6 +386,27 @@ def _quality_v3(col, base):
     decl = list(col.find(dict(base, doublon_declare={"$ne": None}), {"doublon_declare": 1, "doublon_probable": 1}))
     found = sum(1 for d in decl if (d.get("doublon_probable") or {}).get("de") == d["doublon_declare"]["de"])
     out["doublons_declares"] = {"n": len(decl), "retrouves": found}
+
+    # Agressions du personnel (accueil, securite) et impacts de la chaleur (v4)
+    agr = dict(base, agression_agent={"$ne": None})
+    out["agressions"] = {
+        "n": col.count_documents(agr),
+        "cibles": _top(col, agr, "agression_agent.cible", n=3),
+        "formes": _top(col, agr, "agression_agent.forme", n=3),
+        "derniers": [{"quand": _when(d), "cible": (d.get("agression_agent") or {}).get("cible"),
+                      "forme": (d.get("agression_agent") or {}).get("forme"),
+                      "description": (d.get("agression_agent") or {}).get("description"), "id": d["_id"]}
+                     for d in col.find(agr, {"agression_agent": 1, "ts": 1, "event": 1, "year": 1})
+                     .sort("ts", -1).limit(12)],
+    }
+    chal = dict(base, chaleur={"$ne": None})
+    out["chaleur"] = {
+        "n": col.count_documents(chal),
+        "impacts": _top(col, chal, "chaleur.impact", n=3),
+        "derniers": [{"quand": _when(d), "impact": (d.get("chaleur") or {}).get("impact"),
+                      "description": (d.get("chaleur") or {}).get("description"), "id": d["_id"]}
+                     for d in col.find(chal, {"chaleur": 1, "ts": 1, "event": 1, "year": 1}).sort("ts", -1).limit(12)],
+    }
     return out
 
 

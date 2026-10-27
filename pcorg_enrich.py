@@ -491,6 +491,10 @@ def review_reasons(d):
         add(6 if g == 5 else 5, "gravite %d" % g)
     if d.get("alarme_non_remise"):
         add(5, "alarme jamais remise")
+    if d.get("agression_agent"):
+        add(4, "agression d'agent")
+    if d.get("chaleur"):
+        add(3, "chaleur")
     if d.get("secours"):
         add(3, "secours")
     if d.get("dysfonctionnement"):

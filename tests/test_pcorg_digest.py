@@ -23,6 +23,23 @@ class TestReponseModele:
         r = PD.parse_reply('{"gravite": 1}')
         assert r["resume"] == "non precise" and r["victimes"] == 0
 
+    def test_agression_d_agent_et_chaleur(self):
+        r = PD.parse_reply(json.dumps({"gravite": 3, "agression_agent": {"cible": "securite", "forme": "Verbale",
+                                                                        "description": "insultes au filtrage"},
+                                       "chaleur": {"impact": "inconnu"}}))
+        assert r["agression_agent"] == {"cible": "securite", "forme": "verbale", "description": "insultes au filtrage"}
+        assert r["chaleur"] is None                                  # valeur hors liste, rien d'autre
+
+    def test_coup_de_chaleur_vaut_impact_chaleur(self):
+        r = PD.parse_reply(json.dumps({"gravite": 3, "secours": {"nature": "coup_de_chaleur"}}))
+        assert r["chaleur"]["impact"] == "personne"
+
+    def test_age_et_sante_d_un_anonyme_ne_sont_pas_personnels(self):
+        r = PD.parse_reply(json.dumps({"gravite": 3, "donnees_personnelles": ["age", "sante", "plaque"]}))
+        assert r["donnees_personnelles"] == ["plaque"]
+        r = PD.parse_reply(json.dumps({"gravite": 3, "donnees_personnelles": ["nom", "sante"]}))
+        assert r["donnees_personnelles"] == ["nom", "sante"]
+
     @pytest.mark.parametrize("raw", ['{"gravite": 7}', '{"gravite": "x"}', "[1]", "pas du json"])
     def test_reponse_rejetee(self, raw):
         with pytest.raises(ValueError):
@@ -34,6 +51,11 @@ class TestSource:
         src = PD.source_text(FICHE)
         assert "Bagarre buvette" in src and "deux blesses" in src
         assert "0600000000" not in src and "Mme X" not in src
+
+    def test_zone_de_saisie_nommee_comme_telle(self):
+        src = PD.source_text(dict(FICHE, area={"desc": "_MC PCO/Interieur Dep./01-Grand Paddock"}))
+        assert "Zone de saisie (approximative, ce n'est pas le lieu) : Grand Paddock" in src
+        assert "Zone de saisie" not in PD.source_text(dict(FICHE, area={"desc": "_MC PCO"}))
 
     def test_empreinte_suit_le_texte(self):
         h = PD.src_hash(FICHE)
