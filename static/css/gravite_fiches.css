@@ -64,6 +64,18 @@
     font-weight: 700; font-size: 14px; }
 .gf-gbtn.gf-model-val { border-width: 2px; border-color: var(--text); }
 .gf-gbtn.gf-chosen { color: #fff; border-color: transparent; }
+/* Le fond blanc des boutons ecrasait .gf-gN : chiffre choisi blanc sur blanc */
+.gf-gbtn.gf-chosen.gf-g1, .gf-mb-grav button.gf-chosen.gf-g1 { background: #64748b; }
+.gf-gbtn.gf-chosen.gf-g2, .gf-mb-grav button.gf-chosen.gf-g2 { background: #0ea5e9; }
+.gf-gbtn.gf-chosen.gf-g3, .gf-mb-grav button.gf-chosen.gf-g3 { background: #eab308; }
+.gf-gbtn.gf-chosen.gf-g4, .gf-mb-grav button.gf-chosen.gf-g4 { background: #f97316; }
+.gf-gbtn.gf-chosen.gf-g5, .gf-mb-grav button.gf-chosen.gf-g5 { background: #dc2626; }
+.gf-gbtn.gf-chosen.gf-model-val, .gf-mb-grav button.gf-chosen.gf-model-val { border-color: var(--text); }
+/* Gravite proposee par l'IA : pastille "IA" sur le bouton */
+.gf-gbtn, .gf-mb-grav button { position: relative; }
+.gf-gbtn.gf-model-val::after, .gf-mb-grav button.gf-model-val::after { content: "IA"; position: absolute; top: -7px; right: -5px;
+    background: var(--text); color: #fff; font-size: 9px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 6px; }
+.gf-ia-label { font-size: 12px; margin-right: 2px; }
 .gf-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; margin-left: 8px; cursor: pointer; }
 .gf-note { flex: 1; min-width: 160px; font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; }
 .gf-verdict { font-size: 12px; font-weight: 600; margin-left: auto; }

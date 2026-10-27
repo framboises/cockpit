@@ -448,6 +448,7 @@
       right.appendChild(why);
     }
     var head = el("div", "gf-head");
+    head.appendChild(el("span", "gf-muted gf-ia-label", "Gravite IA"));
     head.appendChild(el("span", "gf-badge gf-g" + it.gravite, it.gravite));
     head.appendChild(el("strong", null, GRAV_LABELS[it.gravite] || ""));
     right.appendChild(head);
