@@ -820,6 +820,11 @@
   function recenter() {
     state.followMe = !state.followMe;
     updateFollowBtn();
+    // Mode test : la position simulee est "ma" position
+    if (state.followMe && state.simPos) {
+      state.map.setView(state.simPos, Math.max(state.map.getZoom(), 17));
+      return;
+    }
     if (state.followMe && state.meMarker) {
       state.map.setView(state.meMarker.getLatLng(), Math.max(state.map.getZoom(), 18));
     } else if (state.followMe) {
@@ -2007,6 +2012,11 @@
   }
 
   function flyToPoiResult(p) {
+    // Outils de test > Chercher un lieu : le lieu choisi devient la position simulee
+    if (state.simPickPoi && p && p.lat != null && p.lng != null) {
+      state.simPickPoi = false;
+      setTimeout(function () { setSimPosition([p.lat, p.lng]); }, 0);
+    }
     // Remove previous highlight
     if (_poiSearchHighlight) {
       try { state.map.removeLayer(_poiSearchHighlight); } catch (e) {}
@@ -4506,6 +4516,15 @@
           setSimPosition([e.latlng.lat, e.latlng.lng]);
         });
       }
+      // Position simulee d'avant le rechargement
+      if (!state.simPos) {
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem(SIM_KEY) || "null"); } catch (e) { saved = null; }
+        if (saved && saved.length === 2 && isFinite(saved[0]) && isFinite(saved[1])) {
+          setSimPosition(saved);
+          tlog("position", "simulee retablie apres rechargement");
+        }
+      }
     } else {
       if (badge) badge.remove();
       if (fab) { fab.remove(); state.testFab = null; }
@@ -4516,10 +4535,16 @@
   }
 
   // quiet : appel repete du trajet simule (ni message, ni journal)
+  // La position simulee est gardee d'un rechargement a l'autre (mode test).
+  var SIM_KEY = "field_sim_pos";
   function setSimPosition(latlng, quiet) {
     if (state.simTimer) { clearInterval(state.simTimer); state.simTimer = null; }
     if (!latlng && !quiet) stopSimWalk();
     state.simPos = latlng;
+    try {
+      if (latlng) localStorage.setItem(SIM_KEY, JSON.stringify(latlng));
+      else localStorage.removeItem(SIM_KEY);
+    } catch (e) { /* stockage indisponible */ }
     if (state.testFab) {
       state.testFab.classList.toggle("active", !!latlng);
       state.testFab.title = latlng ? "Position simulee : toucher pour revenir au GPS reel" : "Position simulee (mode test)";
@@ -4837,21 +4862,54 @@
     _actBtn(g, "Relire maintenant", "refresh", function () { pollFiches(); loadTestServer(); toast("Relecture", "ok"); });
     body.appendChild(g);
 
-    body.appendChild(_n("div", "test-sec", "Position"));
+    body.appendChild(_n("div", "test-sec", "Position" + (state.simPos ? " (simulee : " + state.simPos[0].toFixed(5) + ", " + state.simPos[1].toFixed(5) + ")" : " (GPS reel)")));
     var g2 = _n("div", "test-grid");
-    _actBtn(g2, "A 300 m du point suivant", "near_me", function () {
-      var nx = patrolNextStep();
-      if (!nx) { toast("Pas de point suivant", "warn"); return; }
-      simNear(nx.step, 300);
-    });
-    _actBtn(g2, "Sur le point suivant", "pin_drop", function () {
-      var nx = patrolNextStep();
-      if (!nx) { toast("Pas de point suivant", "warn"); return; }
-      setSimPosition([nx.step.lat, nx.step.lng]);
-    });
+    _actBtn(g2, "Toucher la carte", "touch_app", function () {
+      closeTestPanel();
+      state.simPick = true;
+      if (state.testFab) state.testFab.classList.add("active");
+      toast("Touchez la carte a l'endroit voulu (deplacez-la d'abord si besoin)", "warn");
+    }, "primary");
+    _actBtn(g2, "Chercher un lieu", "search", function () {
+      closeTestPanel();
+      state.simPickPoi = true;
+      var b = $("btn-poi-search");
+      if (b) b.click();
+      toast("Choisissez un lieu : il deviendra votre position", "warn");
+    }, "primary");
     _actBtn(g2, "Au Mans (Village)", "location_city", function () { setSimPosition([47.9558, 0.2079]); });
     _actBtn(g2, "Revenir au GPS reel", "my_location", function () { stopSimWalk(); setSimPosition(null); });
     body.appendChild(g2);
+    var crow = _n("div", "test-row");
+    var cin = _n("input", "test-select");
+    cin.type = "text";
+    cin.placeholder = "Coordonnees : 47.9558, 0.2079";
+    cin.setAttribute("inputmode", "decimal");
+    crow.appendChild(cin);
+    _actBtn(crow, "Aller", "arrow_forward", function () {
+      var m = (cin.value || "").replace(/[()]/g, "").split(/[,;\s]+/).filter(Boolean).map(parseFloat);
+      if (m.length < 2 || !isFinite(m[0]) || !isFinite(m[1]) || Math.abs(m[0]) > 90 || Math.abs(m[1]) > 180) {
+        toast("Coordonnees attendues : latitude, longitude", "warn"); return;
+      }
+      setSimPosition([m[0], m[1]]);
+    });
+    body.appendChild(crow);
+    if (_patrol.run) {
+      body.appendChild(_n("div", "test-muted", "Points de la patrouille : Sur = valide le point (s'il est le suivant), 300 m = juste avant."));
+      var pl = _n("div", "test-steps");
+      _patrol.run.steps.forEach(function (s, i) {
+        var r = _n("div", "test-step test-step-pos");
+        r.appendChild(_n("span", "n", String(i + 1)));
+        r.appendChild(_n("span", "name", s.name + (s.state !== "pending" ? " (" + s.state + ")" : "")));
+        var b1 = _n("button", "test-mini", "300 m");
+        b1.addEventListener("click", function () { simNear(s, 300); });
+        var b2 = _n("button", "test-mini", "Sur");
+        b2.addEventListener("click", function () { setSimPosition([s.lat, s.lng]); });
+        r.appendChild(b1); r.appendChild(b2);
+        pl.appendChild(r);
+      });
+      body.appendChild(pl);
+    }
     var row2 = _n("div", "test-row");
     var sp = _n("select", "test-select");
     [["5", "A pied 5 km/h"], ["25", "A pied accelere x5"], ["30", "Vehicule 30 km/h"], ["150", "Vehicule accelere x5"]].forEach(function (o) { sp.appendChild(new Option(o[1], o[0])); });

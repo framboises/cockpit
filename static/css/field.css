@@ -3503,3 +3503,5 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
 .test-log-line .k { color: #fb923c; }
 .test-log-line .m { color: #e2e8f0; word-break: break-word; }
 .test-log-line.k-poll .m, .test-log-line.k-file .m { color: #fca5a5; }
+.test-mini { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 7px; padding: 5px 9px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.test-step-pos { padding: 4px; }
