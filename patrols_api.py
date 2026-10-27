@@ -121,6 +121,10 @@ def patrols_bootstrap():
     db = _db()
     now = P._now()
     st = P.get_settings(db)
+    try:        # points issus des couches Looker : ils suivent Looker
+        P.sync_layer_points(db)
+    except Exception as e:
+        logger.warning("Patrouilles : synchro Looker en echec (%s)", e)
     zones = P._zones(db)
     labels = _zone_labels(zones)
     groups = F._beacon_groups(db)
@@ -133,6 +137,8 @@ def patrols_bootstrap():
         "dominantes": [{"id": k, "label": v} for k, v in P.DOMINANTES.items()],
         # Epreuves connues (exceptions de planning calees sur une epreuve)
         "events": _event_names(db),
+        # Couches Looker (import de points), celles retenues dans les reglages
+        "layers": P.available_layers(db),
         "zones": [{"id": z["id"], "label": z["label"], "geometry": z["geometry"]} for z in zones],
         "groups": [{"id": gid, "label": g.get("label") or gid, "color": g.get("color") or "#6366f1",
                     "declarant": bool(g.get("declarant")), "disabled": g.get("enabled") is False}
@@ -146,6 +152,9 @@ def patrols_settings():
     data = request.get_json(silent=True) or {}
     db = _db()
     upd = {k: data[k] for k in P.DEFAULTS if k in data}
+    if isinstance(data.get("layers"), list):
+        known = {d["collection"] for d in P.available_layers(db)}
+        upd["layers"] = [str(x) for x in data["layers"] if str(x) in known]
     upd.update(updated_at=P._now(), updated_by=_who())
     db["cockpit_settings"].update_one({"_id": P.SETTINGS_ID}, {"$set": upd}, upsert=True)
     return jsonify({"ok": True, "settings": P.get_settings(db)})
@@ -173,6 +182,36 @@ def patrols_point_update(point_id):
     if err:
         return _err(err, 404 if err == "not_found" else 400)
     return jsonify({"ok": True, "point": P.pub_point(p, _zone_labels(P._zones(db)))})
+
+
+@patrols_bp.route("/api/patrols/layers/<collection>/items")
+@admin_required
+def patrols_layer_items(collection):
+    """Objets d'une couche Looker, et le point deja cree pour chacun."""
+    db = _db()
+    items = P.layer_items(db, collection)
+    if items is None:
+        return _err("couche_inconnue", 404)
+    done = {(p.get("layer_ref") or {}).get("fid"): {"id": str(p["_id"]), "active": p.get("active", True) is not False}
+            for p in db["patrol_points"].find({"layer_ref.collection": collection}, {"layer_ref": 1, "active": 1})}
+    for it in items:
+        it["point"] = done.get(it["fid"])
+    return jsonify({"ok": True, "items": items})
+
+
+@patrols_bp.route("/api/patrols/points/import", methods=["POST"])
+@admin_required
+def patrols_points_import():
+    """Cree un point par objet choisi d'une couche Looker (ou reactive celui
+    qui existe). Retourne les points dans l'ordre demande."""
+    db = _db()
+    data = request.get_json(silent=True) or {}
+    ids, err = P.import_points(db, data.get("collection"), data.get("fids"), _who())
+    if err:
+        return _err(err)
+    labels = _zone_labels(P._zones(db))
+    pts = {str(p["_id"]): p for p in db["patrol_points"].find({"_id": {"$in": [P._oid(i) for i in ids]}})}
+    return jsonify({"ok": True, "ids": ids, "points": [P.pub_point(pts[i], labels) for i in ids if i in pts]})
 
 
 @patrols_bp.route("/api/patrols/points/<point_id>/active", methods=["POST"])

@@ -228,3 +228,10 @@
 .pt-pick-item:hover { background: #f1f5f9; }
 .pt-pick-item.on { background: #eff6ff; }
 .pt-pick-name { flex: 1; min-width: 0; font-weight: 600; }
+
+/* Import depuis une couche */
+.pt-imp-list { max-height: none; border: 0; padding: 0; }
+.pt-imp-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pt-imp-txt .pt-muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-layer-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 260px; overflow-y: auto; }
+#pt-pt-zones { white-space: pre-line; }

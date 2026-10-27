@@ -4251,6 +4251,13 @@
         ins.textContent = nx.step.instruction;
         card.appendChild(ins);
       }
+      // Informations de l'objet Looker (sanitaire, tribune, portail...)
+      if (nx.step.info) {
+        var inf = document.createElement("div");
+        inf.className = "patrol-info";
+        inf.textContent = nx.step.info;
+        card.appendChild(inf);
+      }
     } else {
       var all = document.createElement("div");
       all.className = "patrol-next";

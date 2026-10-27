@@ -146,7 +146,12 @@
   }
 
   function onMapClick(e) {
-    if (S.tab === "points") openPointEditor({ lat: e.latlng.lat, lng: e.latlng.lng });
+    if (S.tab !== "points") return;
+    if (IMP.on) {       // import depuis une couche : la carte sert au lasso
+      if (IMP.lasso) { IMP.lasso.push([e.latlng.lng, e.latlng.lat]); drawImport(); }
+      return;
+    }
+    openPointEditor({ lat: e.latlng.lat, lng: e.latlng.lng });
   }
 
   // ---------- Chargement ----------
@@ -170,6 +175,14 @@
     $("pt-set-radius").value = S.data.settings.radius_m;
     $("pt-set-timeout").value = S.data.settings.accept_timeout_s;
     $("pt-set-seen").value = S.data.settings.seen_window_min;
+    var ll = $("pt-set-layers");
+    clear(ll);
+    (S.data.layers || []).forEach(function (l) {
+      var lab = el("label", "pt-check");
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.value = l.collection; cb.checked = l.selected;
+      lab.appendChild(cb); lab.appendChild(document.createTextNode(" " + l.label));
+      ll.appendChild(lab);
+    });
   }
 
   // ---------- Onglets ----------
@@ -213,7 +226,7 @@
     S.layers.points.clearLayers();
     S.layers.scenario.clearLayers();
     S.layers.live.clearLayers();
-    if (S.tab === "points") { renderPoints(); drawAllPoints(true); }
+    if (S.tab === "points") { renderPoints(); if (IMP.on) drawImport(); else drawAllPoints(true); }
     else if (S.tab === "scenarios") { renderScenarios(); if (S.sc) drawScenarioEditor(); else drawAllPoints(false); }
     else if (S.tab === "tablettes") renderDevices();
     else if (S.tab === "suivi") renderLive();
@@ -238,7 +251,8 @@
       m.addTo(S.layers.points);
     });
     if (S.pt) {
-      var em = L.marker([S.pt.lat, S.pt.lng], { draggable: true, icon: dotIcon("#dc2626", "en edition") }).addTo(S.layers.points);
+      // Point issu de Looker : position fixee par Looker, pas de deplacement ici
+      var em = L.marker([S.pt.lat, S.pt.lng], { draggable: !S.pt.layer_ref, icon: dotIcon("#dc2626", "en edition") }).addTo(S.layers.points);
       var circle = L.circle([S.pt.lat, S.pt.lng], { radius: Number($("pt-pt-radius").value) || S.data.settings.radius_m, color: "#dc2626", weight: 2, fillOpacity: 0.08, interactive: false }).addTo(S.layers.points);
       em.on("drag", function (e) { circle.setLatLng(e.latlng); });
       em.on("dragend", function (e) {
@@ -265,6 +279,7 @@
       if (p.photo_required) sub.push("photo exigee");
       if (p.instruction) sub.push("consigne");
       sub.push((uses[p.id] || 0) + " scenario(s)");
+      if (p.layer_ref) sub.push(p.layer_missing ? "ABSENT de Looker" : "suit Looker");
       if (p.zones && p.zones.length) sub.push(p.zones.join(", "));
       main.appendChild(el("div", "pt-item-sub", sub.join(" - ")));
       row.appendChild(main);
@@ -276,7 +291,7 @@
   function openPointEditor(p) {
     S.pt = { id: p.id || null, name: p.name || "", lat: p.lat, lng: p.lng, radius_m: p.radius_m || S.data.settings.radius_m,
              dwell_s: p.dwell_s || 0, instruction: p.instruction || "", photo_required: !!p.photo_required,
-             active: p.active !== false, zones: p.zones || [] };
+             active: p.active !== false, zones: p.zones || [], info: p.info || "", layer_ref: p.layer_ref || null };
     $("pt-pt-editor").hidden = false;
     $("pt-pt-listpane").hidden = true;
     $("pt-pt-name").value = S.pt.name;
@@ -285,7 +300,10 @@
     $("pt-pt-instruction").value = S.pt.instruction;
     $("pt-pt-photo").checked = S.pt.photo_required;
     $("pt-pt-pos").textContent = "Position : " + S.pt.lat.toFixed(5) + ", " + S.pt.lng.toFixed(5) + " (deplacez le repere rouge pour ajuster)";
-    $("pt-pt-zones").textContent = S.pt.id ? (S.pt.zones.length ? "Zones : " + S.pt.zones.join(", ") : "Dans aucune zone de competence") : "";
+    $("pt-pt-zones").textContent = (S.pt.id ? (S.pt.zones.length ? "Zones : " + S.pt.zones.join(", ") : "Dans aucune zone de competence") : "") +
+      (S.pt.info ? "\nInformations transmises a l'agent : " + S.pt.info : "");
+    $("pt-pt-name").disabled = !!S.pt.layer_ref;
+    if (S.pt.layer_ref) $("pt-pt-pos").textContent = "Nom, position et informations suivent Looker" + (p.layer_missing ? " (objet ABSENT de la couche : derniere position gardee)" : "") + ".";
     $("pt-pt-toggle").hidden = !S.pt.id;
     $("pt-pt-toggle").textContent = S.pt.active ? "Desactiver" : "Reactiver";
     render();
@@ -322,6 +340,187 @@
       toast("success", active ? "Point reactive" : "Point desactive (les scenarios qui l'utilisent le gardent)");
       fillSelects();
       closePointEditor();
+    }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
+  // ---------- Import depuis une couche Looker ----------
+  // Les points crees suivent Looker (nom, position, informations) : voir
+  // patrols.sync_layer_points. Selection par nom (filtre), par zone de
+  // competence, au lasso (polygone trace sur la carte) ou au clic sur la carte.
+  var IMP = { on: false, layer: null, items: [], sel: {}, lasso: null, visible: [] };
+
+  function pipRing(lat, lng, ring) {
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / ((yj - yi) || 1e-12) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+  function inGeom(lat, lng, g) {
+    if (!g) return false;
+    var polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+    return polys.some(function (p) {
+      return p.length && pipRing(lat, lng, p[0]) && !p.slice(1).some(function (h) { return pipRing(lat, lng, h); });
+    });
+  }
+
+  function openImport() {
+    var layers = (S.data.layers || []).filter(function (l) { return l.selected; });
+    if (!layers.length) { toast("info", "Choisissez d'abord les couches dans Reglages"); return; }
+    if (S.pt) closePointEditor();
+    IMP.on = true;
+    IMP.sel = {};
+    IMP.lasso = null;
+    var ls = $("pt-imp-layer");
+    clear(ls);
+    layers.forEach(function (l) { ls.appendChild(new Option(l.label, l.collection)); });
+    if (IMP.layer && layers.some(function (l) { return l.collection === IMP.layer; })) ls.value = IMP.layer;
+    var zs = $("pt-imp-zone");
+    clear(zs);
+    zs.appendChild(new Option("Toutes", ""));
+    S.data.zones.forEach(function (z) { zs.appendChild(new Option(z.label, z.id)); });
+    $("pt-imp-search").value = "";
+    $("pt-pt-listpane").hidden = true;
+    $("pt-imp-pane").hidden = false;
+    loadImportItems();
+  }
+
+  function closeImport() {
+    IMP.on = false;
+    IMP.lasso = null;
+    $("pt-imp-lasso-help").hidden = true;
+    $("pt-imp-pane").hidden = true;
+    $("pt-pt-listpane").hidden = false;
+    render();
+  }
+
+  function loadImportItems() {
+    IMP.layer = $("pt-imp-layer").value;
+    IMP.items = [];
+    IMP.sel = {};
+    paintImport();
+    $("pt-imp-count").textContent = "Chargement...";
+    apiGet("/api/patrols/layers/" + encodeURIComponent(IMP.layer) + "/items").then(function (r) {
+      IMP.items = r.items;
+      paintImport();
+      var ll = r.items.map(function (i) { return [i.lat, i.lng]; });
+      if (ll.length) S.map.fitBounds(L.latLngBounds(ll).pad(0.05), { maxZoom: 17 });
+    }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
+  function importFilter() {
+    var q = ($("pt-imp-search").value || "").toLowerCase();
+    var zid = $("pt-imp-zone").value;
+    var zone = zid ? S.data.zones.find(function (z) { return z.id === zid; }) : null;
+    return IMP.items.filter(function (it) {
+      if (q && (it.name + " " + it.info).toLowerCase().indexOf(q) < 0) return false;
+      if (zone && !inGeom(it.lat, it.lng, zone.geometry)) return false;
+      return true;
+    });
+  }
+
+  function paintImport() {
+    var vis = importFilter();
+    IMP.visible = vis.map(function (i) { return i.fid; });
+    var box = $("pt-imp-list");
+    clear(box);
+    if (!vis.length) box.appendChild(el("div", "pt-empty", IMP.items.length ? "Aucun objet ne correspond." : "Aucun objet."));
+    vis.slice(0, 400).forEach(function (it) {
+      var lab = el("label", "pt-pick-item" + (IMP.sel[it.fid] ? " on" : ""));
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!IMP.sel[it.fid];
+      cb.addEventListener("change", function () {
+        if (cb.checked) IMP.sel[it.fid] = true; else delete IMP.sel[it.fid];
+        lab.classList.toggle("on", cb.checked);
+        countImport(); drawImport();
+      });
+      lab.appendChild(cb);
+      var txt = el("span", "pt-imp-txt");
+      txt.appendChild(el("span", "pt-pick-name", it.name));
+      if (it.info) txt.appendChild(el("span", "pt-muted", it.info));
+      lab.appendChild(txt);
+      if (it.point) lab.appendChild(el("span", "pt-chip zone", it.point.active ? "deja un point" : "point desactive"));
+      box.appendChild(lab);
+    });
+    if (vis.length > 400) box.appendChild(el("div", "pt-hint", (vis.length - 400) + " autres : affinez le filtre (tout cocher les prend quand meme)."));
+    countImport();
+    drawImport();
+  }
+
+  function countImport() {
+    var n = Object.keys(IMP.sel).length;
+    $("pt-imp-count").textContent = IMP.visible.length + " objet(s) affiche(s) sur " + IMP.items.length + " - " + n + " coche(s)";
+    $("pt-imp-go").disabled = !n;
+    $("pt-imp-sc").disabled = n < 2;
+    $("pt-imp-go").lastChild.textContent = " Creer " + (n || "") + " point" + (n > 1 ? "s" : "");
+  }
+
+  function drawImport() {
+    if (S.tab !== "points" || !IMP.on) return;
+    S.layers.points.clearLayers();
+    var shown = {};
+    IMP.visible.forEach(function (f) { shown[f] = true; });
+    IMP.items.forEach(function (it) {
+      if (!shown[it.fid] && !IMP.sel[it.fid]) return;
+      var on = !!IMP.sel[it.fid];
+      var m = L.circleMarker([it.lat, it.lng], {
+        radius: on ? 7 : 5, weight: it.point ? 3 : 1, color: it.point ? "#16a34a" : "#1e293b",
+        fillColor: on ? "#2563eb" : "#cbd5e1", fillOpacity: 0.95,
+      }).bindTooltip(esc(it.name), { direction: "top", offset: [0, -6] });
+      m.on("click", function (e) {
+        L.DomEvent.stopPropagation(e);
+        if (IMP.lasso) return;
+        if (IMP.sel[it.fid]) delete IMP.sel[it.fid]; else IMP.sel[it.fid] = true;
+        paintImport();
+      });
+      m.addTo(S.layers.points);
+    });
+    if (IMP.lasso && IMP.lasso.length) {
+      var ll = IMP.lasso.map(function (c) { return [c[1], c[0]]; });
+      L.polyline(ll.concat(ll.length > 2 ? [ll[0]] : []), { color: "#f59e0b", weight: 2, dashArray: "6 4" }).addTo(S.layers.points);
+      ll.forEach(function (p) { L.circleMarker(p, { radius: 4, color: "#f59e0b", fillOpacity: 1 }).addTo(S.layers.points); });
+    }
+  }
+
+  function startLasso() {
+    IMP.lasso = [];
+    $("pt-imp-lasso-help").hidden = false;
+    S.map.getContainer().style.cursor = "crosshair";
+    drawImport();
+  }
+  function endLasso(apply) {
+    var poly = IMP.lasso;
+    IMP.lasso = null;
+    $("pt-imp-lasso-help").hidden = true;
+    S.map.getContainer().style.cursor = "";
+    if (apply) {
+      if (!poly || poly.length < 3) { toast("warning", "Au moins 3 points pour tracer une zone"); drawImport(); return; }
+      var ring = poly.concat([poly[0]]);
+      var n = 0;
+      IMP.items.forEach(function (it) { if (pipRing(it.lat, it.lng, ring) && !IMP.sel[it.fid]) { IMP.sel[it.fid] = true; n++; } });
+      toast("success", n + " objet(s) coche(s) dans la zone");
+    }
+    paintImport();
+  }
+
+  function doImport(asScenario) {
+    // Ordre : celui de la liste (noms) ; Optimiser le remet dans l'ordre de passage
+    var fids = IMP.items.filter(function (it) { return IMP.sel[it.fid]; }).map(function (it) { return it.fid; });
+    if (!fids.length) return;
+    if (asScenario && fids.length > 40) { toast("warning", "40 points au plus par scenario (" + fids.length + " coches)"); return; }
+    var layerLabel = ($("pt-imp-layer").selectedOptions[0] || {}).textContent || "";
+    apiPost("/api/patrols/points/import", { collection: IMP.layer, fids: fids }).then(function (r) {
+      toast("success", r.ids.length + " point(s) crees ou mis a jour");
+      return load().then(function () {
+        if (!asScenario) { paintImport(); loadImportItems(); return; }
+        closeImport();
+        setTab("scenarios");
+        openScenario(null);
+        $("pt-sc-name").value = "Ronde " + layerLabel.toLowerCase();
+        S.sc.points = r.ids.slice();
+        renderScenarioPoints(); render(); fitScenario(); preview();
+        if (r.ids.length >= 3) setTimeout(optimize, 400);
+      });
     }).catch(function (e) { toast("error", errLabel(e)); });
   }
 
@@ -1217,7 +1416,13 @@
     apiPut("/api/patrols/settings", {
       radius_m: Number($("pt-set-radius").value), accept_timeout_s: Number($("pt-set-timeout").value),
       seen_window_min: Number($("pt-set-seen").value),
-    }).then(function (r) { S.data.settings = r.settings; fillSelects(); toast("success", "Reglages enregistres"); })
+      layers: Array.prototype.slice.call(document.querySelectorAll("#pt-set-layers input:checked")).map(function (c) { return c.value; }),
+    }).then(function (r) {
+      S.data.settings = r.settings;
+      (S.data.layers || []).forEach(function (l) { l.selected = r.settings.layers.indexOf(l.collection) >= 0; });
+      fillSelects();
+      toast("success", "Reglages enregistres");
+    })
       .catch(function (e) { toast("error", errLabel(e)); });
   }
 
@@ -1268,6 +1473,18 @@
     document.querySelectorAll('input[name="pt-sc-travel"]').forEach(function (r) { r.addEventListener("change", preview); });
     $("pt-send-close").addEventListener("click", function () { $("pt-send-modal").hidden = true; if (S.tab === "suivi") loadLive(); });
     $("pt-send-go").addEventListener("click", doSend);
+    $("pt-imp-open").addEventListener("click", openImport);
+    $("pt-imp-close").addEventListener("click", closeImport);
+    $("pt-imp-layer").addEventListener("change", loadImportItems);
+    $("pt-imp-zone").addEventListener("change", paintImport);
+    $("pt-imp-search").addEventListener("input", paintImport);
+    $("pt-imp-all").addEventListener("click", function () { IMP.visible.forEach(function (f) { IMP.sel[f] = true; }); paintImport(); });
+    $("pt-imp-none").addEventListener("click", function () { IMP.sel = {}; paintImport(); });
+    $("pt-imp-lasso").addEventListener("click", startLasso);
+    $("pt-imp-lasso-done").addEventListener("click", function () { endLasso(true); });
+    $("pt-imp-lasso-cancel").addEventListener("click", function () { endLasso(false); });
+    $("pt-imp-go").addEventListener("click", function () { doImport(false); });
+    $("pt-imp-sc").addEventListener("click", function () { doImport(true); });
     $("pt-dev-search").addEventListener("input", renderDevices);
     $("pt-zone-search").addEventListener("input", paintZones);
     $("pt-zone-clear").addEventListener("click", function () { ZD.sel = []; paintZones(); });

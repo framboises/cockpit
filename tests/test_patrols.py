@@ -416,3 +416,39 @@ class TestOutilsTablette:
         assert r.get_json()["ok"]
         rep = db["field_test_reports"].find_one()
         assert rep["note"] == "point 2 pas valide" and rep["log"][0]["k"] == "gps" and rep["server"]["device"]["name"] == "Essai"
+
+
+class TestCouchesLooker:
+    def _layer(self, db, lat=47.951):
+        db["categories_config"].delete_many({})
+        db["categories_config"].insert_one({"categories": [
+            {"label": "Tribunes", "collection_name": "tribunes", "searchField": "properties.NUMERO 2026", "dataType": "geojson"}]})
+        db["tribunes"].delete_many({})
+        db["tribunes"].insert_one({"type": "FeatureCollection", "features": [
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0.21, lat]},
+             "properties": {"_id_feature": "f1", "NUMERO 2026": "01", "NOM": "TERTRE ROUGE", "NB ACCES": "3", "POLYGONE": ""}},
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0.22, 47.952]},
+             "properties": {"_id_feature": "f2", "NUMERO 2026": "02", "NOM": "VIRAGE"}}]})
+
+    def test_import_et_suivi(self, db):
+        self._layer(db)
+        items = P.layer_items(db, "tribunes")
+        assert [i["name"] for i in items] == ["Tribune 01 - TERTRE ROUGE", "Tribune 02 - VIRAGE"]
+        assert items[0]["info"] == "NB ACCES : 3"
+        ids, err = P.import_points(db, "tribunes", ["f1", "f2"], "t")
+        assert not err and len(ids) == 2
+        p = db["patrol_points"].find_one({"_id": ObjectId(ids[0])})
+        assert p["layer_ref"] == {"collection": "tribunes", "fid": "f1"} and p["zone_ids"] == ["z1"]
+        # Re-import : pas de doublon
+        assert P.import_points(db, "tribunes", ["f1"], "t")[0] == [ids[0]]
+        # L'objet bouge dans Looker : le point suit ; nom et position non modifiables a la main
+        self._layer(db, lat=47.9555)
+        assert P.sync_layer_points(db) == 1
+        assert abs(db["patrol_points"].find_one({"_id": ObjectId(ids[0])})["lat"] - 47.9555) < 1e-9
+        P.save_point(db, {"name": "Autre", "lat": 1, "lng": 1, "radius_m": 40}, "t", point_id=ids[0])
+        p = db["patrol_points"].find_one({"_id": ObjectId(ids[0])})
+        assert p["name"] == "Tribune 01 - TERTRE ROUGE" and p["radius_m"] == 40 and abs(p["lat"] - 47.9555) < 1e-9
+        # Objet supprime de la couche : marque absent
+        db["tribunes"].update_one({}, {"$pull": {"features": {"properties._id_feature": "f1"}}})
+        P.sync_layer_points(db)
+        assert db["patrol_points"].find_one({"_id": ObjectId(ids[0])})["layer_missing"] is True

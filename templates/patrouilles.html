@@ -119,13 +119,39 @@
                     <div class="pt-tab" data-tab="points" hidden>
                         <div class="pt-pane" id="pt-pt-listpane">
                             <div class="pt-view-head">
-                                <div class="pt-callout"><span class="material-symbols-outlined">add_location_alt</span> Cliquez sur la carte pour creer un point.</div>
+                                <div class="pt-callout"><span class="material-symbols-outlined">add_location_alt</span> Cliquez sur la carte pour creer un point, ou importez-les d'une couche.</div>
+                                <button type="button" class="btn btn-primary" id="pt-imp-open"><span class="material-symbols-outlined">layers</span> Importer depuis une couche (sanitaires, tribunes, portails...)</button>
                                 <div class="pt-row">
                                     <input type="search" id="pt-pt-search" class="pt-input" placeholder="Rechercher un point">
                                     <label class="pt-check"><input type="checkbox" id="pt-pt-inactive"> Desactives</label>
                                 </div>
                             </div>
                             <div class="pt-scroll"><div id="pt-pt-list" class="pt-list"></div></div>
+                        </div>
+                        <div class="pt-pane" id="pt-imp-pane" hidden>
+                            <div class="pt-view-head">
+                                <button type="button" class="pt-back" id="pt-imp-close"><span class="material-symbols-outlined">arrow_back</span> Points</button>
+                                <div class="pt-grid2">
+                                    <label class="pt-field">Couche<select id="pt-imp-layer" class="pt-input"></select></label>
+                                    <label class="pt-field">Dans la zone<select id="pt-imp-zone" class="pt-input"><option value="">Toutes</option></select></label>
+                                </div>
+                                <input type="search" id="pt-imp-search" class="pt-input" placeholder="Filtrer par nom ou information (ex. ACT, Tertre Rouge, Cle)">
+                                <div class="pt-row pt-pick-tools">
+                                    <button type="button" class="pt-link" id="pt-imp-all">Tout cocher (filtre)</button>
+                                    <button type="button" class="pt-link" id="pt-imp-none">Tout decocher</button>
+                                    <span class="pt-spacer"></span>
+                                    <button type="button" class="btn" id="pt-imp-lasso"><span class="material-symbols-outlined">gesture_select</span> Lasso</button>
+                                </div>
+                                <div class="pt-callout" id="pt-imp-lasso-help" hidden><span class="material-symbols-outlined">gesture_select</span>
+                                    <span>Cliquez sur la carte pour tracer la zone, point par point. <button type="button" class="pt-link" id="pt-imp-lasso-done">Terminer</button> - <button type="button" class="pt-link" id="pt-imp-lasso-cancel">Annuler</button></span></div>
+                                <div class="pt-hint" id="pt-imp-count"></div>
+                            </div>
+                            <div class="pt-scroll"><div id="pt-imp-list" class="pt-pick-list pt-imp-list"></div></div>
+                            <div class="pt-foot pt-row">
+                                <button type="button" class="btn" id="pt-imp-go"><span class="material-symbols-outlined">add_location_alt</span> Creer les points</button>
+                                <span class="pt-spacer"></span>
+                                <button type="button" class="btn btn-primary" id="pt-imp-sc"><span class="material-symbols-outlined">route</span> En faire un scenario</button>
+                            </div>
                         </div>
                         <div class="pt-pane" id="pt-pt-editor" hidden>
                             <div class="pt-view-head">
@@ -196,6 +222,9 @@
                                 <label class="pt-field">Rayon par defaut d'un nouveau point (m)<input type="number" id="pt-set-radius" class="pt-input" min="5" max="300"></label>
                                 <label class="pt-field">Delai de reponse a une proposition (s)<input type="number" id="pt-set-timeout" class="pt-input" min="30" max="900"></label>
                                 <label class="pt-field">Tablette vue recemment (min)<input type="number" id="pt-set-seen" class="pt-input" min="1" max="120"></label>
+                                <div class="pt-field">Couches proposees pour importer des points
+                                    <div class="pt-layer-list" id="pt-set-layers"></div>
+                                </div>
                                 <div class="pt-row"><button type="button" class="btn btn-primary" id="pt-set-save"><span class="material-symbols-outlined">save</span> Enregistrer</button></div>
                             </div>
                         </div>

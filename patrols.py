@@ -113,6 +113,9 @@ def get_settings(db):
             out[k] = max(lo, min(hi, int(doc.get(k, out[k]))))
         except (TypeError, ValueError):
             pass
+    # Couches Looker proposees pour creer des points
+    layers = doc.get("layers")
+    out["layers"] = [str(x) for x in layers] if isinstance(layers, list) else list(DEFAULT_LAYERS)
     return out
 
 
@@ -191,21 +194,206 @@ def save_point(db, data, by, point_id=None):
     clean, err = _clean_point(data or {}, get_settings(db))
     if err:
         return None, err
-    clean["zone_ids"] = zones_of_point(db, clean["lat"], clean["lng"])
     now = _now()
     clean.update(updated_at=now, updated_by=by)
     if point_id:
         oid = _oid(point_id)
         if not oid:
             return None, "not_found"
+        cur = db["patrol_points"].find_one({"_id": oid}, {"layer_ref": 1})
+        if cur and cur.get("layer_ref"):
+            # Point issu d'une couche Looker : nom et position suivent Looker
+            for k in ("name", "lat", "lng"):
+                clean.pop(k, None)
+        else:
+            clean["zone_ids"] = zones_of_point(db, clean["lat"], clean["lng"])
         r = db["patrol_points"].update_one({"_id": oid}, {"$set": clean})
         if not r.matched_count:
             return None, "not_found"
         return db["patrol_points"].find_one({"_id": oid}), None
+    clean["zone_ids"] = zones_of_point(db, clean["lat"], clean["lng"])
     clean.update(_id=ObjectId(), active=True, source="manual", ia_reason=None,
                  created_by=by, created_at=now)
     db["patrol_points"].insert_one(clean)
     return clean, None
+
+
+# ---------------------------------------------------------------------------
+# Points tires des couches Looker (sanitaires, tribunes, portails...)
+# ---------------------------------------------------------------------------
+# Un point importe garde `layer_ref {collection, fid}` et SUIT Looker : nom,
+# position et informations relus a chaque ouverture de la page
+# (sync_layer_points) et a chaque lancement de patrouille. Objet supprime de
+# la couche : `layer_missing`, le point garde sa derniere position.
+
+DEFAULT_LAYERS = ["sanitaires", "tribunes", "3p"]
+INFO_SKIP = {"_id_feature", "file", "photo", "photos", "hyperlien", "lattitude", "latitude", "longitude",
+             "polygone", "post_numbers", "id", "fid"}
+INFO_MAX = 8
+
+
+def _layer_defs(db):
+    import operateurs as OP
+    out = {}
+    for c in OP._looker_categories(db):
+        coll = c.get("collection_name")
+        if coll and c.get("dataType", "geojson") == "geojson" and coll not in ("grid_ref",):
+            out[coll] = {"collection": coll, "label": c.get("label") or coll,
+                         "search_field": OP._strip_prop(c.get("searchField"))}
+    return out
+
+
+def available_layers(db):
+    """Couches Looker et celles retenues pour creer des points (reglages)."""
+    chosen = get_settings(db).get("layers") or []
+    return [dict(d, selected=d["collection"] in chosen) for d in
+            sorted(_layer_defs(db).values(), key=lambda d: str(d["label"]).lower())]
+
+
+def _feature_point(f):
+    g = f.get("geometry") or {}
+    c = g.get("coordinates")
+    try:
+        if g.get("type") == "Point":
+            return float(c[1]), float(c[0])
+        if g.get("type") in ("Polygon", "MultiPolygon"):
+            from shapely.geometry import shape
+            p = shape(g).representative_point()
+            return p.y, p.x
+    except Exception:
+        return None
+    return None
+
+
+def _feature_name(f, layer):
+    props = f.get("properties") or {}
+    val = str(props.get(layer.get("search_field") or "") or "").strip()
+    other = next((str(props[k]).strip() for k in ("NOM", "Nom", "nom", "Name", "name", "NAME")
+                  if k in props and k != layer.get("search_field") and str(props[k] or "").strip()), "")
+    if not val:
+        val = other
+        other = ""
+    if not val:     # objet sans nom : nature et acces (ex. "Portail sans nom - Tertre Rouge")
+        nature = next((str(props[k]).strip() for k in ("Nature", "TYPE", "Type") if str(props.get(k) or "").strip()), "")
+        where = next((str(props[k]).strip() for k in ("Accès", "Acces", "Zone", "Secteur") if str(props.get(k) or "").strip()), "")
+        val = ((nature or str(layer.get("label") or "Objet").rstrip("s")) + " sans nom") + (" - " + where if where else "")
+        return val[:80]
+    # Numero seul (tribune "01") : prefixe du nom de la couche au singulier
+    if len(val) <= 4 and val.replace(" ", "").replace("bis", "").isdigit():
+        singular = str(layer.get("label") or "").rstrip("s") or "Objet"
+        val = "%s %s" % (singular, val)
+    return (val + (" - " + other if other and other.lower() not in val.lower() else ""))[:80]
+
+
+NAME_KEYS = {"nom", "name", "numero 2026", "ancien 2025", "lien", "couleur du stickers"}
+
+
+def _feature_info(f, layer=None):
+    """Informations utiles a l'agent : proprietes renseignees (hors nom deja
+    affiche), 8 au plus."""
+    parts = []
+    skip_name = str((layer or {}).get("search_field") or "").lower()
+    for k, v in (f.get("properties") or {}).items():
+        kl = k.lower()
+        if kl in INFO_SKIP or kl in NAME_KEYS or kl == skip_name or isinstance(v, (list, dict)):
+            continue
+        s = str(v if v is not None else "").strip()
+        if not s or s.lower() in ("none", "null", "0", "off") or s.startswith("http"):
+            continue
+        if s.lower() == "on":
+            s = "oui"
+        parts.append("%s : %s" % (k, s[:60]))
+        if len(parts) >= INFO_MAX:
+            break
+    return " - ".join(parts)
+
+
+def layer_items(db, collection):
+    """Objets d'une couche : [{fid, name, lat, lng, info}], dans l'ordre des noms."""
+    import operateurs as OP
+    layer = _layer_defs(db).get(collection)
+    if not layer:
+        return None
+    out = []
+    for f in OP.layer_features(db, collection):
+        fid = str((f.get("properties") or {}).get("_id_feature") or "")
+        pt = _feature_point(f)
+        if not fid or not pt:
+            continue
+        out.append({"fid": fid, "name": _feature_name(f, layer), "lat": pt[0], "lng": pt[1], "info": _feature_info(f, layer)})
+    out.sort(key=lambda x: x["name"].lower())
+    return out
+
+
+def import_points(db, collection, fids, by):
+    """Cree (ou reactive) un point par objet choisi. Retourne (ids, erreur) :
+    les ids des points dans l'ordre de `fids`."""
+    items = layer_items(db, collection)
+    if items is None:
+        return None, "couche_inconnue"
+    by_fid = {i["fid"]: i for i in items}
+    wanted = [str(f) for f in fids or [] if str(f) in by_fid]
+    if not wanted:
+        return None, "aucun_objet"
+    if len(wanted) > 500:
+        return None, "trop_d_objets"
+    zones = _zones(db)
+    settings = get_settings(db)
+    now = _now()
+    ids = []
+    for fid in wanted:
+        it = by_fid[fid]
+        upd = {"name": it["name"], "lat": it["lat"], "lng": it["lng"], "info": it["info"],
+               "zone_ids": zones_of_point(db, it["lat"], it["lng"], zones), "active": True,
+               "layer_missing": False, "updated_at": now, "updated_by": by}
+        old = db["patrol_points"].find_one({"layer_ref.collection": collection, "layer_ref.fid": fid}, {"_id": 1})
+        if old:
+            db["patrol_points"].update_one({"_id": old["_id"]}, {"$set": upd})
+            ids.append(str(old["_id"]))
+            continue
+        doc = dict(upd, _id=ObjectId(), radius_m=settings["radius_m"], instruction="", photo_required=False,
+                   dwell_s=0, source="layer:" + collection, layer_ref={"collection": collection, "fid": fid},
+                   ia_reason=None, created_by=by, created_at=now)
+        db["patrol_points"].insert_one(doc)
+        ids.append(str(doc["_id"]))
+    return ids, None
+
+
+def sync_layer_points(db, point_ids=None):
+    """Points importes : nom, position et informations relus dans Looker.
+    `point_ids` : seulement ceux-la (lancement d'une patrouille). Retourne le
+    nombre de points modifies."""
+    q = {"layer_ref": {"$exists": True}}
+    if point_ids is not None:
+        q["_id"] = {"$in": [o for o in (_oid(i) for i in point_ids) if o]}
+    pts = list(db["patrol_points"].find(q, {"layer_ref": 1, "name": 1, "lat": 1, "lng": 1, "info": 1, "layer_missing": 1}))
+    if not pts:
+        return 0
+    cache, zones, n = {}, None, 0
+    for p in pts:
+        ref = p.get("layer_ref") or {}
+        coll = ref.get("collection")
+        if coll not in cache:
+            items = layer_items(db, coll)
+            cache[coll] = {i["fid"]: i for i in items} if items is not None else None
+        by_fid = cache[coll]
+        if by_fid is None:
+            continue
+        it = by_fid.get(ref.get("fid"))
+        if not it:
+            if not p.get("layer_missing"):
+                db["patrol_points"].update_one({"_id": p["_id"]}, {"$set": {"layer_missing": True}})
+                n += 1
+            continue
+        moved = abs((p.get("lat") or 0) - it["lat"]) > 1e-7 or abs((p.get("lng") or 0) - it["lng"]) > 1e-7
+        if moved or p.get("name") != it["name"] or p.get("info") != it["info"] or p.get("layer_missing"):
+            upd = {"name": it["name"], "lat": it["lat"], "lng": it["lng"], "info": it["info"], "layer_missing": False}
+            if moved:
+                zones = _zones(db) if zones is None else zones
+                upd["zone_ids"] = zones_of_point(db, it["lat"], it["lng"], zones)
+            db["patrol_points"].update_one({"_id": p["_id"]}, {"$set": upd})
+            n += 1
+    return n
 
 
 def set_point_active(db, point_id, active):
@@ -222,6 +410,7 @@ def pub_point(p, zone_labels=None):
         "zones": [zone_labels.get(z, z) for z in p.get("zone_ids") or []] if zone_labels is not None else None,
         "active": p.get("active", True) is not False, "source": p.get("source") or "manual",
         "ia_reason": p.get("ia_reason"), "updated_at": _iso(p.get("updated_at")),
+        "info": p.get("info") or "", "layer_ref": p.get("layer_ref"), "layer_missing": bool(p.get("layer_missing")),
     }
 
 
@@ -564,7 +753,8 @@ def _snapshot(db, sc):
         "points": [{"point_id": str(p["_id"]), "name": p.get("name"), "lat": p["lat"], "lng": p["lng"],
                     "radius_m": p.get("radius_m") or DEFAULTS["radius_m"],
                     "instruction": p.get("instruction") or "", "photo_required": bool(p.get("photo_required")),
-                    "dwell_s": p.get("dwell_s") or 0, "zone_ids": p.get("zone_ids") or []} for p in pts],
+                    "dwell_s": p.get("dwell_s") or 0, "zone_ids": p.get("zone_ids") or [],
+                    "info": p.get("info") or ""} for p in pts],
         "estimate": {k: (sc.get("estimate") or {}).get(k) for k in ("distance_m", "duration_s", "polyline")},
     }
 
@@ -576,6 +766,10 @@ def create_run(db, scenario_id, target, by, plan_id=None, slot_key=None, now=Non
     sc = db["patrol_scenarios"].find_one({"_id": _oid(scenario_id), "archived": {"$ne": True}})
     if not sc:
         return None, "scenario_introuvable", []
+    try:        # points issus de Looker : derniere position connue
+        sync_layer_points(db, sc.get("points") or [])
+    except Exception as e:
+        logger.warning("patrouille : synchro Looker en echec (%s)", e)
     snap = _snapshot(db, sc)
     if not snap["points"]:
         return None, "scenario_vide", []
@@ -1333,7 +1527,7 @@ def _pub_steps(run):
                     "at": _iso(s.get("at")), "method": s.get("method"), "comment": s.get("comment"),
                     "photo": s.get("photo"), "lat": p.get("lat"), "lng": p.get("lng"),
                     "radius_m": p.get("radius_m"), "instruction": p.get("instruction") or "",
-                    "photo_required": bool(p.get("photo_required"))})
+                    "photo_required": bool(p.get("photo_required")), "info": p.get("info") or ""})
     return out
 
 

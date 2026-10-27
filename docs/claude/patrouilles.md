@@ -418,6 +418,20 @@ compte l.arnault, chaque minute, IgnoreNew), `templates/patrouilles.html`, `stat
   non prise » et fiche Information = livraison 2 (`patrols.on_not_taken`).
 - Dominante enregistree sur le scenario (section 6.1), sans effet avant la livraison 4.
 
+### Points tires des couches Looker (27/10/2026)
+
+- Reglages : couches proposees (`cockpit_settings.patrols.layers`, defaut sanitaires, tribunes, `3p` =
+  portails), liste lue dans `categories_config` (`patrols.available_layers`).
+- Points > « Importer depuis une couche » : filtre nom / informations, zone de competence, lasso
+  (polygone trace sur la carte, coche ce qu'il contient), clic sur la carte, tout cocher ; « Creer les
+  points » ou « En faire un scenario » (40 points au plus, ordre optimise propose).
+- Point importe : `source "layer:<coll>"`, `layer_ref {collection, fid}`, `info` (proprietes renseignees
+  hors nom, 8 au plus, transmises a l'agent sous la consigne). Il **suit Looker** : nom, position et
+  infos relus a l'ouverture de la page (`sync_layer_points`) et a chaque lancement (`create_run`) ;
+  nom et position non modifiables a la main ; objet disparu = `layer_missing` (derniere position
+  gardee). Re-import = mise a jour du meme point, jamais de doublon. Nom : champ de recherche de la
+  couche (+ NOM s'il differe) ; numero seul = prefixe « Tribune 01 » ; objet sans nom = nature + acces.
+
 ### Livraison 2 : planifications (27/10/2026)
 
 - `patrol_plans {name, scenario_id, target, enabled, launch {rule: span_start | every, every_min},
