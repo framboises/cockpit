@@ -9973,6 +9973,18 @@
     text.textContent = "Mise a jour disponible - taper pour recharger";
     banner.appendChild(icon);
     banner.appendChild(text);
+    // Croix : masquer sans recharger (le bandeau revient a la prochaine version)
+    var close = document.createElement("span");
+    close.className = "material-symbols-outlined field-update-close";
+    close.setAttribute("role", "button");
+    close.setAttribute("aria-label", "Masquer");
+    close.textContent = "close";
+    close.addEventListener("click", function (e) {
+      e.stopPropagation();
+      banner.remove();
+      _updateBannerShown = false;
+    });
+    banner.appendChild(close);
     banner.addEventListener("click", function () {
       banner.disabled = true;
       text.textContent = "Rechargement...";
