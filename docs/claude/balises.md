@@ -137,7 +137,9 @@ Mis en place le 26/10/2026. Page manager, aussi ouverte aux afficheurs TV du por
   Sans parametre : dernier choix du navigateur (localStorage `balisesMur.groupes`), sinon
   selecteur. Le bouton reglage (en-tete) change le choix et reecrit l'adresse (a mettre en favori).
 - `?event&year` facultatifs : tablettes Field rattachees aux groupes (comme `/anoloc/live`).
-  `?fond=ortho` : vue aerienne au lieu du plan IGN assombri.
+  `?fond=ortho` : vue satellite IGN (ortho, secours Esri) ; `?fond=plan` ou absent : carte OSM
+  passee en sombre. Choisi dans le selecteur avec les groupes ; sans `?fond=` : dernier
+  choix du navigateur (localStorage `balisesMur.fond`). Changement a chaud, sans recharger.
 - Visibilite : `anoloc._get_user_visible_groups` (un afficheur, sans groupe Cockpit, voit tout).
 - `etat_mur` : en ligne / GPS par `balises_core.device_state` ; en mouvement = en ligne et
   vitesse >= 5 km/h (ou capteur Teltonika) ; trainee = `anoloc_positions` des 10 dernieres
@@ -155,6 +157,9 @@ Document `_id: "cockpit:groupes_balises"` : `app_key` "cockpit", `variable` "gro
 (groupes actifs, ordre de la configuration), `maj_le`. Ecrit par `balises_mur.publier_choix_tv` :
 au demarrage (force), a l'enregistrement de Configuration > Balises GPS (force), et par le mur au
 plus toutes les 60 s s'il a change. Cockpit ne lit jamais ce document : il fait foi pour le portail.
+Second document `_id: "cockpit:fond_balises"`, meme ecriture : `variable` "fond", `min` 1, `max` 1,
+`defaut ["plan"]`, `options` plan (Carte, OSM sombre) / ortho (Satellite IGN), sans `nb`. Adresse du
+catalogue : `.../balises-mur?groupes={groupes}&fond={fond}`.
 
 ## A faire / a verifier
 

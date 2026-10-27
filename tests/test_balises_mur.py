@@ -95,6 +95,9 @@ def test_liste_publiee_pour_le_portail(db):
     assert [o["valeur"] for o in doc["options"]] == ["med", "sur", "dep", "fou"]
     assert doc["options"][0] == {"valeur": "med", "libelle": "Medical", "couleur": "#f00",
                                  "icone": "e911_emergency", "nb": 3}
+    fond = db[M.TV_CHOIX_COL].find_one({"_id": M.TV_CHOIX_FOND_ID})
+    assert (fond["variable"], fond["min"], fond["max"], fond["defaut"]) == ("fond", 1, 1, ["plan"])
+    assert [o["valeur"] for o in fond["options"]] == ["plan", "ortho"]
     # Sans changement ni force : rien n'est reecrit
     M._PUBLIE["a"] = 0.0
     assert not M.publier_choix_tv(db)

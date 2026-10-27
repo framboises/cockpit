@@ -11,7 +11,8 @@
 # que le portail propose a l'affectation d'un ecran pour remplir la variable
 # {groupes} de l'adresse du catalogue TV. Republie a l'enregistrement de la
 # configuration des balises, au demarrage et au plus toutes les 60 s par le
-# mur lui-meme.
+# mur lui-meme. Second document "cockpit:fond_balises" : variable {fond}
+# (carte OSM sombre ou vue satellite IGN), un seul choix.
 
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -28,6 +29,12 @@ EN_MOUVEMENT_KMH = B.MOVING_SPEED_KMH
 
 TV_CHOIX_COL = "tv_choix"
 TV_CHOIX_ID = "cockpit:groupes_balises"
+TV_CHOIX_FOND_ID = "cockpit:fond_balises"
+FONDS = [
+    {"valeur": "plan", "libelle": "Carte", "couleur": "#334155", "icone": "map"},
+    {"valeur": "ortho", "libelle": "Satellite IGN", "couleur": "#15803d", "icone": "satellite_alt"},
+]
+FOND_DEFAUT = "plan"
 _PUBLIE = {"empreinte": None, "a": 0.0}
 
 
@@ -75,8 +82,8 @@ def _option(g):
 
 
 def publier_choix_tv(db, force=False):
-    """Ecrit tv_choix/cockpit:groupes_balises si la liste a change (ou
-    force). Retourne True si le document a ete ecrit."""
+    """Ecrit tv_choix/cockpit:groupes_balises (et cockpit:fond_balises) si
+    la liste a change (ou force). Retourne True si ecrit."""
     if not force and time.time() - _PUBLIE["a"] < 60:
         return False
     _PUBLIE["a"] = time.time()
@@ -94,6 +101,18 @@ def publier_choix_tv(db, force=False):
         "max": MAX_GROUPES,
         "separateur": ",",
         "options": options,
+        "maj_le": datetime.now(timezone.utc),
+    }}, upsert=True)
+    db[TV_CHOIX_COL].update_one({"_id": TV_CHOIX_FOND_ID}, {"$set": {
+        "app_key": "cockpit",
+        "variable": "fond",
+        "libelle": "Fond de carte",
+        "aide": "Carte OSM sombre ou vue satellite IGN",
+        "min": 1,
+        "max": 1,
+        "separateur": ",",
+        "defaut": [FOND_DEFAUT],
+        "options": FONDS,
         "maj_le": datetime.now(timezone.utc),
     }}, upsert=True)
     _PUBLIE["empreinte"] = empreinte

@@ -25,7 +25,9 @@
      quand une balise sort du cadre ou que les groupes changent).
      Sans ?groupes= : dernier choix de ce navigateur, sinon selecteur. Le portail
      TITAN pose ?groupes= sur l'adresse de l'afficheur (variable {groupes},
-     collection tv_choix). ?fond=ortho : vue aerienne au lieu du plan sombre.
+     collection tv_choix). ?fond=ortho : vue satellite IGN au lieu de la carte
+     OSM sombre (?fond=plan), choisi aussi dans le selecteur et par le portail
+     (variable {fond}) ; sans ?fond= : dernier choix de ce navigateur.
      Donnees : /api/balises/mur (balises_mur.etat_mur), toutes les 5 s.
      ========================================================================== */
   :root{
@@ -158,6 +160,7 @@
   .choix .opt .s{color:var(--muted); font-size:0.85rem}
   .choix .opt .rang{margin-left:auto; width:28px; height:28px; border-radius:50%; background:var(--c); color:#fff; font-weight:900;
     display:flex; align-items:center; justify-content:center; flex:0 0 auto}
+  .choix h2{font-size:1.05rem; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin:22px 0 10px}
   .choix .bas{display:flex; align-items:center; gap:12px; margin-top:22px}
   .choix .bas .nb{color:var(--muted); margin-right:auto}
   .choix button.go{background:#2563eb; color:#fff; border:0; border-radius:10px; padding:12px 22px; font:800 1rem 'Outfit',sans-serif; cursor:pointer}
@@ -201,11 +204,14 @@
   var MAX_GROUPES = 3;
   var CENTRE = [47.938561, 0.224318];
   var CLE_LOCALE = "balisesMur.groupes";
+  var CLE_FOND = "balisesMur.fond";
+  var FONDS = [{ valeur: "plan", libelle: "Carte", icone: "map" },
+               { valeur: "ortho", libelle: "Satellite IGN", icone: "satellite_alt" }];
   var params = new URLSearchParams(location.search);
 
   var S = { data: null, decalage: 0, recu: 0, erreur: null, groupes: [], marqueurs: {}, traces: {},
-            sigCadre: "", choixOuvert: false };
-  var carte, coucheTraces, coucheBalises;
+            sigCadre: "", choixOuvert: false, fond: "plan" };
+  var carte, coucheTraces, coucheBalises, couchesFond = [];
 
   function $(id) { return document.getElementById(id); }
   function el(tag, cls, txt) {
@@ -239,50 +245,67 @@
     });
     return out.slice(0, MAX_GROUPES);
   }
-  function memoire(v) {
+  function memoire(v, cle) {
+    cle = cle || CLE_LOCALE;
     try {
-      if (v === undefined) return localStorage.getItem(CLE_LOCALE) || "";
-      localStorage.setItem(CLE_LOCALE, v);
+      if (v === undefined) return localStorage.getItem(cle) || "";
+      localStorage.setItem(cle, v);
     } catch (e) {}
     return "";
   }
-  function appliquerGroupes(liste) {
+  function fondSur(v) { return v === "ortho" ? "ortho" : "plan"; }
+  function appliquerGroupes(liste, fond) {
     S.groupes = liste.slice(0, MAX_GROUPES);
     var txt = S.groupes.join(",");
     memoire(txt);
     params.set("groupes", txt);
+    if (fond) {
+      memoire(fond, CLE_FOND);
+      params.set("fond", fond);
+      if (fond !== S.fond) poserFond(fond);
+    }
     history.replaceState(null, "", location.pathname + "?" + params.toString().replace(/%2C/g, ","));
     S.sigCadre = "";
     charger(true);
   }
 
   /* ---------------- carte ---------------- */
-  function initCarte() {
-    var ortho = params.get("fond") === "ortho";
-    document.body.className = ortho ? "ortho" : "plan";
-    carte = L.map("carte", { center: CENTRE, zoom: 14, maxZoom: 19, zoomControl: false, zoomSnap: 0.05,
-      attributionControl: true, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
-      boxZoom: false, keyboard: false, touchZoom: false });
-    // Secours sous l'IGN : une tuile IGN manquante laisse voir OSM / Esri
-    if (ortho) {
-      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        { maxNativeZoom: 19, maxZoom: 19, zIndex: 1 }).addTo(carte);
-    } else {
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        { maxNativeZoom: 19, maxZoom: 19, zIndex: 1 }).addTo(carte);
-    }
-    var ign = L.tileLayer(ortho
-      ? "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"
-      : "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-      { attribution: "IGN-F/Geoplateforme", maxNativeZoom: ortho ? 19 : 18, maxZoom: 19, zIndex: 2 }).addTo(carte);
-    // Le mur ne recharge jamais sa carte : nouvel essai d'une tuile en echec
-    ign.on("tileerror", function (ev) {
+  // Le mur ne recharge jamais sa carte : nouvel essai d'une tuile en echec
+  function reessayer(couche) {
+    couche.on("tileerror", function (ev) {
       var t = ev.tile, n = +(t.getAttribute("data-essais") || 0) + 1;
       if (n > 5) return;
       t.setAttribute("data-essais", n);
-      var src = ign.getTileUrl(ev.coords);
-      setTimeout(function () { t.src = src + "&essai=" + n; }, 2000 * n);
+      var src = couche.getTileUrl(ev.coords);
+      setTimeout(function () { t.src = src + (src.indexOf("?") < 0 ? "?" : "&") + "essai=" + n; }, 2000 * n);
     });
+    return couche;
+  }
+  // Carte = OSM passe en sombre (CSS body.plan) ; satellite = ortho IGN avec
+  // Esri dessous (une tuile IGN manquante laisse voir Esri)
+  function poserFond(fond) {
+    var ortho = fond === "ortho";
+    S.fond = ortho ? "ortho" : "plan";
+    document.body.className = S.fond;
+    couchesFond.forEach(function (c) { carte.removeLayer(c); });
+    if (ortho) {
+      couchesFond = [
+        L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          { maxNativeZoom: 19, maxZoom: 19, zIndex: 1 }),
+        reessayer(L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+          { attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 19, zIndex: 2 }))];
+    } else {
+      couchesFond = [reessayer(L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { attribution: "&copy; OpenStreetMap", maxNativeZoom: 19, maxZoom: 19, zIndex: 1 }))];
+    }
+    couchesFond.forEach(function (c) { c.addTo(carte); });
+  }
+
+  function initCarte() {
+    carte = L.map("carte", { center: CENTRE, zoom: 14, maxZoom: 19, zoomControl: false, zoomSnap: 0.05,
+      attributionControl: true, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
+      boxZoom: false, keyboard: false, touchZoom: false });
+    poserFond(fondSur(params.get("fond") || memoire(undefined, CLE_FOND)));
     coucheTraces = L.layerGroup().addTo(carte);
     coucheBalises = L.layerGroup().addTo(carte);
     if (window.ResizeObserver) new ResizeObserver(function () { carte.invalidateSize(); S.sigCadre = ""; cadrer(); }).observe($("carte"));
@@ -508,13 +531,13 @@
   function ouvrirChoix() {
     var d = S.data;
     if (!d) return;
-    var box = $("choix"), sel = S.groupes.slice();
+    var box = $("choix"), sel = S.groupes.slice(), fond = S.fond;
     S.choixOuvert = true;
     function dessiner() {
       box.textContent = "";
       var b = el("div", "boite");
       b.appendChild(el("h1", "", "Groupes à suivre"));
-      b.appendChild(el("p", "", "Choisissez de 1 à " + MAX_GROUPES + " groupes, dans l'ordre d'affichage. " +
+      b.appendChild(el("p", "", "Choisissez de 1 à " + MAX_GROUPES + " groupes, dans l'ordre d'affichage, puis le fond de carte. " +
         "Le choix reste dans l'adresse de la page (à mettre en favori) et dans ce navigateur."));
       var gr = el("div", "grille");
       if (!d.dispo.length) gr.appendChild(el("div", "rien", "Aucun groupe de balises actif."));
@@ -538,6 +561,18 @@
         gr.appendChild(bt);
       });
       b.appendChild(gr);
+      b.appendChild(el("h2", "", "Fond de carte"));
+      var gf = el("div", "grille fonds");
+      FONDS.forEach(function (f) {
+        var bt = el("button", "opt" + (f.valeur === fond ? " on" : ""));
+        bt.type = "button";
+        bt.style.setProperty("--c", f.valeur === "ortho" ? "#15803d" : "#475569");
+        var ic = el("span", "ico"); ic.appendChild(ico(f.icone)); bt.appendChild(ic);
+        bt.appendChild(el("span", "t", f.libelle));
+        bt.addEventListener("click", function () { fond = f.valeur; dessiner(); });
+        gf.appendChild(bt);
+      });
+      b.appendChild(gf);
       var bas = el("div", "bas");
       bas.appendChild(el("span", "nb", sel.length + " / " + MAX_GROUPES + " choisi" + (sel.length > 1 ? "s" : "")));
       if (S.groupes.length) {
@@ -547,7 +582,7 @@
       }
       var go = el("button", "go", "Afficher"); go.type = "button";
       go.disabled = !sel.length;
-      go.addEventListener("click", function () { fermerChoix(); appliquerGroupes(sel); });
+      go.addEventListener("click", function () { fermerChoix(); appliquerGroupes(sel, fond); });
       bas.appendChild(go);
       b.appendChild(bas);
       box.appendChild(b);
