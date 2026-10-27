@@ -63,7 +63,7 @@ def _pub_digest(d, fiche=None):
                                   "dysfonctionnement", "jalon", "secours", "prise_service",
                                   "sous_classification_proposee", "taxo", "area", "relances",
                                   "doublon_declare", "alarme_non_remise", "a_controler",
-                                  "competence", "dans", "pres", "ignoree")}
+                                  "competence", "dans", "pres", "ignoree", "plaques")}
     out["id"] = d["_id"]
     out["at"] = _iso(d.get("at"))
     out["ms"] = (d.get("meta") or {}).get("ms")

@@ -88,6 +88,26 @@ class TestPosition:
         assert [p["name"] for p in g.surroundings(47.95, 0.2, "lieu")["pres"]] == ["PORTE HOUX"]   # rayon 100 m
 
 
+class TestPlaques:
+    def test_formats(self):
+        assert PE.plates("FOURRIERE : Mercedes Marco Polo  EY-422-KG") == ["EY422KG"]
+        assert PE.plates("Fourriere - FV940YV", "immatriculation GN 176 TC") == ["FV940YV", "GN176TC"]
+        assert PE.plates("fourriere: AL-039-GB / 505-BRA-44") == ["505BRA44", "AL039GB"]
+        assert PE.plates("Ford Transit blanc 6513-LFL") == ["6513LFL"]
+        assert PE.plates("P7C FOURRIERE FORD TOURNEO YR25KYP") == ["YR25KYP"]
+
+    def test_pas_de_faux_positifs(self):
+        txt = ("12/06/2025 09:04:19 , COULBAUT Benoit Golfette n10 stickee P7B stationnee sur le P6D. "
+               "DEMANDE FAITE AU TANGO 11H33 Fourriere CD 92, 8h45 arrivee, T52 27, 3 barrieres, MP35b, PS Nord")
+        assert PE.plates(txt) == []
+
+    def test_doublon_tranche_par_les_plaques(self):
+        base = {"type": "fourriere", "resume": "enlevement vehicule genant", "lieu_norm": "p7b"}
+        assert PE.dup_score(dict(base, plaques=["AB123CD"]), dict(base, plaques=["EF456GH"])) == 0.0
+        assert PE.dup_score(dict(base, plaques=["AB123CD"]), dict(base, plaques=["AB123CD", "X"])) == 0.95
+        assert PE.dup_score(base, dict(base)) >= PE.DUP_THRESHOLD    # sans plaque : texte et lieu
+
+
 class TestDelais:
     def test_delais_depuis_le_signalement(self):
         d = PE.delays({"signalement": "16:20", "engagement": "16:23", "sur_place": "16:41", "fin": "17:05"})

@@ -428,6 +428,7 @@ def enrich(gaz, fiche, d, taxo=None):
            "delais": delays(d.get("etapes")), "completude": completeness(d, geo),
            "lieu_norm": norm(geo["name"]) if geo and geo.get("name") else norm(d.get("lieu")),
            "area": area_levels(fiche), "relances": _relances(fiche),
+           "plaques": plates(fiche.get("text"), fiche.get("comment")),
            "doublon_declare_sql": declared_duplicate(fiche)}
     if taxo is not None:
         out["taxo"] = taxo.of(fiche)
@@ -580,8 +581,42 @@ def _ts(v):
     return v if isinstance(v, datetime) else None
 
 
+# Immatriculations : SIV (AB-123-CD), FNI (1234 AB 72, 6513-LFL), britannique (YR25 KYP)
+_PLATE_RES = (
+    re.compile(r"\b([A-Z]{2})[ -]?(\d{3})[ -]?([A-Z]{2})\b"),
+    # FNI : jamais colle a une autre plaque ni suivi d'une date / heure (« KG 10/06 »)
+    re.compile(r"(?<![A-Z0-9-])(\d{2,4})[ -]?([A-Z]{2,3})[ -]?(\d{2}|2A|2B)(?![A-Z0-9/:-])"),
+    re.compile(r"(?<![A-Z0-9-])(\d{3,4})-([A-Z]{2,3})(?![A-Z0-9-])"),
+    re.compile(r"\b([A-Z]{2}\d{2})([A-Z]{3})\b"),
+)
+_PLATE_STOP = {"ET", "OU", "AU", "AUX", "LE", "LA", "LES", "DE", "DU", "DES", "EN", "BIS", "TER", "SUR", "PAR",
+               "MIN", "KM", "PAX", "PERS", "UN", "UNE", "ME", "MN", "HEU", "SEC", "PAS", "VL", "PL", "MAX",
+               "ANS", "AN", "HH", "HS", "EST", "PEC", "CLE", "EME", "MAI", "CIK", "ACO", "ADS", "QUI", "NOV",
+               "JUI", "AOU", "SEP", "OCT", "DEC", "JAN", "FEV", "MAR", "AVR", "ER", "RE", "NE"}
+
+
+def plates(*texts):
+    """Plaques citees (normalisees sans separateur) : deux fiches fourriere au
+    meme texte mais aux plaques differentes ne sont PAS des doublons."""
+    t = unicodedata.normalize("NFKD", " ".join(str(x or "") for x in texts)).encode("ascii", "ignore").decode().upper()
+    out = set()
+    for rx in _PLATE_RES:
+        for m in rx.finditer(t):
+            p = "".join(m.groups())
+            if any(g in _PLATE_STOP for g in m.groups()):        # « T11 et 12 », « CC26 bis »
+                continue
+            if re.search(r"\d", p) and re.search(r"[A-Z]", p) and len(p) >= 6:
+                out.add(p)
+    # « 505-BRA-44 » est aussi lu « 505-BRA » : on garde la forme la plus longue
+    return sorted(p for p in out if not any(p != q and p in q for q in out))
+
+
 def dup_score(a, b):
-    """Score 0-1 entre deux fiches structurees proches dans le temps."""
+    """Score 0-1 entre deux fiches structurees proches dans le temps. Les
+    plaques tranchent : differentes = pas un doublon, une commune = doublon."""
+    pa, pb = set(a.get("plaques") or []), set(b.get("plaques") or [])
+    if pa and pb:
+        return 0.95 if pa & pb else 0.0
     same_place = bool(a.get("lieu_norm")) and a.get("lieu_norm") == b.get("lieu_norm") \
         and a.get("lieu_norm") != "non precise"
     t = difflib.SequenceMatcher(None, norm(a.get("type")), norm(b.get("type"))).ratio()
@@ -593,7 +628,7 @@ def link_duplicates(db, coll, event, year):
     """Marque `doublon_probable` {de, score} sur la plus recente de deux fiches
     proches. Un « non » d'un admin (review.doublon == "non") n'est jamais repose."""
     docs = list(db[coll].find({"event": event, "year": year, "error": None, "ts": {"$ne": None}},
-                              {"ts": 1, "type": 1, "resume": 1, "lieu_norm": 1, "category": 1,
+                              {"ts": 1, "type": 1, "resume": 1, "lieu_norm": 1, "category": 1, "plaques": 1,
                                "review": 1, "doublon_probable": 1}).sort("ts", 1))
     found = {}
     win = timedelta(minutes=DUP_WINDOW_MIN)

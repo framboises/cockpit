@@ -219,6 +219,17 @@ fiche, stockee en base et relue directement par le moteur.
   `SC_SYNONYMS`, 6 orthographes du motif « Ronde surete... »), niveaux de zone (`area.desc`), relances,
   doublons DECLARES (« Doublon fiche 31645 » -> `sql_id`, verite de terrain du detecteur), alarmes mises hors
   service sans remise en service du meme batiment sous 24 h (`alarme_non_remise`).
+- Voisinage de la position (code pur, 27/10/2026) : `competence` (departement / zone / secteur + postes, lot
+  prestataire ; `zone` = secteur, le plus fin), `dans` (terrain / parking, batiment, fan zone, campement
+  contenant le point), `pres` (porte, tribune, virage, portail 3P... le plus proche par couche, 150 m GPS /
+  carroyage, 100 m lieu cite). ⚠️ Le GPS d'une fiche peut etre le lieu de SAISIE, pas de l'incident ; les
+  numeros de tribune de la couche sont ceux de 2026 (« ANCIEN 2025 » non exploite).
+- Plaques d'immatriculation (`plaques`, SIV / FNI / britanniques) : deux fiches proches aux plaques
+  differentes ne sont jamais doublons, une plaque commune = doublon (fiches fourriere au meme texte).
+- Fiche de test / essai : bouton « Ignorer » (`review.verdict == "ignoree"`, `ignoree`) : jamais retraitee,
+  hors justesse.
+- A prendre en compte en **v4** : une fourriere pour simple gene au stationnement = gravite 1 (correction
+  recurrente de l'admin).
 - ⚠️ Pour les propositions de patrouilles (6.1) : ne retenir que `nature == "incident"`, sinon les foyers sont
   noyes sous les rondes RAS et les prises de service.
 

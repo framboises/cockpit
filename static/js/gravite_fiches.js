@@ -586,6 +586,7 @@
       row("Prise de service", [p2.type, p2.poste, p2.debut && p2.fin ? p2.debut + " - " + p2.fin : (p2.debut || p2.fin),
         (p2.materiel || []).length ? "materiel : " + p2.materiel.join(", ") : null].filter(Boolean).join(" - "));
     }
+    if ((it.plaques || []).length) row("Plaques", tags(it.plaques));
     if (it.doublon_declare) {
       var dd = el("span", null, "de la fiche n " + it.doublon_declare.sql_id + " ");
       if (it.doublon_declare.fiche) dd.appendChild(renderTwin(it.doublon_declare.fiche, false));
