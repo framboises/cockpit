@@ -4352,12 +4352,22 @@ def api_balises_mur():
     demandes = balises_mur.lire_groupes(request.args.get("groupes", ""))
     cfg = db["anoloc_config"].find_one({"_id": "global"}) or {}
     visibles = _anoloc._get_user_visible_groups(cfg)
-    tablettes = {}
-    event, year = request.args.get("event"), request.args.get("year")
-    if event and year and demandes:
-        for gid, docs in _anoloc._get_field_tablets_by_group(db, event, year).items():
+    # Tablettes Field (statut libre / engagee / sur place) : evenement de
+    # l'adresse, sinon l'evenement courant ; fiches des evenements actifs
+    tablettes, paires = {}, []
+    if demandes:
+        event, year = request.args.get("event"), request.args.get("year")
+        if not (event and year):
+            event, year = EC.current_event(db)
+        for gid, docs in _anoloc._field_tablets_seeing_pair_by_group(db, event, year).items():
             tablettes[gid] = [balises_mur.tablette(t) for t in docs]
-    return jsonify(balises_mur.etat_mur(db, demandes, visibles=visibles, tablettes=tablettes))
+        paires = EC.active_pairs(db)
+        try:
+            if (event, int(year)) not in paires:
+                paires.append((event, int(year)))
+        except (TypeError, ValueError):
+            pass
+    return jsonify(balises_mur.etat_mur(db, demandes, visibles=visibles, tablettes=tablettes, paires=paires))
 
 
 @app.route('/portes-mur', methods=['GET'])

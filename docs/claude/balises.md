@@ -151,6 +151,16 @@ Mis en place le 26/10/2026. Page manager, aussi ouverte aux afficheurs TV du por
   (a surveiller), les plus anciennes / jamais vues comptees en pied de bloc. Trop de lignes :
   pages equilibrees qui tournent toutes les 8 s (tous les blocs ensemble, points + "1-12 sur 23"),
   jamais de balise cachee. Hauteur d'un bloc selon ses lignes, plafonnee (un gros groupe pagine).
+- Activite des unites (`balises_mur._activite`, pastille du mur) : tablette Field = son statut
+  (`patrouille` -> Libre, `intervention` -> Engagee, `sur_place` -> Sur place, `fin_intervention`,
+  `pause`) ; balise sans tablette = Engagee si une fiche pcorg OUVERTE (`close_ts` null, < 7 jours,
+  evenements actifs `EC.active_pairs` + celui de l'adresse) la nomme dans
+  `content_category.patrouille` (comparaison sans casse ni espaces doubles, comme le PC Org engage
+  un vehicule par son nom), Sur place si `intervention.arrived_at`, sinon Libre si en ligne. Une
+  unite engagee reste affichee meme muette. Tablettes : `?event&year` sinon `EC.current_event`
+  (`anoloc._field_tablets_seeing_pair_by_group`, SAISON vue pendant une epreuve active). Front :
+  pastille sur le marqueur + anneau si engagee, badge dans l'etiquette, ligne pleine largeur en tete
+  du bloc (objet de la fiche, duree) ; libre = puce verte ; totaux engagees / libres en en-tete.
 
 ### Choix publies pour le portail : collection partagee `tv_choix`
 

@@ -101,3 +101,37 @@ def test_liste_publiee_pour_le_portail(db):
     # Sans changement ni force : rien n'est reecrit
     M._PUBLIE["a"] = 0.0
     assert not M.publier_choix_tv(db)
+
+
+def test_activite_libre_engagee_sur_place(db):
+    _config(db)
+    _latest(db, "a1", "AMBU 1", 20)                        # fiche ouverte, arrivee horodatee
+    _latest(db, "a2", "AMBU 2", 7200)                      # muette, engagee quand meme
+    _latest(db, "s1", "VL 1", 30, status="stopped")        # aucune fiche : libre
+    base = {"event": "24H AUTOS", "year": 2026, "close_ts": None}
+    db.pcorg.insert_many([
+        {**base, "_id": "f1", "ts": _naif(MAINTENANT - timedelta(minutes=30)), "text": "Malaise tribune",
+         "content_category": {"patrouille": "ambu  1"}, "intervention": {"arrived_at": _naif(MAINTENANT)}},
+        {**base, "_id": "f2", "ts": _naif(MAINTENANT - timedelta(minutes=5)), "text": "Chute",
+         "content_category": {"patrouille": "AMBU 2"}},
+        {**base, "_id": "f3", "ts": _naif(MAINTENANT - timedelta(days=30)), "text": "Jamais close",
+         "content_category": {"patrouille": "VL 1"}},
+        {**base, "_id": "f4", "ts": _naif(MAINTENANT), "close_ts": _naif(MAINTENANT), "text": "Close",
+         "content_category": {"patrouille": "VL 1"}},
+        {"_id": "f5", "event": "AUTRE", "year": 2026, "close_ts": None, "ts": _naif(MAINTENANT),
+         "content_category": {"patrouille": "VL 1"}},
+    ])
+    tab = M.tablette({"_id": "t1", "name": "Secu 1", "last_seen": MAINTENANT - timedelta(seconds=10),
+                      "last_position": {"lat": 47.9, "lng": 0.2}, "status": "intervention",
+                      "status_since": MAINTENANT, "active_fiche_id": "f2"}, now=MAINTENANT)
+    d = M.etat_mur(db, ["med", "sur"], now=MAINTENANT, paires=[("24H AUTOS", 2026)],
+                   tablettes={"sur": [tab]})
+    med = {b["id"]: b for b in d["groupes"][0]["balises"]}
+    assert (med["a1"]["activite"], med["a1"]["fiche_texte"]) == ("sur_place", "Malaise tribune")
+    assert med["a2"]["activite"] == "engagee" and not med["a2"]["en_ligne"]
+    assert med["a3"]["activite"] is None                   # jamais vue, pas de fiche
+    sur = {b["id"]: b for b in d["groupes"][1]["balises"]}
+    assert sur["s1"]["activite"] == "libre"
+    assert (sur["field:t1"]["activite"], sur["field:t1"]["fiche_texte"]) == ("engagee", "Chute")
+    assert "statut_field" not in sur["field:t1"] and "fiche_id" not in sur["field:t1"]
+    assert (d["groupes"][0]["engagees"], d["groupes"][1]["engagees"], d["groupes"][1]["libres"]) == (2, 1, 1)

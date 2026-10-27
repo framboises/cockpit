@@ -23,6 +23,10 @@
          balise en ligne (vitesse ou "arret") puis par balise muette depuis
          moins de 12 h (grisee), les plus anciennes comptees en pied de bloc ;
          trop de lignes = pages qui tournent toutes les 8 s.
+       - activite : pastille Libre / Engagee / Sur place / Fin d'inter / Pause
+         (statut de la tablette Field, ou fiche PC Org ouverte qui nomme la
+         balise), anneau autour de la pastille d'une unite engagee, engagees
+         en tete du panneau ; sans ?event=&year= : evenement courant.
      La carte se recadre seule sur les balises en ligne (sans a-coups : seulement
      quand une balise sort du cadre ou que les groupes changent).
      Sans ?groupes= : dernier choix de ce navigateur, sinon selecteur. Le portail
@@ -66,6 +70,8 @@
   .resume .l{font-size:var(--t-libelle); font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-left:0.4vw}
   .resume .move .n{color:var(--move)}
   .resume .off .n{color:var(--muted)}
+  .resume .eng .n{color:#f59e0b}
+  .resume .lib .n{color:#22c55e}
   .flux{margin-left:auto; font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center; gap:0.5vw; white-space:nowrap}
   .reglage{background:none; border:1px solid var(--line); color:var(--muted-2); border-radius:0.6vw; padding:0.3vh 0.5vw;
     font-size:var(--t-moyen); cursor:pointer; line-height:1}
@@ -81,6 +87,7 @@
   .legende{position:absolute; left:1vw; bottom:1vh; z-index:500; display:flex; gap:1.2vw; padding:0.6vh 1vw; align-items:center;
     background:rgba(11,18,32,0.85); border-radius:0.6vw; font-size:var(--t-libelle); font-weight:700; color:var(--muted)}
   .legende span{display:flex; align-items:center; gap:0.4vw}
+  .legende .sep{width:1px; align-self:stretch; background:var(--line-2)}
   .legende .tr{display:inline-block; width:2vw; height:0.5vh; min-height:3px; border-radius:2px;
     background:linear-gradient(90deg, rgba(148,163,184,0), var(--muted))}
   .vide-carte{position:absolute; inset:0; z-index:600; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:1vh;
@@ -92,6 +99,12 @@
   .bal .rond{position:absolute; inset:0; border-radius:50%; display:flex; align-items:center; justify-content:center;
     border:3px solid #0b1220; box-shadow:0 0 0 2px rgba(255,255,255,0.85), 0 4px 12px rgba(0,0,0,0.55); color:#fff}
   .bal .rond .ms{font-size:20px}
+  /* Activite Field / PC Org : pastille en haut a droite, anneau si engagee */
+  .bal .act{position:absolute; right:-18%; top:-18%; width:46%; height:46%; min-width:12px; min-height:12px; border-radius:50%;
+    background:var(--a); border:2px solid #0b1220; box-shadow:0 0 0 1.5px #fff; z-index:2}
+  .bal.eng .rond{box-shadow:0 0 0 2px #fff, 0 0 0 6px var(--a), 0 4px 14px rgba(0,0,0,0.6)}
+  .leaflet-tooltip.nom i{font-style:normal; background:var(--a); color:#fff; border-radius:4px; padding:0 5px; margin-left:6px;
+    font-size:0.8em; text-transform:uppercase; letter-spacing:0.04em}
   .bal .cap{position:absolute; left:50%; top:50%; width:0; height:0; margin-left:-9px; margin-top:-36px;
     border-left:9px solid transparent; border-right:9px solid transparent; border-bottom:14px solid #fff;
     transform-origin:9px 36px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.7))}
@@ -144,6 +157,22 @@
   .pages span{width:0.55vw; height:0.55vw; min-width:8px; min-height:8px; border-radius:50%; background:var(--line-2)}
   .pages span.on{background:var(--c)}
   .pages em{margin-left:auto; font-style:normal; font-size:var(--t-libelle); color:var(--muted); font-weight:700}
+  /* Lignes denses (2 colonnes) : police reduite pour garder nom + statut
+     lisibles ; "arret" retire (pas de vitesse = a l'arret, la carte le dit) */
+  .lignes:not(.une):not(.aere) .ligne{font-size:calc(var(--t-ligne) * 0.86); gap:0.4vw; padding:0.3vh 0.4vw}
+  .lignes:not(.une):not(.aere) .ligne .v.stop{display:none}
+  .lignes:not(.une):not(.aere) .ligne .bat{font-size:0.8em}
+  .ligne .lab{min-width:0}
+  .ligne .act, .ligne .v, .ligne .bat{flex:0 0 auto}
+  .ligne .act{white-space:nowrap; font-weight:900; font-size:0.72em; text-transform:uppercase; letter-spacing:0.04em;
+    padding:0.15vh 0.45vw; border-radius:0.4vw; background:var(--a); color:#fff}
+  .ligne .act.libre{background:none; color:var(--a); box-shadow:inset 0 0 0 2px var(--a)}
+  .ligne .act small{font-weight:700; opacity:0.9; margin-left:0.3vw; text-transform:none}
+  .ligne .fiche{color:var(--muted); font-weight:600; font-size:0.8em; margin-left:0.5vw}
+  .ligne.eng{background:color-mix(in srgb, var(--a) 16%, transparent); grid-column:1 / -1; box-shadow:inset 0.3vw 0 0 var(--a)}
+  .ligne.off.eng{border-style:solid; border-color:color-mix(in srgb, var(--a) 50%, transparent)}
+  .bloc .compte .m .e{color:#f59e0b}
+  .bloc .compte .m .f{color:#22c55e}
   .ligne .bat{color:var(--warn); font-size:0.85em; white-space:nowrap}
   .ligne .bat.crit{color:var(--crit)}
   .horsligne{flex:0 0 auto; padding:0.6vh 1vw 1vh; font-size:var(--t-libelle); color:var(--muted-2); font-weight:600;
@@ -197,6 +226,10 @@
         <span><span class="puce" style="background:var(--muted)"></span>À l'arrêt</span>
         <span><span class="puce" style="background:var(--off); opacity:0.55"></span>Hors ligne</span>
         <span><span class="tr"></span>10 dernières min</span>
+        <span class="sep"></span>
+        <span><span class="puce" style="background:#22c55e"></span>Libre</span>
+        <span><span class="puce" style="background:#f59e0b"></span>Engagée</span>
+        <span><span class="puce" style="background:#3b82f6"></span>Sur place</span>
       </div>
     </section>
     <section class="panneau" id="panneau"></section>
@@ -217,6 +250,12 @@
   var CENTRE = [47.938561, 0.224318];
   var CLE_LOCALE = "balisesMur.groupes";
   var CLE_FOND = "balisesMur.fond";
+  // Activite (statut Field de la tablette, ou fiche PC Org qui engage la balise)
+  var ACT = { libre: { l: "Libre", c: "#22c55e", rang: 3 }, engagee: { l: "Engagée", c: "#f59e0b", rang: 1 },
+              sur_place: { l: "Sur place", c: "#3b82f6", rang: 0 }, fin: { l: "Fin d'inter", c: "#a855f7", rang: 2 },
+              pause: { l: "Pause", c: "#94a3b8", rang: 4 } };
+  function engagee(b) { return b.activite === "engagee" || b.activite === "sur_place" || b.activite === "fin"; }
+  function depuis(iso) { return iso ? age((maintenant() - new Date(iso).getTime()) / 1000) : ""; }
   var FONDS = [{ valeur: "plan", libelle: "Carte", icone: "map" },
                { valeur: "ortho", libelle: "Satellite IGN", icone: "satellite_alt" }];
   var params = new URLSearchParams(location.search);
@@ -357,7 +396,9 @@
     var c = couleurSure(o.g.couleur);
     var b = o.b, etat = !b.en_ligne ? "off" : b.mouvement ? "move" : "arret";
     var taille = etat === "move" ? 40 : etat === "arret" ? 34 : 26;
-    var html = '<div class="bal ' + etat + (b.en_ligne && !b.gps ? " nogps" : "") + '" style="--c:' + c + '">' +
+    var a = ACT[b.activite];
+    var html = '<div class="bal ' + etat + (b.en_ligne && !b.gps ? " nogps" : "") + (engagee(b) ? " eng" : "") +
+      '" style="--c:' + c + (a ? ";--a:" + a.c : "") + '">' + (a ? '<div class="act"></div>' : "") +
       (etat === "move" ? '<div class="cap" style="transform:rotate(' + (+b.cap || 0) + 'deg)"></div>' : "") +
       '<div class="rond" style="background:' + c + '"><span class="ms" style="font-size:' + Math.round(taille * 0.52) + 'px">' +
       (b.tablette ? "tablet_android" : String(o.g.icone).replace(/[^a-z0-9_]/g, "")) + "</span></div></div>";
@@ -397,7 +438,7 @@
         }
       }
       var ic = iconeBalise(o);
-      var cle = ic.etat + "|" + b.cap + "|" + b.gps + "|" + o.g.couleur + "|" + b.vitesse;
+      var cle = ic.etat + "|" + b.cap + "|" + b.gps + "|" + o.g.couleur + "|" + b.vitesse + "|" + b.activite;
       var m = S.marqueurs[b.id];
       var z = ic.etat === "move" ? 3000 : ic.etat === "arret" ? 2000 : 0;
       if (!m) {
@@ -409,10 +450,15 @@
       }
       if (m._cle !== cle) {
         m.unbindTooltip();
-        if (b.en_ligne) {
+        if (b.en_ligne || engagee(b)) {
           // Texte en noeuds : Leaflet interprete une chaine comme du HTML
           var t = el("span", "", b.label);
           if (b.mouvement) t.appendChild(el("b", "", b.vitesse + " km/h"));
+          if (engagee(b) || b.activite === "pause") {
+            var tag = el("i", "", ACT[b.activite].l);
+            tag.style.setProperty("--a", ACT[b.activite].c);
+            t.appendChild(tag);
+          }
           m.bindTooltip(t, { permanent: true, direction: "bottom", offset: [0, ic.etat === "move" ? 18 : 15],
             className: "nom" + (b.mouvement ? " vite" : "") });
           var tt = m.getTooltip().getElement && m.getTooltip().getElement();
@@ -438,12 +484,31 @@
   }
 
   /* ---------------- panneau ---------------- */
+  // Libre : la puce de la ligne passe au vert, sans badge (place) ; autres
+  // statuts : badge colore avec la duree
+  function pastilleActivite(l, b) {
+    var a = ACT[b.activite];
+    if (!a) return;
+    l.style.setProperty("--a", a.c);
+    var pu = l.querySelector(".puce");
+    if (pu) pu.style.background = a.c;
+    if (b.activite === "libre") return;
+    var p = el("span", "act", a.l);
+    if (b.activite !== "libre" && b.activite_depuis) p.appendChild(el("small", "", depuis(b.activite_depuis)));
+    l.appendChild(p);
+  }
+  function libelle(b) {
+    var lab = el("span", "lab une-ligne", b.label);
+    if (engagee(b) && b.fiche_texte) lab.appendChild(el("span", "fiche", b.fiche_texte));
+    return lab;
+  }
   function ligneBalise(b, g) {
-    var l = el("div", "ligne" + (b.mouvement ? " move" : ""));
+    var l = el("div", "ligne" + (b.mouvement ? " move" : "") + (engagee(b) ? " eng" : ""));
     var pu = el("span", "puce");
     pu.style.background = b.mouvement ? "var(--move)" : g.couleur;
     l.appendChild(pu);
-    l.appendChild(el("span", "lab une-ligne", b.label));
+    l.appendChild(libelle(b));
+    pastilleActivite(l, b);
     if (b.batterie != null && b.batterie <= 20 && !b.charge) {
       var bat = el("span", "bat" + (b.batterie <= 10 ? " crit" : ""));
       bat.appendChild(ico("battery_alert"));
@@ -451,14 +516,15 @@
       l.appendChild(bat);
     }
     if (b.mouvement) l.appendChild(el("span", "v", b.vitesse + " km/h"));
-    else l.appendChild(el("span", "v arret", b.gps ? "arrêt" : "sans GPS"));
+    else l.appendChild(el("span", "v arret" + (b.gps ? " stop" : ""), b.gps ? "arrêt" : "sans GPS"));
     return l;
   }
 
   function ligneMuette(b) {
-    var l = el("div", "ligne off");
+    var l = el("div", "ligne off" + (engagee(b) ? " eng" : ""));
     l.appendChild(el("span", "puce"));
-    l.appendChild(el("span", "lab une-ligne", b.label));
+    l.appendChild(libelle(b));
+    pastilleActivite(l, b);
     l.appendChild(el("span", "v arret", "muette " + age(b.age_s)));
     return l;
   }
@@ -477,7 +543,7 @@
       var hors = g.balises.filter(function (b) { return !b.en_ligne; });
       // Muette depuis peu = a surveiller (ligne grisee) ; depuis longtemps =
       // rangee, comptee seulement en pied de bloc
-      var recentes = hors.filter(function (b) { return b.age_s != null && b.age_s < MUETTE_RECENTE_S; });
+      var recentes = hors.filter(function (b) { return engagee(b) || (b.age_s != null && b.age_s < MUETTE_RECENTE_S); });
       var rangees = hors.length - recentes.length;
       var nbLignes = enLigne.length + recentes.length;
       // Hauteur du bloc selon le nombre de lignes a montrer
@@ -492,16 +558,28 @@
       var n = el("div", "n", String(g.en_ligne));
       n.appendChild(el("small", "", " / " + g.total));
       c.appendChild(n);
-      c.appendChild(el("div", "m", g.en_mouvement ? g.en_mouvement + " en mouvement" : "en ligne"));
+      var m = el("div", "m");
+      if (g.engagees || g.libres) {
+        m.appendChild(el("span", "e", g.engagees + " engagée" + (g.engagees > 1 ? "s" : "")));
+        m.appendChild(document.createTextNode(" · "));
+        m.appendChild(el("span", "f", g.libres + " libre" + (g.libres > 1 ? "s" : "")));
+      } else m.textContent = g.en_mouvement ? g.en_mouvement + " en mouvement" : "en ligne";
+      c.appendChild(m);
       ent.appendChild(c);
       bloc.appendChild(ent);
       if (nbLignes) {
         enLigne.sort(function (a, b) {
+          // Engagees d'abord (sur place, engagee, fin), puis libres
+          var ra = (ACT[a.activite] || { rang: 5 }).rang, rb = (ACT[b.activite] || { rang: 5 }).rang;
+          if (ra !== rb) return ra - rb;
           if (a.mouvement !== b.mouvement) return a.mouvement ? -1 : 1;
           if (a.mouvement) return b.vitesse - a.vitesse;
           return a.label.localeCompare(b.label, "fr", { numeric: true });
         });
-        recentes.sort(function (a, b) { return a.age_s - b.age_s; });
+        recentes.sort(function (a, b) {
+          if (engagee(a) !== engagee(b)) return engagee(a) ? -1 : 1;
+          return (a.age_s || 0) - (b.age_s || 0);
+        });
         // Peu de balises : lignes plus grandes, lisibles de loin
         var aere = nbLignes * (deux ? 0.5 : 1) * d.groupes.length <= 8;
         var ls = el("div", "lignes" + (deux ? "" : " une") + (aere ? " aere" : ""));
@@ -543,20 +621,27 @@
       }
       if (!ind) { ind = el("div", "pages"); bloc.insertBefore(ind, ls.nextSibling); }
       ind.hidden = false;
-      var cap = rows.length;
-      for (var i = 0; i < rows.length; i++) {
-        if (rows[i].offsetTop + rows[i].offsetHeight > ls.clientHeight + 1) { cap = i; break; }
-      }
-      var col = ls.classList.contains("une") ? 1 : 2;
-      cap = Math.max(cap - cap % col, 1);
-      // Pages equilibrees (12 + 11 plutot que 20 + 3)
-      var nb = Math.ceil(rows.length / cap);
-      cap = Math.ceil(Math.ceil(rows.length / nb) / col) * col;
-      var k = page % nb;
-      rows.forEach(function (r, j) { r.hidden = Math.floor(j / cap) !== k; });
+      // Indicateur rempli AVANT la mesure : vide, il est plus bas et la
+      // derniere rangee mesuree comme visible etait rognee
+      ind.textContent = "";
+      ind.appendChild(el("span", "on"));
+      ind.appendChild(el("em", "", "1-1 sur 1"));
+      // Pages au fil de la mise en page reelle (les lignes engagees prennent
+      // toute la largeur) : une page = les lignes qui tiennent a partir de
+      // la premiere ligne de la page
+      var debuts = [0], haut = ls.clientHeight + 1, top0 = rows[0].offsetTop;
+      rows.forEach(function (r, j) {
+        if (!j || r.offsetTop + r.offsetHeight - top0 <= haut) return;
+        // Coupure en debut de rangee de la grille, jamais entre deux colonnes
+        var i = j;
+        while (i > debuts[debuts.length - 1] + 1 && rows[i - 1].offsetTop === r.offsetTop) i--;
+        if (i > debuts[debuts.length - 1]) { debuts.push(i); top0 = rows[i].offsetTop; }
+      });
+      var nb = debuts.length, k = page % nb, de = debuts[k], a = k + 1 < nb ? debuts[k + 1] : rows.length;
+      rows.forEach(function (r, j) { r.hidden = j < de || j >= a; });
       ind.textContent = "";
       for (var q = 0; q < nb; q++) ind.appendChild(el("span", q === k ? "on" : ""));
-      ind.appendChild(el("em", "", (k * cap + 1) + "-" + Math.min((k + 1) * cap, rows.length) + " sur " + rows.length));
+      ind.appendChild(el("em", "", (de + 1) + "-" + a + " sur " + rows.length));
     });
   }
   setInterval(paginer, 500);
@@ -565,9 +650,12 @@
     var r = $("resume");
     r.textContent = "";
     if (!d.groupes || !d.groupes.length) return;
-    var t = { en: 0, mv: 0, tot: 0 };
-    d.groupes.forEach(function (g) { t.en += g.en_ligne; t.mv += g.en_mouvement; t.tot += g.total; });
-    [[t.en, "en ligne", ""], [t.mv, "en mouvement", "move"], [t.tot - t.en, "hors ligne", "off"]].forEach(function (x) {
+    var t = { en: 0, mv: 0, tot: 0, eng: 0, lib: 0 };
+    d.groupes.forEach(function (g) {
+      t.en += g.en_ligne; t.mv += g.en_mouvement; t.tot += g.total; t.eng += g.engagees || 0; t.lib += g.libres || 0;
+    });
+    [[t.eng, "engagées", "eng"], [t.lib, "libres", "lib"], [t.en, "en ligne", ""], [t.mv, "en mouvement", "move"],
+     [t.tot - t.en, "hors ligne", "off"]].forEach(function (x) {
       var s = el("span", x[2]);
       s.appendChild(el("span", "n", String(x[0])));
       s.appendChild(el("span", "l", x[1]));

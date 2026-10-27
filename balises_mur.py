@@ -27,6 +27,16 @@ TRAINEE_MIN = 10          # trainee affichee derriere chaque balise
 TRAINEE_MAX_POINTS = 60   # par balise
 EN_MOUVEMENT_KMH = B.MOVING_SPEED_KMH
 
+# Activite d'une unite (pastille du mur) :
+#  - tablette Field : son statut (field_devices.status) ;
+#  - balise sans tablette : engagee si une fiche OUVERTE d'un evenement actif
+#    la nomme (content_category.patrouille, comme le PC Org l'engage), sur
+#    place si l'arrivee est horodatee (intervention.arrived_at), sinon libre.
+ACTIVITE_TABLETTE = {"patrouille": "libre", "intervention": "engagee", "sur_place": "sur_place",
+                     "pause": "pause", "fin_intervention": "fin"}
+ENGAGEES = ("engagee", "sur_place", "fin")
+FICHE_MAX_JOURS = 7   # fiche jamais close au-dela : ignoree (oubli de cloture)
+
 TV_CHOIX_COL = "tv_choix"
 TV_CHOIX_ID = "cockpit:groupes_balises"
 TV_CHOIX_FOND_ID = "cockpit:fond_balises"
@@ -119,6 +129,62 @@ def publier_choix_tv(db, force=False):
     return True
 
 
+def _nom(x):
+    return " ".join(str(x or "").lower().split())
+
+
+def engagements(db, paires, now=None):
+    """{nom normalise: {fiche, texte, sur_place, depuis}} des fiches ouvertes
+    des paires (event, year) actives qui nomment une unite engagee."""
+    import event_courant as EC
+    now = now or datetime.now(timezone.utc)
+    if not paires:
+        return {}
+    q = {"close_ts": None, "content_category.patrouille": {"$nin": [None, ""]},
+         "ts": {"$gte": now - timedelta(days=FICHE_MAX_JOURS)}}
+    q.update(EC.pairs_filter(paires))
+    out = {}
+    for f in db["pcorg"].find(q, {"ts": 1, "text": 1, "content_category.patrouille": 1,
+                                  "content_category.sous_classification": 1, "intervention": 1}).sort("ts", 1):
+        cc = f.get("content_category") or {}
+        it = f.get("intervention") or {}
+        out[_nom(cc.get("patrouille"))] = {
+            "fiche": str(f["_id"]),
+            "texte": (f.get("text") or cc.get("sous_classification") or "")[:80],
+            "sur_place": bool(it.get("arrived_at")),
+            "depuis": _iso(it.get("arrived_at") or it.get("engaged_at") or f.get("ts")),
+        }
+    return out
+
+
+def _textes_fiches(db, ids):
+    ids = [i for i in ids if i]
+    if not ids:
+        return {}
+    return {str(f["_id"]): (f.get("text") or (f.get("content_category") or {}).get("sous_classification") or "")[:80]
+            for f in db["pcorg"].find({"_id": {"$in": ids}}, {"text": 1, "content_category.sous_classification": 1})}
+
+
+def _activite(b, engs, textes):
+    """Pose b["activite"], b["activite_depuis"], b["fiche_texte"]."""
+    if b.get("tablette"):
+        act = ACTIVITE_TABLETTE.get(b.pop("statut_field", None) or "patrouille", "libre")
+        b["activite_depuis"] = b.pop("statut_depuis", None)
+        b["fiche_texte"] = textes.get(b.pop("fiche_id", None) or "") if act in ENGAGEES else None
+    else:
+        e = engs.get(_nom(b["label"]))
+        if e:
+            act = "sur_place" if e["sur_place"] else "engagee"
+            b["activite_depuis"], b["fiche_texte"] = e["depuis"], e["texte"]
+        else:
+            act = "libre" if b["en_ligne"] else None
+            b["activite_depuis"], b["fiche_texte"] = None, None
+    # Hors ligne et libre : rien a dire (la balise est juste muette)
+    if act == "libre" and not b["en_ligne"]:
+        act = None
+    b["activite"] = act
+
+
 def _balise(dev_id, doc, grp, tlt_devices, tlt_settings, now):
     if not doc:
         return {"id": dev_id, "label": (grp.get("device_labels") or {}).get(dev_id, dev_id),
@@ -169,12 +235,13 @@ def _traces(db, ids, now):
     return {k: v[-TRAINEE_MAX_POINTS:] for k, v in out.items()}
 
 
-def etat_mur(db, demandes, visibles=None, tablettes=None, now=None):
+def etat_mur(db, demandes, visibles=None, tablettes=None, now=None, paires=None):
     """Etat du mur pour les groupes `demandes` (ids, ordre conserve).
 
     visibles : ensemble des groupes visibles de l'utilisateur (None = tous,
     anoloc._get_user_visible_groups). tablettes : {group_id: [devices au
-    format _balise]} des tablettes Field (facultatif, event/year).
+    format _balise]} des tablettes Field (facultatif, event/year). paires :
+    [(event, year)] actives, pour les fiches qui engagent une balise.
     Retour : {maintenant, actif, dispo, groupes, ignores}."""
     now = now or datetime.now(timezone.utc)
     try:
@@ -206,12 +273,17 @@ def etat_mur(db, demandes, visibles=None, tablettes=None, now=None):
         sortie.append({**_option(g), "id": g["id"], "balises": balises})
 
     traces = _traces(db, [i for i in en_ligne_ids if not i.startswith("field:")], now)
+    engs = engagements(db, paires, now) if paires else {}
+    textes = _textes_fiches(db, [b.get("fiche_id") for g in sortie for b in g["balises"] if b.get("tablette")])
     for g in sortie:
         for b in g["balises"]:
             b["trace"] = traces.get(b["id"], [])
+            _activite(b, engs, textes)
         g["total"] = len(g["balises"])
         g["en_ligne"] = sum(1 for b in g["balises"] if b["en_ligne"])
         g["en_mouvement"] = sum(1 for b in g["balises"] if b["mouvement"])
+        g["engagees"] = sum(1 for b in g["balises"] if b["activite"] in ENGAGEES)
+        g["libres"] = sum(1 for b in g["balises"] if b["activite"] == "libre")
     return {"maintenant": now.isoformat(), "actif": True, "dispo": dispo,
             "groupes": sortie, "ignores": ignores}
 
@@ -233,4 +305,5 @@ def tablette(t, now=None):
             "vitesse": round(vitesse) if en_ligne else 0, "cap": pos.get("heading") or 0,
             "batterie": pos.get("battery"), "charge": None, "vu_a": _iso(vu),
             "age_s": round(age) if age is not None else None, "source": "field",
-            "tablette": True, "trace": []}
+            "tablette": True, "trace": [], "statut_field": t.get("status") or "patrouille",
+            "statut_depuis": _iso(t.get("status_since")), "fiche_id": t.get("active_fiche_id")}
