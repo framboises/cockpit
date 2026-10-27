@@ -146,6 +146,7 @@
   }
 
   function onMapClick(e) {
+    if (S.tab === "proposer" && PR.placing) { placeAt(e.latlng); return; }
     if (S.tab !== "points") return;
     if (IMP.on) {       // import depuis une couche : la carte sert au lasso
       if (IMP.lasso) { IMP.lasso.push([e.latlng.lng, e.latlng.lat]); drawImport(); }
@@ -440,31 +441,9 @@
     sum.textContent = r.stops.length + " arret(s) - " + fmtKm(est.distance_m) + " - " + fmtMin(est.total_s) +
       " (arrets compris) pour " + fmtMin(r.budget_s) + " disponibles";
     box.appendChild(sum);
-    box.appendChild(el("div", "pt-hint", r.stats.fiches + " fiche(s) placee(s), " + r.stats.foyers + " foyer(s) sur la carte (cercles gris, taille = importance)."));
+    box.appendChild(el("div", "pt-hint", (r.foyers || []).length + " foyer(s) sur la carte (cercles gris, taille = importance)."));
     (r.notes || []).forEach(function (n) { box.appendChild(el("div", "pt-hint", n)); });
-    // Lieux cites dans les fiches mais pas encore places : un point a creer
-    // (avec ses autres noms) et toutes ces fiches entrent dans les propositions
-    var miss = (r.stats && r.stats.non_placees) || [];
-    if (miss.length) {
-      var mb = el("details", "pr-missing");
-      mb.open = (r.stats.placees || 0) < (r.stats.fiches || 0) * 0.6;
-      mb.appendChild(el("summary", null, "Lieux cites non places (" + miss.length + ")"));
-      miss.forEach(function (m) {
-        var row = el("div", "pr-miss-row");
-        row.appendChild(el("span", "pr-miss-name", m.lieu));
-        row.appendChild(el("span", "pt-muted", m.n + " fiche" + (m.n > 1 ? "s" : "")));
-        var b = el("button", "btn", "Placer"); b.type = "button";
-        b.title = "Creer un point " + m.lieu + " : cliquez ensuite sur la carte a son emplacement";
-        b.addEventListener("click", function () {
-          S.pendingPlace = m.lieu;
-          setTab("points");
-          toast("info", "Cliquez sur la carte a l'emplacement de " + m.lieu + " (ajoutez ses autres noms si besoin)");
-        });
-        row.appendChild(b);
-        mb.appendChild(row);
-      });
-      box.appendChild(mb);
-    }
+    renderMissing(box, r);
     if (r.ai_comment) {
       var c = el("div", "pt-callout");
       c.appendChild(icon("psychology"));
@@ -485,10 +464,125 @@
       main.appendChild(el("div", "pt-muted", sub));
       if (s.ai_reason) main.appendChild(el("div", "pr-ai-reason", "IA : " + s.ai_reason));
       li.appendChild(main);
+      if (s.kind === "foyer") {
+        // Lieu mal place (nom rapproche du mauvais objet du referentiel) : on le corrige ici
+        var fix = el("button", "btn btn-sm", "Corriger le lieu"); fix.type = "button";
+        fix.title = "Placer ce lieu au bon endroit : toutes les fiches qui le citent suivront";
+        fix.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          startPlacing(s.lieu || s.name, li);
+          S.map.setView([s.lat, s.lng], Math.max(S.map.getZoom(), 16));
+        });
+        li.appendChild(fix);
+      }
       li.addEventListener("click", function () { S.map.setView([s.lat, s.lng], Math.max(S.map.getZoom(), 17)); });
       ol.appendChild(li);
     });
     box.appendChild(ol);
+  }
+
+  // Lieux cites dans les fiches mais pas encore places. « Placer » se fait ici
+  // meme : clic sur la carte (nouveau point) ou rattachement comme autre nom
+  // d'un point existant, puis la proposition est recalculee.
+  function renderMissing(box, r) {
+    var miss = (r.stats && r.stats.non_placees) || [];
+    if (!miss.length) return;
+    var mb = el("details", "pr-missing");
+    mb.open = true;
+    mb.appendChild(el("summary", null, "Lieux cites non places (" + miss.length + ") - " +
+      Math.round(100 * (r.stats.placees || 0) / Math.max(1, r.stats.fiches || 0)) + " % des fiches placees"));
+    miss.forEach(function (m) {
+      var row = el("div", "pr-miss-row");
+      row.appendChild(el("span", "pr-miss-name", m.lieu));
+      row.appendChild(el("span", "pt-muted", m.n + " fiche" + (m.n > 1 ? "s" : "")));
+      var b = el("button", "btn", "Placer"); b.type = "button";
+      b.addEventListener("click", function () { startPlacing(m.lieu, row); });
+      row.appendChild(b);
+      mb.appendChild(row);
+    });
+    box.appendChild(mb);
+  }
+
+  function startPlacing(lieu, row) {
+    stopPlacing(true);
+    // Un point de ce nom existe deja : on le DEPLACE (pas de doublon)
+    var same = (S.data.points || []).find(function (p) { return p.active && p.name.toLowerCase() === String(lieu).toLowerCase(); });
+    PR.placing = { lieu: lieu, latlng: null, marker: null, move: same && !same.layer_ref ? same : null };
+    var f = el("div", "pr-place");
+    f.appendChild(el("div", "pt-hint", PR.placing.move
+      ? "Le point « " + lieu + " » existe : cliquez sur la carte a son BON emplacement (repere deplacable) puis enregistrez."
+      : "Cliquez sur la carte a l'emplacement de « " + lieu + " » (repere deplacable), ou rattachez ce nom a un point existant. Votre point passe avant le referentiel."));
+    var nm = el("input", "pt-input"); nm.type = "text"; nm.maxLength = 80; nm.value = lieu; nm.placeholder = "Nom du point";
+    var al = el("input", "pt-input"); al.type = "text"; al.maxLength = 400; al.placeholder = "Autres noms (virgules), ex. pole europeen";
+    f.appendChild(labelled("Nom du nouveau point", nm));
+    f.appendChild(labelled("Autres noms", al));
+    var sel = el("select", "pt-input");
+    sel.appendChild(new Option("- ou rattacher a un point existant -", ""));
+    (S.data.points || []).filter(function (p) { return p.active; }).forEach(function (p) { sel.appendChild(new Option(p.name, p.id)); });
+    f.appendChild(sel);
+    var pos = el("div", "pt-muted", "Position : pas encore placee");
+    f.appendChild(pos);
+    var bar = el("div", "pr-place-bar");
+    var ok = el("button", "btn btn-primary", "Enregistrer et recalculer"); ok.type = "button";
+    var ko = el("button", "btn", "Annuler"); ko.type = "button";
+    bar.appendChild(ok); bar.appendChild(ko);
+    f.appendChild(bar);
+    PR.placing.posEl = pos;
+    ko.addEventListener("click", function () { stopPlacing(); f.remove(); });
+    ok.addEventListener("click", function () {
+      var req;
+      if (PR.placing.move && !sel.value) {
+        if (!PR.placing.latlng) { toast("warning", "Cliquez d'abord sur la carte au bon emplacement"); return; }
+        var mv = PR.placing.move;
+        var extra = al.value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+        req = apiPut("/api/patrols/points/" + mv.id, Object.assign({}, mv, { lat: PR.placing.latlng.lat, lng: PR.placing.latlng.lng,
+                                                                           aliases: (mv.aliases || []).concat(extra).join(", ") }));
+      } else if (sel.value) {
+        var p = pointById(sel.value);
+        var aliases = (p.aliases || []).concat([lieu]).concat(al.value.split(",").map(function (x) { return x.trim(); }).filter(Boolean));
+        req = apiPut("/api/patrols/points/" + p.id, Object.assign({}, p, { aliases: aliases.join(", ") }));
+      } else {
+        if (!PR.placing.latlng) { toast("warning", "Cliquez d'abord sur la carte a l'emplacement du lieu"); return; }
+        req = apiPost("/api/patrols/points", { name: nm.value, lat: PR.placing.latlng.lat, lng: PR.placing.latlng.lng, aliases: al.value });
+      }
+      ok.disabled = true;
+      req.then(function (res) {
+        var i = S.data.points.findIndex(function (x) { return x.id === res.point.id; });
+        if (i >= 0) S.data.points[i] = res.point; else S.data.points.push(res.point);
+        S.data.points.sort(function (a, b) { return a.name.localeCompare(b.name); });
+        toast("success", sel.value ? "« " + lieu + " » rattache a " + res.point.name : "Point " + res.point.name + " cree");
+        stopPlacing();
+        runProposal(false);
+      }).catch(function (e) { ok.disabled = false; toast("error", errLabel(e)); });
+    });
+    row.after(f);
+    S.map.getContainer().style.cursor = "crosshair";
+    nm.focus();
+  }
+
+  function labelled(text, input) {
+    var l = el("label", "pt-field", text);
+    l.appendChild(input);
+    return l;
+  }
+
+  function placeAt(latlng) {
+    var pl = PR.placing;
+    pl.latlng = latlng;
+    if (!pl.marker) {
+      pl.marker = L.marker(latlng, { draggable: true, zIndexOffset: 2000 }).addTo(S.map);
+      pl.marker.on("dragend", function () { pl.latlng = pl.marker.getLatLng(); showPos(); });
+    } else pl.marker.setLatLng(latlng);
+    showPos();
+    function showPos() { pl.posEl.textContent = "Position : " + pl.latlng.lat.toFixed(5) + ", " + pl.latlng.lng.toFixed(5) + " (deplacez le repere pour ajuster)"; }
+  }
+
+  function stopPlacing(keepForm) {
+    if (PR.placing && PR.placing.marker) S.map.removeLayer(PR.placing.marker);
+    PR.placing = null;
+    S.map.getContainer().style.cursor = "";
+    if (keepForm !== true) return;
+    document.querySelectorAll(".pr-place").forEach(function (x) { x.remove(); });
   }
 
   function drawProposal() {

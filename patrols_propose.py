@@ -528,7 +528,7 @@ def propose(db, dominante, duration_min, travel, event, loop=False, hour=None, a
         st = {"kind": s.get("kind", "foyer"), "name": s.get("name"), "lat": s["lat"], "lng": s["lng"],
               "score": s.get("score")}
         if st["kind"] == "foyer":
-            st.update(id=s["id"], n=s["n"], editions=s["editions"], gravite_moy=s["gravite_moy"],
+            st.update(id=s["id"], n=s["n"], lieu=s.get("lieu"), editions=s["editions"], gravite_moy=s["gravite_moy"],
                       top_sous=s["top_sous"], types=s.get("types"), kinds=s.get("kinds"), fiche_ids=s["fiche_ids"],
                       sources=s["sources"], score_code=s.get("score_code"), ai_reason=s.get("ai_reason"))
         else:
