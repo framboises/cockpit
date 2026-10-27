@@ -23,7 +23,7 @@
 #   python pcorg_digest.py --poll               mode tache planifiee (chaque minute) :
 #       1. une demande deposee depuis la page (lots de 50 / 100) -> traitee ;
 #       2. sinon, si le traitement de nuit est active dans la page et qu'on
-#          est dans la fenetre (--night 01:00-06:00) -> jusqu'a la fin de fenetre ;
+#          est dans la fenetre (--night 23:00-07:00) -> jusqu'a la fin de fenetre ;
 #       3. sinon (ou traitement deja en cours) -> sortie immediate.
 import argparse
 import hashlib

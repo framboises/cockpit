@@ -181,8 +181,8 @@ fiche, stockee en base et relue directement par le moteur.
   synchro SQL). Elle vit dans `pcorg_digests`. Champs d'entree exacts a confirmer au codage (`text`,
   `comment`, `text_full` present sur 30 478 fiches).
 - **Tache** : `pcorg_digest_nightly.py` + `.bat` (gabarit `alert_engine.bat`), tache planifiee
-  « Cockpit - Fiches structurees (nuit) » a 01:00, compte `l.arnault` (variables utilisateur). Fenetre
-  bornee : s'arrete seule a 06:00 (`DIGEST_END_HOUR`) et reprend la nuit suivante ; une fiche a la fois
+  (prevue ; realise : `pcorg_digest.bat --poll --night 23:00-07:00`, voir plus bas). Fenetre
+  bornee : s'arrete seule en fin de fenetre et reprend la nuit suivante ; une fiche a la fois
   (le GPU sert aussi au chat Alfred) ; verrou en base contre les chevauchements ; echec d'une fiche =
   `error` + `attempts`, retentee la nuit suivante (abandon apres 3) ; Ollama injoignable = arret propre.
   Journal `logs/pcorg_digest-AAAAMMJJ.log` avec le bilan (traitees, erreurs, duree, reste).
@@ -205,7 +205,7 @@ fiche, stockee en base et relue directement par le moteur.
   garde la gravite et la version JUGEES (`review.gravite_modele`, `review.prompt_version`) et la page mesure
   chaque version sur les fiches validees.
 - Lancement uniquement par la page (lots de 50 / 100) ou la fenetre de nuit, via la tache planifiee
-  « Cockpit - Fiches structurees » (`pcorg_digest.bat`, chaque minute, `--poll --night 01:00-06:00`).
+  « Cockpit - Fiches structurees » (`pcorg_digest.bat`, chaque minute, `--poll --night 23:00-07:00`, fenetre passee a 23:00-07:00 le 27/10/2026).
 - Consignes **v3** (27/10/2026), apres lecture d'un echantillon : 52 % de la base est le PC Surete (rondes,
   ouvertures / fermetures, prestations, alarmes) et 15 % des prises de service. Ajouts : `nature`
   (incident / routine / information) et `activite` ; blocs facultatifs `ronde` (horaires, points dans

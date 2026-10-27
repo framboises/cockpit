@@ -1024,7 +1024,7 @@
   function toggleNight(ev) {
     var on = ev.target.checked;
     apiPost("/api/gravite-fiches/night", { enabled: on }).then(function () {
-      toast("success", on ? "Traitement de nuit active (01:00 - 06:00)" : "Traitement de nuit coupe");
+      toast("success", on ? "Traitement de nuit active (23:00 - 07:00)" : "Traitement de nuit coupe");
     }).catch(function (e) {
       ev.target.checked = !on;
       toast("error", "Reglage non enregistre : " + e.message);
