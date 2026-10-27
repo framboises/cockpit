@@ -196,6 +196,10 @@
             <span class="material-symbols-outlined">biotech</span>
             <span class="label">Analyse Ops</span>
         </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('gravite_fiches')) %}<a href="/admin/gravite-fiches" class="{{ nav_class('/admin/gravite-fiches') }}" title="Gravite evaluee des fiches par le modele local, controle par sondage" data-nav-item>
+            <span class="material-symbols-outlined">priority_high</span>
+            <span class="label">Gravite des fiches</span>
+        </a>{% endif %}
         {% endset %}
         {{ nav_group('analyses', 'analytics', 'Analyses', _g_analyses) }}
 
@@ -228,10 +232,6 @@
         {% if _adm or (admin_page_allowed is defined and admin_page_allowed('itineraire')) %}<a href="/admin/itineraire" class="{{ nav_class('/admin/itineraire') }}" title="Moteur d'itineraire : saisons, epreuves, chargement des scenarios Valhalla" data-nav-item>
             <span class="material-symbols-outlined">alt_route</span>
             <span class="label">Moteur d'itineraire</span>
-        </a>{% endif %}
-        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('gravite_fiches')) %}<a href="/admin/gravite-fiches" class="{{ nav_class('/admin/gravite-fiches') }}" title="Gravite evaluee des fiches par le modele local, controle par sondage" data-nav-item>
-            <span class="material-symbols-outlined">priority_high</span>
-            <span class="label">Gravite des fiches</span>
         </a>{% endif %}
         {% if sidebar_routing_test and _adm %}<button type="button" class="nav-btn" id="routing-test-button" title="Test itineraire (bac a sable Valhalla)" data-nav-item>
             <span class="material-symbols-outlined">science</span>
