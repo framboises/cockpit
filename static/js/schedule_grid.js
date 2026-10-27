@@ -90,9 +90,12 @@
 
     var root = el("div", "sg");
     var modes = el("div", "sg-modes");
+    // UN nom de groupe pour les trois choix (un nom par bouton les rendait
+    // independants : impossible de revenir a "Selon le planning")
+    var modeGroup = "sg-mode-" + Math.random().toString(36).slice(2);
     [["schedule", "Selon le planning", "event_repeat"], ["always", "Tout le temps", "all_inclusive"], ["off", "En pause", "pause_circle"]].forEach(function (m) {
       var l = el("label", "sg-mode");
-      var r = document.createElement("input"); r.type = "radio"; r.name = "sg-mode-" + Math.random().toString(36).slice(2); r.value = m[0];
+      var r = document.createElement("input"); r.type = "radio"; r.name = modeGroup; r.value = m[0];
       r.checked = a.mode === m[0];
       r.addEventListener("change", function () { a.mode = m[0]; changed(); paint(); });
       l.appendChild(r); l.appendChild(icon(m[2])); l.appendChild(document.createTextNode(" " + m[1]));

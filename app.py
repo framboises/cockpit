@@ -7816,6 +7816,14 @@ def pcorg_set_urgency(doc_id):
     return jsonify({"ok": True, "entry": entry})
 
 
+# Issues proposees par la fenetre de cloture (memes codes que l'issue des
+# fiches structurees pcorg_digest : resolu, transmis, sans_suite)
+PCORG_CLOSE_ISSUES = {
+    "resolu": "Resolu", "transmis": "Transmis", "sans_suite": "Sans suite",
+    "fausse_alerte": "Fausse alerte", "doublon": "Doublon",
+}
+
+
 @app.route('/api/pcorg/close/<doc_id>', methods=['POST'])
 @role_required("user")
 def pcorg_close(doc_id):
@@ -7826,6 +7834,10 @@ def pcorg_close(doc_id):
     categorie de la fiche (verifie apres chargement, la categorie en depend)."""
     data = request.get_json(silent=True) or {}
     motif = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
+    # Fenetre de cloture (pcorg.js) : issue facultative, liberation de l'unite
+    # engagee (par defaut oui, comme avant)
+    issue = data.get("issue") if data.get("issue") in PCORG_CLOSE_ISSUES else None
+    release = data.get("release", True) is not False
     doc, err = _pcorg_load_for_write(
         doc_id, need_open=False,
         projection={"status_code": 1, "category": 1, "content_category": 1, "event": 1, "year": 1})
@@ -7839,18 +7851,22 @@ def pcorg_close(doc_id):
     user = request.user_payload
     operator_name = _pcorg_operator(user)
     now = datetime.now(ZoneInfo("Europe/Paris"))
-    text = "Statut: En cours -> Terminé" + (f"\n{motif}" if motif else "")
+    text = "Statut: En cours -> Terminé" + (f"\nIssue : {PCORG_CLOSE_ISSUES[issue]}" if issue else "") \
+        + (f"\n{motif}" if motif else "")
     entry = PH.make_entry(operator_name, text, ts=now)
+    sets = {
+        "close_ts": now,
+        "close_iso": now.isoformat(),
+        "status_code": 10,
+        "operator_close": operator_name,
+        "operator_id_close": user.get("email", ""),
+        "cockpit_status_at": now,
+    }
+    if issue:
+        sets["cloture"] = {"issue": issue, "bilan": motif or None}
     n = PH.append_entry(
         db["pcorg"], doc_id, entry,
-        set_fields={
-            "close_ts": now,
-            "close_iso": now.isoformat(),
-            "status_code": 10,
-            "operator_close": operator_name,
-            "operator_id_close": user.get("email", ""),
-            "cockpit_status_at": now,
-        },
+        set_fields=sets,
         owned={"status"}, inc_bounce=True, extra_filter=_PCORG_OPEN_FILTER,
     )
     if not n:
@@ -7858,7 +7874,9 @@ def pcorg_close(doc_id):
         return jsonify({"error": "introuvable ou deja clos"}), 404
 
     # Auto-disengage: reset tablet to "patrouille" when cockpit closes fiche
-    _disengage_field_device(doc, doc_id)
+    # (sauf si l'operateur l'a decoche dans la fenetre de cloture)
+    if release:
+        _disengage_field_device(doc, doc_id)
     DA.on_close(db, doc_id)
 
     return jsonify({"ok": True})

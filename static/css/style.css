@@ -16516,3 +16516,23 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .tlcat-icon.is-invalid { border-color: var(--danger); }
 .tlcat-add { display: flex; gap: 6px; margin-top: 8px; max-width: 520px; }
 .tlcat-add .form-input { flex: 1; height: 32px; font-size: 0.82rem; }
+
+/* Fenetre de cloture d'une fiche (pcorg.js closeIntervention) */
+.pcorg-close-overlay { position: fixed; inset: 0; z-index: 12000; background: rgba(15, 23, 42, .45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.pcorg-close-box { width: 100%; max-width: 560px; background: var(--card-bg, #fff); color: var(--text, #1e293b); border-radius: 14px; padding: 18px; box-shadow: 0 18px 50px rgba(0,0,0,.3); display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 32px); overflow-y: auto; box-sizing: border-box; }
+.pcorg-close-head { display: flex; align-items: center; gap: 8px; }
+.pcorg-close-head .material-symbols-outlined { color: #16a34a; font-size: 26px; }
+.pcorg-close-title { font-size: 18px; font-weight: 700; }
+.pcorg-close-sub { white-space: pre-line; font-size: 13px; color: var(--muted, #64748b); background: var(--bg-soft, #f8fafc); border-radius: 8px; padding: 8px 10px; }
+.pcorg-close-sub:empty { display: none; }
+.pcorg-close-lbl { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted, #64748b); }
+.pcorg-close-issues { display: flex; flex-wrap: wrap; gap: 6px; }
+.pcorg-close-issue { display: inline-flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border, #cbd5e1); background: var(--card-bg, #fff); color: inherit; font: inherit; font-size: 13.5px; cursor: pointer; }
+.pcorg-close-issue .material-symbols-outlined { font-size: 18px; }
+.pcorg-close-issue.on { background: #16a34a; border-color: #16a34a; color: #fff; }
+.pcorg-close-text { width: 100%; box-sizing: border-box; resize: vertical; min-height: 90px; }
+.pcorg-close-unit { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 8px 10px; border-radius: 8px; background: #fef3c7; color: #78350f; cursor: pointer; }
+.pcorg-close-unit[hidden] { display: none; }
+.pcorg-close-err { color: #b91c1c; font-size: 13px; }
+.pcorg-close-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.pcorg-close-ok { display: inline-flex; align-items: center; gap: 6px; }

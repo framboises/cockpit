@@ -1257,7 +1257,34 @@
   }
 
   var PLAN = null;   // {id, grid}
-  function planDirty() { $("pt-plan-dirty").textContent = "Modifications non enregistrees"; }
+  function planDirty() { $("pt-plan-dirty").textContent = "Modifications non enregistrees"; scheduleWhen(); }
+
+  // Etape 5 expliquee en clair (selon la regle de l'etape 3) et prochains
+  // departs recalcules a chaque modification
+  var whenTimer = null;
+  function scheduleWhen() { clearTimeout(whenTimer); whenTimer = setTimeout(updateWhen, 500); }
+  function updateWhen() {
+    var box = $("pt-plan-when");
+    if (!box || !PLAN || !PLAN.grid) return;
+    var rule = document.querySelector('input[name="pt-plan-rule"]:checked').value;
+    var every = Number($("pt-plan-every").value);
+    var mode = PLAN.grid.arming().mode;
+    clear(box);
+    var txt = mode === "off" ? "En pause : aucune patrouille ne part."
+      : mode === "always" ? (rule === "every" ? "Tout le temps : une patrouille part toutes les " + fmtEvery(every) + ", jour et nuit (a partir de minuit)."
+                                              : "Tout le temps : une seule patrouille au debut (choisissez plutot Toutes les ... a l'etape 3).")
+      : rule === "every" ? "Peignez ci-dessous les plages horaires (en couleur). Pendant chaque plage, une patrouille part toutes les " + fmtEvery(every) +
+          " a partir du debut de la plage. Ex. plage 08:00-12:00, toutes les 2 h : departs a 08:00 et 10:00."
+      : "Peignez ci-dessous les plages horaires (en couleur). Une patrouille part au DEBUT de chaque plage. Ex. plage 08:00-12:00 : un depart a 08:00.";
+    box.appendChild(el("div", "pt-hint", txt));
+    var nx = el("div", "pt-when-next", "Prochains departs : calcul...");
+    box.appendChild(nx);
+    apiPost("/api/patrols/plans/preview", planBody()).then(function (r) {
+      nx.textContent = (r.next || []).length
+        ? "Prochains departs : " + r.next.slice(0, 6).map(fmtWhen).join(", ")
+        : "Aucun depart dans les 14 prochains jours avec ce planning.";
+    }).catch(function () { nx.textContent = ""; });
+  }
 
   function fillPlanSelects() {
     var sc = $("pt-plan-sc");
@@ -1314,6 +1341,7 @@
     });
     $("pt-plan-dirty").textContent = "";
     $("pt-plan-modal").hidden = false;
+    updateWhen();
   }
 
   function closePlan() {

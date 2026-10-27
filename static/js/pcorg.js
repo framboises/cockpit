@@ -2983,30 +2983,129 @@
   // Le bilan deja tape dans "Consigner une action" pre-remplit le motif
   // (il etait perdu : la boite partait vide puis la fiche se fermait).
   var closingIds = {};
+  // Fenetre de cloture : issue, bilan (pre-rempli par le brouillon de
+  // "Consigner une action"), liberation de l'unite engagee, resume de la
+  // fiche (duree, nombre d'actions). Ctrl+Entree clot, Echap annule.
+  var CLOSE_ISSUES = [
+    ["resolu", "Resolu", "task_alt"], ["transmis", "Transmis", "forward"], ["sans_suite", "Sans suite", "do_not_disturb_on"],
+    ["fausse_alerte", "Fausse alerte", "notifications_off"], ["doublon", "Doublon", "content_copy"],
+  ];
   function closeIntervention(id) {
     if (closingIds[id]) return;   // double clic : une seule boite
     closingIds[id] = true;
-    showPromptToast("Clore cette intervention ? Motif / bilan (facultatif, Ctrl+Entree pour clore)",
-      { okLabel: "Clore", cancelLabel: "Annuler", type: "warning", multiline: true,
-        defaultValue: ficheDrafts[id] || "" }).then(function (motif) {
-      if (motif === null) { delete closingIds[id]; return; }
-      apiCall("POST", "/api/pcorg/close/" + encodeURIComponent(id), { comment: (motif || "").trim() })
+    var issue = null;
+    var ov = mkEl("div", "pcorg-close-overlay");
+    var box = mkEl("div", "pcorg-close-box");
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    var h = mkEl("div", "pcorg-close-head");
+    h.appendChild(matIcon("task_alt"));
+    var ht = mkEl("div", "pcorg-close-title"); ht.textContent = "Clore la fiche"; h.appendChild(ht);
+    box.appendChild(h);
+    var sub = mkEl("div", "pcorg-close-sub"); sub.textContent = "Chargement..."; box.appendChild(sub);
+
+    var lblI = mkEl("div", "pcorg-close-lbl"); lblI.textContent = "Issue"; box.appendChild(lblI);
+    var chips = mkEl("div", "pcorg-close-issues");
+    CLOSE_ISSUES.forEach(function (it) {
+      var b = mkEl("button", "pcorg-close-issue");
+      b.type = "button";
+      b.appendChild(matIcon(it[2]));
+      var t = mkEl("span", ""); t.textContent = it[1]; b.appendChild(t);
+      b.addEventListener("click", function () {
+        issue = issue === it[0] ? null : it[0];
+        Array.prototype.forEach.call(chips.children, function (c) { c.classList.remove("on"); });
+        if (issue) b.classList.add("on");
+      });
+      chips.appendChild(b);
+    });
+    box.appendChild(chips);
+
+    var lblB = mkEl("div", "pcorg-close-lbl"); lblB.textContent = "Bilan (facultatif)"; box.appendChild(lblB);
+    var ta = mkEl("textarea", "form-input pcorg-close-text");
+    ta.rows = 4;
+    ta.placeholder = "Ce qui a ete fait, suites eventuelles...";
+    ta.value = ficheDrafts[id] || "";
+    box.appendChild(ta);
+
+    var unitRow = mkEl("label", "pcorg-close-unit");
+    unitRow.hidden = true;
+    var unitCb = mkEl("input", ""); unitCb.type = "checkbox"; unitCb.checked = true;
+    var unitTxt = mkEl("span", "");
+    unitRow.appendChild(unitCb); unitRow.appendChild(unitTxt);
+    box.appendChild(unitRow);
+
+    var err = mkEl("div", "pcorg-close-err"); err.hidden = true; box.appendChild(err);
+    var acts = mkEl("div", "pcorg-close-actions");
+    var bCancel = mkEl("button", "btn"); bCancel.type = "button"; bCancel.textContent = "Annuler";
+    var bOk = mkEl("button", "btn btn-primary pcorg-close-ok"); bOk.type = "button";
+    bOk.appendChild(matIcon("task_alt"));
+    var okT = mkEl("span", ""); okT.textContent = "Clore la fiche"; bOk.appendChild(okT);
+    acts.appendChild(bCancel); acts.appendChild(bOk);
+    box.appendChild(acts);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    setTimeout(function () { ta.focus(); }, 30);
+
+    function close() {
+      delete closingIds[id];
+      document.removeEventListener("keydown", onKey, true);
+      ov.remove();
+    }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); }
+    }
+    document.addEventListener("keydown", onKey, true);
+    ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
+    bCancel.addEventListener("click", close);
+    // Brouillon garde pendant la saisie (annuler ne perd rien)
+    ta.addEventListener("input", function () { ficheDrafts[id] = ta.value; });
+
+    // Resume de la fiche et unite engagee
+    fetch("/api/pcorg/detail/" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || d.error) { sub.textContent = ""; return; }
+      var cc = d.content_category || {};
+      var parts = [shortCat(d.category) + (cc.sous_classification ? " - " + cc.sous_classification : "")];
+      if (d.ts) {
+        var mins = Math.max(0, Math.round((Date.now() - new Date(d.ts).getTime()) / 60000));
+        parts.push("ouverte depuis " + (mins < 60 ? mins + " min" : Math.floor(mins / 60) + " h " + _pad2(mins % 60)));
+      }
+      var n = (d.comment_history || []).length;
+      parts.push(n + " action" + (n > 1 ? "s" : "") + " consignee" + (n > 1 ? "s" : ""));
+      sub.textContent = (d.text || "").slice(0, 140) + "\n" + parts.join(" - ");
+      if (cc.patrouille) {
+        var dev = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(cc.patrouille) : null;
+        var stl = dev ? _resolveDeviceStatus(dev.device) : null;
+        unitTxt.textContent = "Liberer " + cc.patrouille + (stl ? " (" + stl.label.toLowerCase() + ")" : "") + " : redevient disponible";
+        unitRow.hidden = false;
+      }
+    }).catch(function () { sub.textContent = ""; });
+
+    function submit() {
+      if (bOk.disabled) return;
+      bOk.disabled = true;
+      err.hidden = true;
+      apiCall("POST", "/api/pcorg/close/" + encodeURIComponent(id),
+              { comment: (ta.value || "").trim(), issue: issue, release: unitRow.hidden ? true : unitCb.checked })
         .then(function (r) {
-          delete closingIds[id];
           if (r.ok) {
+            close();
             delete ficheDrafts[id];
             hideFiche();
             removePin(id);
-            showToast("success", "Intervention cloturee");
+            showToast("success", "Fiche close" + (issue ? " (" + CLOSE_ISSUES.filter(function (x) { return x[0] === issue; })[0][1].toLowerCase() + ")" : ""));
             refresh();
           } else {
-            showToast("error", r.error || "Erreur");
+            bOk.disabled = false;
+            err.textContent = r.error || "Erreur";
+            err.hidden = false;
             // Fiche close ou modifiee ailleurs entre-temps : etat a jour
             refresh();
             reloadFiche(id);
           }
         });
-    });
+    }
+    bOk.addEventListener("click", submit);
   }
 
   function reopenIntervention(id) {
