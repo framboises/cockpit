@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <script src="{{ url_for('static', filename='js/session_portail.js') }}"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>COCKPIT &mdash; Patrouilles</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/patrouilles.css') }}?v={{ asset_v }}">
+</head>
+
+<body>
+<div class="app-layout">
+
+    {% set sidebar_active = '/patrouilles' %}
+    {% include '_sidebar.html' %}
+
+    <div class="app-main single-col-page">
+
+        <header class="app-header">
+            <div class="header-event-info">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">route</span>
+                <span class="header-event-name">Patrouilles</span>
+                <span class="header-event-year" style="opacity:.6;">tablettes Field</span>
+            </div>
+            <div class="header-spacer"></div>
+            <div class="header-actions" style="gap:10px;">
+                <button class="btn btn-primary" id="pt-refresh">
+                    <span class="material-symbols-outlined" style="font-size:17px;vertical-align:middle;">refresh</span> Actualiser
+                </button>
+            </div>
+        </header>
+
+        <div id="main-content" class="pt-main">
+            <nav class="pt-tabs" id="pt-tabs">
+                <button type="button" data-tab="suivi" class="active"><span class="material-symbols-outlined">monitoring</span> Suivi</button>
+                <button type="button" data-tab="scenarios"><span class="material-symbols-outlined">route</span> Scenarios</button>
+                <button type="button" data-tab="points"><span class="material-symbols-outlined">location_on</span> Points</button>
+                <button type="button" data-tab="tablettes"><span class="material-symbols-outlined">tablet_android</span> Tablettes</button>
+                <button type="button" data-tab="historique"><span class="material-symbols-outlined">history</span> Historique</button>
+                <button type="button" data-tab="reglages"><span class="material-symbols-outlined">tune</span> Reglages</button>
+            </nav>
+
+            <div class="pt-layout">
+                <section class="pt-panel" id="pt-panel">
+                    <!-- Suivi -->
+                    <div class="pt-tab" data-tab="suivi">
+                        <div class="pt-hint">Patrouilles proposees et en cours, et celles des 18 dernieres heures. Rafraichi toutes les 10 s.</div>
+                        <div id="pt-live"></div>
+                    </div>
+
+                    <!-- Scenarios -->
+                    <div class="pt-tab" data-tab="scenarios" hidden>
+                        <div class="pt-row">
+                            <button type="button" class="btn btn-primary" id="pt-sc-new"><span class="material-symbols-outlined">add</span> Nouveau scenario</button>
+                            <label class="pt-check"><input type="checkbox" id="pt-sc-archived"> Archives</label>
+                        </div>
+                        <div id="pt-sc-list" class="pt-list"></div>
+                        <div id="pt-sc-editor" class="pt-editor" hidden>
+                            <div class="pt-editor-head">
+                                <input type="text" id="pt-sc-name" class="pt-input" placeholder="Nom du scenario" maxlength="80">
+                                <input type="color" id="pt-sc-color" value="#2563eb" title="Couleur">
+                            </div>
+                            <div class="pt-row">
+                                <label class="pt-radio"><input type="radio" name="pt-sc-travel" value="vehicle" checked> <span class="material-symbols-outlined">directions_car</span> Vehicule</label>
+                                <label class="pt-radio"><input type="radio" name="pt-sc-travel" value="pedestrian"> <span class="material-symbols-outlined">directions_walk</span> A pied</label>
+                                <label class="pt-check"><input type="checkbox" id="pt-sc-loop"> Boucle (retour au depart)</label>
+                            </div>
+                            <label class="pt-hint">Dominante
+                                <select id="pt-sc-dominante" class="pt-input"></select>
+                            </label>
+                            <div class="pt-hint">Cliquez les points sur la carte (ou dans la liste ci-dessous) pour les ajouter dans l'ordre. Glissez pour reordonner.</div>
+                            <ol id="pt-sc-points" class="pt-steps"></ol>
+                            <div class="pt-row">
+                                <select id="pt-sc-add" class="pt-input"><option value="">+ Ajouter un point...</option></select>
+                            </div>
+                            <div id="pt-sc-estimate" class="pt-estimate">-</div>
+                            <div id="pt-sc-zone" class="pt-hint"></div>
+                            <textarea id="pt-sc-note" class="pt-input" rows="2" maxlength="500" placeholder="Note (consigne generale, facultatif)"></textarea>
+                            <div class="pt-row pt-actions">
+                                <button type="button" class="btn" id="pt-sc-optimize" title="Propose l'ordre le plus court (le premier point reste le depart)"><span class="material-symbols-outlined">auto_fix_high</span> Optimiser</button>
+                                <span class="pt-spacer"></span>
+                                <button type="button" class="btn" id="pt-sc-cancel">Fermer</button>
+                                <button type="button" class="btn btn-primary" id="pt-sc-save"><span class="material-symbols-outlined">save</span> Enregistrer</button>
+                            </div>
+                            <div class="pt-row pt-actions" id="pt-sc-more">
+                                <button type="button" class="btn" id="pt-sc-send"><span class="material-symbols-outlined">send</span> Envoyer maintenant</button>
+                                <span class="pt-spacer"></span>
+                                <button type="button" class="btn pt-danger" id="pt-sc-archive">Archiver</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Points -->
+                    <div class="pt-tab" data-tab="points" hidden>
+                        <div class="pt-hint">Cliquez sur la carte pour creer un point a cet endroit. Un point peut servir a plusieurs scenarios.</div>
+                        <div class="pt-row">
+                            <input type="search" id="pt-pt-search" class="pt-input" placeholder="Rechercher un point">
+                            <label class="pt-check"><input type="checkbox" id="pt-pt-inactive"> Desactives</label>
+                        </div>
+                        <div id="pt-pt-list" class="pt-list"></div>
+                        <div id="pt-pt-editor" class="pt-editor" hidden>
+                            <input type="text" id="pt-pt-name" class="pt-input" placeholder="Nom du point" maxlength="80">
+                            <div class="pt-hint" id="pt-pt-pos"></div>
+                            <div class="pt-grid2">
+                                <label>Rayon de validation (m)<input type="number" id="pt-pt-radius" class="pt-input" min="5" max="300"></label>
+                                <label>Arret minimal (s)<input type="number" id="pt-pt-dwell" class="pt-input" min="0" max="3600" value="0"></label>
+                            </div>
+                            <textarea id="pt-pt-instruction" class="pt-input" rows="3" maxlength="500" placeholder="Consigne au point (affichee a l'agent)"></textarea>
+                            <label class="pt-check"><input type="checkbox" id="pt-pt-photo"> Photo exigee pour valider le point</label>
+                            <div class="pt-hint" id="pt-pt-zones"></div>
+                            <div class="pt-row pt-actions">
+                                <button type="button" class="btn pt-danger" id="pt-pt-toggle">Desactiver</button>
+                                <span class="pt-spacer"></span>
+                                <button type="button" class="btn" id="pt-pt-cancel">Fermer</button>
+                                <button type="button" class="btn btn-primary" id="pt-pt-save"><span class="material-symbols-outlined">save</span> Enregistrer</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tablettes -->
+                    <div class="pt-tab" data-tab="tablettes" hidden>
+                        <div class="pt-hint">Zone de competence de chaque tablette (couche de zones de la prise de poste). Aucune zone = partout. Une patrouille ne part que vers une tablette dont la zone couvre tous ses points.</div>
+                        <div id="pt-dev-list" class="pt-list"></div>
+                    </div>
+
+                    <!-- Historique -->
+                    <div class="pt-tab" data-tab="historique" hidden>
+                        <div class="pt-row">
+                            <select id="pt-hist-days" class="pt-input">
+                                <option value="7">7 jours</option><option value="30" selected>30 jours</option>
+                                <option value="90">90 jours</option><option value="365">1 an</option>
+                            </select>
+                            <select id="pt-hist-sc" class="pt-input"><option value="">Tous les scenarios</option></select>
+                        </div>
+                        <div id="pt-hist-stats"></div>
+                        <div id="pt-hist-list" class="pt-list"></div>
+                    </div>
+
+                    <!-- Reglages -->
+                    <div class="pt-tab" data-tab="reglages" hidden>
+                        <div class="pt-grid2">
+                            <label>Rayon par defaut d'un nouveau point (m)<input type="number" id="pt-set-radius" class="pt-input" min="5" max="300"></label>
+                            <label>Delai de reponse a une proposition (s)<input type="number" id="pt-set-timeout" class="pt-input" min="30" max="900"></label>
+                            <label>Tablette vue recemment (min)<input type="number" id="pt-set-seen" class="pt-input" min="1" max="120"></label>
+                        </div>
+                        <div class="pt-row pt-actions"><span class="pt-spacer"></span>
+                            <button type="button" class="btn btn-primary" id="pt-set-save"><span class="material-symbols-outlined">save</span> Enregistrer</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="pt-map-wrap">
+                    <div id="pt-map"></div>
+                    <label class="pt-map-zones"><input type="checkbox" id="pt-show-zones"> Zones de competence</label>
+                </section>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Envoyer maintenant -->
+<div class="pt-modal" id="pt-send-modal" hidden>
+    <div class="pt-modal-box">
+        <h3><span class="material-symbols-outlined">send</span> Envoyer la patrouille</h3>
+        <div class="pt-hint" id="pt-send-sc"></div>
+        <label class="pt-radio"><input type="radio" name="pt-send-kind" value="group" checked> Premiere tablette disponible d'un groupe</label>
+        <select id="pt-send-group" class="pt-input"></select>
+        <label class="pt-radio"><input type="radio" name="pt-send-kind" value="device"> Une tablette precise</label>
+        <select id="pt-send-device" class="pt-input"></select>
+        <div id="pt-send-result" class="pt-send-result" hidden></div>
+        <div class="pt-row pt-actions"><span class="pt-spacer"></span>
+            <button type="button" class="btn" id="pt-send-close">Fermer</button>
+            <button type="button" class="btn btn-primary" id="pt-send-go"><span class="material-symbols-outlined">send</span> Envoyer</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/patrouilles.js') }}?v={{ asset_v }}"></script>
+<script>
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
+</body>
+</html>

@@ -261,9 +261,14 @@ def _device_metiers_ok(device, metier):
 
 
 def _proposal_pending(device, now):
-    pp = device.get("pending_proposal") or {}
-    exp = _aware(pp.get("expires_at"))
-    return bool(pp.get("fiche_id")) and isinstance(exp, datetime) and exp + timedelta(seconds=ANSWER_GRACE_S) > now
+    """Proposition en attente : fiche (`pending_proposal`) ou patrouille
+    programmee (`patrol_proposal`, patrols.py). Une seule a la fois."""
+    for key, ref in (("pending_proposal", "fiche_id"), ("patrol_proposal", "run_id")):
+        pp = device.get(key) or {}
+        exp = _aware(pp.get("expires_at"))
+        if pp.get(ref) and isinstance(exp, datetime) and exp + timedelta(seconds=ANSWER_GRACE_S) > now:
+            return True
+    return False
 
 
 def find_candidates(db, fiche, exclude_ids=(), now=None):
@@ -462,10 +467,16 @@ def propose_next(db, fiche_id, now=None):
     for c in candidates:
         dev = c["device"]
         # Reservation atomique de l'unite : une seule proposition a la fois.
+        stale = now - timedelta(seconds=ANSWER_GRACE_S)
         r = db["field_devices"].update_one(
             {"_id": dev["_id"], "status": {"$in": ["patrouille", None]},
-             "$or": [{"pending_proposal": None},
-                     {"pending_proposal.expires_at": {"$lt": now - timedelta(seconds=ANSWER_GRACE_S)}}]},
+             "$and": [
+                 {"$or": [{"pending_proposal": None},
+                          {"pending_proposal.expires_at": {"$lt": stale}}]},
+                 # Proposition de patrouille en attente (patrols.py) : une seule a la fois
+                 {"$or": [{"patrol_proposal": None},
+                          {"patrol_proposal.expires_at": {"$lt": stale}}]},
+             ]},
             {"$set": {"pending_proposal": {"fiche_id": fiche_id, "proposed_at": now, "expires_at": expires}}},
         )
         if r.modified_count:

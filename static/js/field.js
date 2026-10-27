@@ -761,6 +761,7 @@
     var latlng = [pos.coords.latitude, pos.coords.longitude];
     renderMeMarker(latlng, pos.coords.accuracy);
     maybePushPosition(pos);
+    try { checkPatrolProximity(latlng, pos.coords.accuracy); } catch (e) { /* jamais bloquant */ }
   }
 
   function onGpsError(err) {
@@ -3598,6 +3599,9 @@
         if (data.hasOwnProperty("route_piste")) state.routePiste = !!data.route_piste;
         state.selfClose = !!data.self_close;
         if (data.hasOwnProperty("proposal")) handleProposal(data.proposal);
+        // Patrouille programmee : proposition puis carte de suivi (patrols.py)
+        if (data.hasOwnProperty("patrol_proposal")) handlePatrolProposal(data.patrol_proposal);
+        if (data.hasOwnProperty("patrol")) handlePatrol(data.patrol);
         renderFiches();
         updateMissionsBadge();
         var mPanel = $("missions-panel");
@@ -3932,6 +3936,505 @@
   function _fmtDistance(m) {
     if (m == null) return "";
     return m < 1000 ? (m + " m") : ((m / 1000).toFixed(1) + " km");
+  }
+
+  // ---------------------------------------------------------------------
+  // Patrouilles programmees (patrols.py, /field/patrol/*). Proposition avec
+  // compte a rebours (Accepter / Refuser), puis carte flottante : prochain
+  // point, consigne, "Point fait" / "Passer", itineraire vers le point.
+  // Validation automatique au passage GPS a moins du rayon du point (apres
+  // l'arret minimal eventuel) ; photo exigee = demande de photo au lieu de
+  // la validation. Points faits idempotents cote serveur : file hors ligne.
+  // ---------------------------------------------------------------------
+  var _pp = { id: null, overlay: null, timer: null, deadline: 0, answered: false };
+  var _patrol = { run: null, layer: null, near: null, sent: {}, routeFor: null, collapsed: false, asking: null };
+
+  function closePatrolProposal() {
+    if (_pp.timer) { clearInterval(_pp.timer); _pp.timer = null; }
+    if (_pp.overlay) { try { _pp.overlay.remove(); } catch (e) {} }
+    _pp.overlay = null;
+  }
+
+  function handlePatrolProposal(p) {
+    if (!p) {
+      if (_pp.id && _pp.overlay && !_pp.answered) toast("Patrouille proposee a une autre tablette", "warn");
+      closePatrolProposal();
+      _pp.id = null;
+      return;
+    }
+    if (p.run_id === _pp.id && _pp.overlay) return;
+    closePatrolProposal();
+    _pp.id = p.run_id;
+    _pp.answered = false;
+    _pp.deadline = Date.now() + (Number(p.remaining_s) || 0) * 1000;
+    showPatrolProposal(p);
+  }
+
+  function showPatrolProposal(p) {
+    var color = "#22c55e";
+    var overlay = document.createElement("div");
+    overlay.className = "dispatch-alert-overlay";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Patrouille proposee");
+    var box = document.createElement("div");
+    box.className = "dispatch-alert-box";
+    box.style.borderColor = color;
+    var header = document.createElement("div");
+    header.className = "dispatch-alert-header";
+    header.style.background = "linear-gradient(135deg, " + color + "cc, " + color + "88)";
+    var ic = _mkIcon(p.travel === "pedestrian" ? "directions_walk" : "route");
+    ic.classList.add("dispatch-alert-icon");
+    header.appendChild(ic);
+    var title = document.createElement("div");
+    title.className = "dispatch-alert-title";
+    title.textContent = "Patrouille proposee";
+    header.appendChild(title);
+    box.appendChild(header);
+
+    var bodyEl = document.createElement("div");
+    bodyEl.className = "dispatch-alert-body";
+    var descEl = document.createElement("div");
+    descEl.className = "dispatch-alert-desc";
+    descEl.textContent = p.name || "Patrouille";
+    bodyEl.appendChild(descEl);
+    var infos = document.createElement("div");
+    infos.className = "dispatch-alert-infos";
+    var n = (p.points || []).length;
+    infos.appendChild(_mkInfoRow("location_on", n + " point" + (n > 1 ? "s" : "") + (p.loop ? ", retour au depart" : "")));
+    if (p.distance_m) infos.appendChild(_mkInfoRow(p.travel === "pedestrian" ? "directions_walk" : "directions_car",
+      _fmtDistance(p.distance_m) + (p.duration_s ? ", environ " + Math.round(p.duration_s / 60) + " min" : "")));
+    if (p.distance_to_start_m != null) infos.appendChild(_mkInfoRow("near_me", "Depart a " + _fmtDistance(p.distance_to_start_m) + " de vous"));
+    bodyEl.appendChild(infos);
+    var list = document.createElement("div");
+    list.className = "patrol-prop-points";
+    list.textContent = (p.points || []).map(function (x, i) { return (i + 1) + ". " + x; }).join("  ");
+    bodyEl.appendChild(list);
+
+    var cd = document.createElement("div");
+    cd.style.cssText = "margin-top:12px;";
+    var cdText = document.createElement("div");
+    cdText.style.cssText = "font-size:15px;font-weight:700;text-align:center;margin-bottom:6px;";
+    var cdTrack = document.createElement("div");
+    cdTrack.style.cssText = "height:8px;border-radius:4px;background:rgba(148,163,184,.25);overflow:hidden;";
+    var cdBar = document.createElement("div");
+    cdBar.style.cssText = "height:100%;width:100%;background:" + color + ";transition:width .9s linear;";
+    cdTrack.appendChild(cdBar);
+    cd.appendChild(cdText);
+    cd.appendChild(cdTrack);
+    bodyEl.appendChild(cd);
+    box.appendChild(bodyEl);
+
+    var actions = document.createElement("div");
+    actions.className = "dispatch-alert-actions";
+    var btnAccept = document.createElement("button");
+    btnAccept.className = "dispatch-alert-btn dispatch-btn-engage";
+    btnAccept.style.background = "#16a34a";
+    btnAccept.appendChild(_mkIcon("check_circle"));
+    btnAccept.appendChild(document.createTextNode(" Accepter"));
+    var btnRefuse = document.createElement("button");
+    btnRefuse.className = "dispatch-alert-btn dispatch-btn-detail";
+    btnRefuse.appendChild(_mkIcon("close"));
+    btnRefuse.appendChild(document.createTextNode(" Refuser"));
+    actions.appendChild(btnAccept);
+    actions.appendChild(btnRefuse);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    _pp.overlay = overlay;
+
+    var total = Math.max(1, _pp.deadline - Date.now());
+    function tick() {
+      var left = Math.max(0, _pp.deadline - Date.now());
+      cdText.textContent = "Reponse attendue : " + Math.ceil(left / 1000) + " s";
+      cdBar.style.width = Math.round(100 * left / total) + "%";
+      if (left <= 0) { cdText.textContent = "Delai depasse"; btnAccept.disabled = true; pollFiches(); }
+    }
+    tick();
+    _pp.timer = setInterval(tick, 1000);
+    playDispatchAlarm();
+    try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
+    bumpActivity();
+
+    function answer(kind) {
+      btnAccept.disabled = true;
+      btnRefuse.disabled = true;
+      _pp.answered = true;
+      fetchWithTimeout("/field/patrol/" + encodeURIComponent(p.run_id) + "/" + kind, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      }, 10000).then(function (r) {
+        if (r.status === 401) { handleSessionLost(); return null; }
+        return r.json().catch(function () { return { ok: r.ok }; });
+      }).then(function (data) {
+        if (!data) return;
+        closePatrolProposal();
+        if (kind === "accept") {
+          if (data.ok) { toast("Patrouille acceptee", "ok"); _patrol.routeFor = null; }
+          else toast(data.error === "unite_occupee" ? "Vous etes deja engage" : "Proposition expiree", "warn");
+        } else {
+          toast("Patrouille refusee", "ok");
+        }
+        pollFiches();
+      }).catch(function () {
+        _pp.answered = false;
+        btnAccept.disabled = Date.now() >= _pp.deadline;
+        btnRefuse.disabled = false;
+        toast("Pas de reseau, reessayez", "err");
+      });
+    }
+    btnAccept.addEventListener("click", function () { answer("accept"); });
+    btnRefuse.addEventListener("click", function () { answer("refuse"); });
+  }
+
+  function patrolNextStep() {
+    var run = _patrol.run;
+    if (!run) return null;
+    for (var i = 0; i < run.steps.length; i++) {
+      var s = run.steps[i];
+      if (s.state === "pending" && !_patrol.sent[s.point_id]) return { step: s, index: i };
+    }
+    return null;
+  }
+
+  function handlePatrol(run) {
+    var prevId = _patrol.run ? _patrol.run.run_id : null;
+    if (!run) {
+      if (prevId) {
+        toast("Patrouille terminee", "ok");
+        if (_patrol.routeFor) { clearRoute(); _patrol.routeFor = null; }
+      }
+      _patrol.run = null;
+      _patrol.sent = {};
+      _patrol.near = null;
+      renderPatrol();
+      return;
+    }
+    if (run.run_id !== prevId) { _patrol.sent = {}; _patrol.routeFor = null; }
+    // Reprise apres une intervention : l'itineraire de la fiche a remplace
+    // celui de la patrouille, on le recalcule vers le prochain point.
+    if (_patrol.run && _patrol.run.run_id === run.run_id && _patrol.run.state === "paused" && run.state === "running") {
+      _patrol.routeFor = null;
+    }
+    // Un point valide localement reste "envoye" tant que le serveur ne l'a pas vu
+    run.steps.forEach(function (s) { if (s.state !== "pending") delete _patrol.sent[s.point_id]; });
+    _patrol.run = run;
+    renderPatrol();
+    var nx = patrolNextStep();
+    if (run.state === "running" && nx && _patrol.routeFor !== nx.step.point_id) routeToPatrolPoint(nx.step);
+  }
+
+  function renderPatrol() {
+    var card = $("patrol-card");
+    if (!card) return;
+    if (_patrol.layer) { state.map.removeLayer(_patrol.layer); _patrol.layer = null; }
+    var run = _patrol.run;
+    if (!run) { card.hidden = true; card.textContent = ""; return; }
+    var nx = patrolNextStep();
+    var doneCount = run.steps.filter(function (s) { return s.state !== "pending" || _patrol.sent[s.point_id]; }).length;
+
+    // Points sur la carte
+    var layer = L.layerGroup();
+    if (run.polyline) {
+      L.polyline(_decodePolyline6(run.polyline), { color: run.color || "#22c55e", weight: 3, opacity: 0.45, dashArray: "4 8", interactive: false }).addTo(layer);
+    }
+    run.steps.forEach(function (s, i) {
+      if (s.lat == null) return;
+      var st = _patrol.sent[s.point_id] ? "done" : s.state;
+      var col = { pending: "#64748b", done: "#16a34a", skipped: "#f59e0b", missed: "#dc2626" }[st] || "#64748b";
+      var isNext = nx && nx.step.point_id === s.point_id;
+      if (isNext) col = "#22c55e";
+      L.marker([s.lat, s.lng], {
+        icon: L.divIcon({ className: "patrol-num-marker" + (isNext ? " next" : ""),
+                          html: "<span style='background:" + col + "'>" + (i + 1) + "</span>",
+                          iconSize: isNext ? [32, 32] : [26, 26], iconAnchor: isNext ? [16, 16] : [13, 13] }),
+        interactive: false, zIndexOffset: isNext ? 900 : 800,
+      }).addTo(layer);
+      if (isNext && s.radius_m) L.circle([s.lat, s.lng], { radius: s.radius_m, color: "#22c55e", weight: 2, fillOpacity: 0.1, interactive: false }).addTo(layer);
+    });
+    layer.addTo(state.map);
+    _patrol.layer = layer;
+
+    // Carte flottante
+    card.textContent = "";
+    card.hidden = false;
+    card.classList.toggle("paused", run.state === "paused");
+    var head = document.createElement("div");
+    head.className = "patrol-head";
+    head.appendChild(_mkIcon(run.state === "paused" ? "pause_circle" : (run.travel === "pedestrian" ? "directions_walk" : "route")));
+    var t = document.createElement("div");
+    t.className = "patrol-title";
+    t.textContent = "Patrouille : " + (run.name || "");
+    head.appendChild(t);
+    var cnt = document.createElement("span");
+    cnt.className = "patrol-count";
+    cnt.textContent = doneCount + "/" + run.steps.length;
+    head.appendChild(cnt);
+    var tg = document.createElement("button");
+    tg.className = "patrol-toggle";
+    tg.setAttribute("aria-label", _patrol.collapsed ? "Deplier" : "Replier");
+    tg.appendChild(_mkIcon(_patrol.collapsed ? "expand_less" : "expand_more"));
+    tg.addEventListener("click", function () { _patrol.collapsed = !_patrol.collapsed; renderPatrol(); });
+    head.appendChild(tg);
+    card.appendChild(head);
+    if (_patrol.collapsed) return;
+
+    if (run.state === "paused") {
+      var pm = document.createElement("div");
+      pm.className = "patrol-paused-msg";
+      pm.textContent = "En pause pendant votre intervention. Reprise au prochain point quand vous repasserez disponible.";
+      card.appendChild(pm);
+    }
+    if (nx) {
+      var nEl = document.createElement("div");
+      nEl.className = "patrol-next";
+      nEl.textContent = "Point " + (nx.index + 1) + " : " + nx.step.name;
+      var sm = document.createElement("small");
+      var dist = state.meMarker ? Math.round(haversine([state.meMarker.getLatLng().lat, state.meMarker.getLatLng().lng], [nx.step.lat, nx.step.lng])) : null;
+      sm.textContent = (dist != null ? "a " + _fmtDistance(dist) : "") + (nx.step.photo_required ? " - photo exigee" : "") +
+        " - valide automatiquement a moins de " + nx.step.radius_m + " m";
+      nEl.appendChild(sm);
+      card.appendChild(nEl);
+      if (nx.step.instruction) {
+        var ins = document.createElement("div");
+        ins.className = "patrol-instr";
+        ins.textContent = nx.step.instruction;
+        card.appendChild(ins);
+      }
+    } else {
+      var all = document.createElement("div");
+      all.className = "patrol-next";
+      all.textContent = "Tous les points sont faits : envoi en cours";
+      card.appendChild(all);
+    }
+
+    var acts = document.createElement("div");
+    acts.className = "patrol-actions";
+    function btn(cls, iconName, label, fn, disabled) {
+      var b = document.createElement("button");
+      if (cls) b.className = cls;
+      b.appendChild(_mkIcon(iconName));
+      b.appendChild(document.createTextNode(" " + label));
+      b.disabled = !!disabled;
+      b.addEventListener("click", fn);
+      acts.appendChild(b);
+      return b;
+    }
+    if (nx && run.state === "running") {
+      btn("patrol-done", nx.step.photo_required ? "photo_camera" : "check_circle", nx.step.photo_required ? "Photo + fait" : "Point fait",
+          function () { patrolDone(nx.step, "manual"); });
+      btn("", "directions", "Itineraire", function () { _patrol.routeFor = null; routeToPatrolPoint(nx.step, true); });
+      btn("", "skip_next", "Passer", function () { patrolSkip(nx.step); });
+    }
+    btn("", "flag", nx ? "Terminer" : "Fermer", function () { patrolFinish(); });
+    card.appendChild(acts);
+
+    var ol = document.createElement("ol");
+    ol.className = "patrol-steps";
+    run.steps.forEach(function (s, i) {
+      var li = document.createElement("li");
+      var st = _patrol.sent[s.point_id] ? "done" : s.state;
+      li.className = st + (nx && nx.step.point_id === s.point_id ? " next" : "");
+      var num = document.createElement("span");
+      num.className = "num";
+      num.textContent = String(i + 1);
+      li.appendChild(num);
+      li.appendChild(document.createTextNode(s.name));
+      var at = document.createElement("span");
+      at.className = "at";
+      at.textContent = s.at ? new Date(s.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+                            : (_patrol.sent[s.point_id] ? "envoi..." : (st === "skipped" ? "passe" : ""));
+      li.appendChild(at);
+      ol.appendChild(li);
+    });
+    card.appendChild(ol);
+  }
+
+  function routeToPatrolPoint(step, manual) {
+    if (!_patrol.run || !step) return;
+    var latlng = [step.lat, step.lng];
+    _patrol.routeFor = step.point_id;
+    if (!state.meMarker || !navigator.onLine) {
+      setRouteDestination(latlng, null, false, null);
+      return;
+    }
+    var me = state.meMarker.getLatLng();
+    fetchWithTimeout("/field/patrol/" + encodeURIComponent(_patrol.run.run_id) + "/route", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: [me.lat, me.lng], point_id: step.point_id }),
+    }, 12000).then(function (r) { return r.json(); }).then(function (d) {
+      if (!_patrol.run || _patrol.routeFor !== step.point_id) return;
+      setRouteDestination(latlng, d && d.ok ? d.polyline : null, false, null);
+      if (manual && d && d.ok) toast("Itineraire : " + _fmtDistance(d.distance_m) + ", " + Math.max(1, Math.round(d.duration_s / 60)) + " min", "ok");
+    }).catch(function () { setRouteDestination(latlng, null, false, null); });
+  }
+
+  function patrolPost(step, body, label) {
+    var run = _patrol.run;
+    _patrol.sent[step.point_id] = true;
+    renderPatrol();
+    return queuedJsonPost("/field/patrol/" + encodeURIComponent(run.run_id) + "/step",
+      Object.assign({ point_id: step.point_id, at: Date.now() }, body), label).then(function (res) {
+      if (res && res.queued) toast(label + " : enregistre, envoi au retour du reseau", "warn");
+      else if (res && res.ok === false) {
+        delete _patrol.sent[step.point_id];
+        toast(res.error === "photo_obligatoire" ? "Photo exigee pour ce point" : "Point refuse : " + (res.error || "?"), "err");
+      }
+      afterPatrolStep();
+    }).catch(function () { afterPatrolStep(); });
+  }
+
+  function afterPatrolStep() {
+    renderPatrol();
+    var nx = patrolNextStep();
+    if (nx && _patrol.run && _patrol.run.state === "running") routeToPatrolPoint(nx.step);
+    else if (!nx && _patrol.routeFor) { clearRoute(); _patrol.routeFor = null; }
+    pollFiches();
+  }
+
+  function patrolDone(step, method) {
+    if (step.photo_required) { patrolPhoto(step, method); return; }
+    toast("Point fait : " + step.name, "ok");
+    try { if (navigator.vibrate) navigator.vibrate(200); } catch (e) {}
+    patrolPost(step, { action: "done", method: method }, "Point " + step.name);
+  }
+
+  function patrolPhoto(step, method) {
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.setAttribute("capture", "environment");
+    input.style.display = "none";
+    document.body.appendChild(input);
+    input.addEventListener("change", function () {
+      var f = input.files && input.files[0];
+      input.remove();
+      if (!f) return;
+      compressImageIfNeeded(f).then(function (blob) {
+        var run = _patrol.run;
+        if (!run) return;
+        var url = "/field/patrol/" + encodeURIComponent(run.run_id) + "/step";
+        var fields = { point_id: step.point_id, action: "done", method: method || "manual", at: String(Date.now()) };
+        _patrol.sent[step.point_id] = true;
+        renderPatrol();
+        function enqueue() {
+          return OfflineQueue.enqueue({ url: url, method: "POST", kind: "multipart", fields: fields,
+                                        files: [{ blob: blob, name: "patrouille.jpg", fieldName: "photo" }],
+                                        label: "Photo du point " + step.name })
+            .then(function () { toast("Photo enregistree, envoi au retour du reseau", "warn"); });
+        }
+        var fd = new FormData();
+        Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+        fd.append("photo", blob, "patrouille.jpg");
+        var p = navigator.onLine
+          ? fetchWithTimeout(url, { method: "POST", body: fd }, 30000).then(function (r) {
+              return r.json().then(function (d) {
+                if (d.ok) toast("Point fait avec photo : " + step.name, "ok");
+                else { delete _patrol.sent[step.point_id]; toast("Point refuse : " + (d.error || r.status), "err"); }
+              });
+            }).catch(enqueue)
+          : enqueue();
+        p.then(afterPatrolStep, afterPatrolStep);
+      });
+    });
+    input.click();
+  }
+
+  function patrolSkip(step) {
+    var reasons = ["Acces ferme", "Zone dangereuse", "Point deja controle", "Manque de temps", "Autre"];
+    var overlay = document.createElement("div");
+    overlay.className = "field-modal";
+    var html = "<div class='field-modal-box' style='max-width:420px;padding:14px;color:#e2e8f0;overflow-y:auto'><h2 style='margin:0 0 10px'>Passer le point</h2>" +
+      "<p style='margin:0 0 10px;color:#94a3b8'></p><div class='patrol-actions' style='flex-direction:column'></div>" +
+      "<textarea rows='2' style='width:100%;margin-top:10px;box-sizing:border-box;border-radius:8px;padding:8px' placeholder='Precision (facultatif)'></textarea>" +
+      "<div class='patrol-actions' style='margin-top:10px'></div></div>";
+    overlay.innerHTML = html;
+    overlay.querySelector("p").textContent = step.name;
+    var list = overlay.querySelectorAll(".patrol-actions")[0];
+    var foot = overlay.querySelectorAll(".patrol-actions")[1];
+    var ta = overlay.querySelector("textarea");
+    reasons.forEach(function (r) {
+      var b = document.createElement("button");
+      b.textContent = r;
+      b.addEventListener("click", function () {
+        var why = r === "Autre" ? (ta.value || "").trim() : (r + (ta.value.trim() ? " : " + ta.value.trim() : ""));
+        if (why.length < 3) { toast("Precisez le motif", "warn"); ta.focus(); return; }
+        overlay.remove();
+        patrolPost(step, { action: "skipped", comment: why }, "Point passe " + step.name);
+      });
+      list.appendChild(b);
+    });
+    var cancel = document.createElement("button");
+    cancel.textContent = "Annuler";
+    cancel.addEventListener("click", function () { overlay.remove(); });
+    foot.appendChild(cancel);
+    document.body.appendChild(overlay);
+  }
+
+  function patrolFinish() {
+    var run = _patrol.run;
+    if (!run) return;
+    var left = run.steps.filter(function (s) { return s.state === "pending" && !_patrol.sent[s.point_id]; }).length;
+    var overlay = document.createElement("div");
+    overlay.className = "field-modal";
+    overlay.innerHTML = "<div class='field-modal-box' style='max-width:420px;padding:14px;color:#e2e8f0;overflow-y:auto'><h2 style='margin:0 0 10px'>Terminer la patrouille</h2>" +
+      "<p style='margin:0 0 10px;color:#94a3b8'></p>" +
+      "<textarea rows='2' style='width:100%;box-sizing:border-box;border-radius:8px;padding:8px' placeholder='Motif'></textarea>" +
+      "<div class='patrol-actions' style='margin-top:10px'></div></div>";
+    overlay.querySelector("p").textContent = left
+      ? left + " point(s) restant(s) seront notes non faits. Motif obligatoire."
+      : "Tous les points sont faits.";
+    var ta = overlay.querySelector("textarea");
+    if (!left) ta.hidden = true;
+    var foot = overlay.querySelector(".patrol-actions");
+    var cancel = document.createElement("button");
+    cancel.textContent = "Annuler";
+    cancel.addEventListener("click", function () { overlay.remove(); });
+    var ok = document.createElement("button");
+    ok.className = "patrol-done";
+    ok.textContent = left ? "Abandonner" : "Terminer";
+    ok.addEventListener("click", function () {
+      var why = (ta.value || "").trim();
+      if (left && why.length < 3) { toast("Motif obligatoire", "warn"); ta.focus(); return; }
+      overlay.remove();
+      queuedJsonPost("/field/patrol/" + encodeURIComponent(run.run_id) + "/finish",
+        { abandon: !!left, reason: why }, "Fin de patrouille").then(function (res) {
+        if (res && res.queued) toast("Fin enregistree, envoi au retour du reseau", "warn");
+        else toast("Patrouille terminee", "ok");
+        pollFiches();
+      });
+    });
+    foot.appendChild(cancel);
+    foot.appendChild(ok);
+    document.body.appendChild(overlay);
+  }
+
+  // Passage GPS : point valide a moins de son rayon (precision du GPS
+  // comptee jusqu'a 15 m), apres l'arret minimal du point s'il y en a un.
+  function checkPatrolProximity(latlng, accuracy) {
+    var run = _patrol.run;
+    if (!run || run.state !== "running") return;
+    var nx = patrolNextStep();
+    if (!nx) return;
+    var s = nx.step;
+    var d = haversine(latlng, [s.lat, s.lng]);
+    var tol = (s.radius_m || 25) + Math.min(15, Math.max(0, (accuracy || 0) / 2));
+    if (d > tol) {
+      if (_patrol.near && _patrol.near.pid === s.point_id) _patrol.near = null;
+      return;
+    }
+    var now = Date.now();
+    if (!_patrol.near || _patrol.near.pid !== s.point_id) _patrol.near = { pid: s.point_id, since: now, asked: false };
+    var dwell = (s.dwell_s || 0) * 1000;
+    if (now - _patrol.near.since < dwell) return;
+    if (s.photo_required) {
+      if (_patrol.near.asked) return;
+      _patrol.near.asked = true;
+      toast("Point atteint : " + s.name + ". Photo exigee : touchez \"Photo + fait\"", "warn");
+      try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
+      return;
+    }
+    _patrol.near = null;
+    patrolDone(s, "gps");
   }
 
   // Duree de trajet estimee par le moteur d'itineraire (meme route et meme

@@ -58,6 +58,10 @@ Deux voies d'engagement coexistent. **Directe** : le PC Org (ou un responsable) 
 - **Planificateur** `DA.start_scheduler()` (tick 3 s, démarré dans le `__main__` d'`app.py` à côté d'Alfred et PMV) : propositions expirées (+ 4 s de grâce) → unité suivante. Suppose un seul process (waitress) ; les transitions restent atomiques (filtre sur l'état attendu).
 - Tests : `tests/test_dispatch_auto.py` contre un MongoDB **local réel** (base jetable `titan_test_dispatch_<pid>`, sautés sans Mongo) — les mises à jour conditionnelles et les pipelines de `pcorg_history` ne se simulent pas.
 
+### Patrouilles programmées (27/10/2026)
+
+Détail dans `patrouilles.md`. Côté tablette : `/field/my-fiches` renvoie `patrol` (patrouille en cours) et `patrol_proposal` ; la fiche de main courante d'une patrouille (`content_category.patrol_run`) n'apparaît jamais dans les missions. `field_devices.patrol_proposal` compte comme une proposition en attente pour le dispatch (une seule à la fois) ; passer en non-disponible avec une proposition de patrouille vaut refus, comme pour une fiche.
+
 ### SAISON et épreuves simultanées
 
 Source unique : `event_courant.py` (SAISON reconnu par son NOM, épreuve active de `montage.start` à `demontage.end`, bascule ; entre épreuves simultanées, priorité **choisie par un admin** — `cockpit_settings._id="event_priority"`, pastille de l'en-tête — sinon l'épreuve déjà en cours garde la main). Une tablette n'est plus liée à son seul appairage `(event, year)` (`field_devices.year` est une **chaîne**, `pcorg.year` un **entier** : comparer via `field._pair_key` / `EC.pairs_filter`).

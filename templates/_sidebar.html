@@ -140,6 +140,10 @@
             <span class="material-symbols-outlined">tablet_android</span>
             <span class="label">Field dispatch</span>
         </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('patrouilles')) %}<a href="/patrouilles" class="{{ nav_class('/patrouilles') }}" title="Patrouilles programmees des tablettes Field : points, scenarios, envoi, suivi" data-nav-item>
+            <span class="material-symbols-outlined">route</span>
+            <span class="label">Patrouilles</span>
+        </a>{% endif %}
         {% if _mgr and (page_allowed is not defined or page_allowed('pmv')) %}<a href="/pmv" class="{{ nav_class('/pmv') }}" title="Panneaux a message variable (remorques)" data-nav-item>
             <span class="material-symbols-outlined">signpost</span>
             <span class="label">PMV</span>

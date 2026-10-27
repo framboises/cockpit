@@ -3406,3 +3406,47 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
 .decl-hist.is-msg { border-left-color: #8b5cf6; background: rgba(139, 92, 246, 0.14); margin-right: 18px; }
 .decl-hist.is-me { margin-left: 18px; }
 #missions-badge.is-msg { background: #7c3aed; }
+
+/* =====================================================================
+   PATROUILLE PROGRAMMEE (patrols.py) : carte flottante sur la carte
+   ===================================================================== */
+.patrol-card {
+  position: absolute; left: 10px; right: 64px; bottom: 10px; z-index: 650;
+  background: rgba(15, 23, 42, 0.94); border: 1px solid #334155; border-left: 5px solid #22c55e;
+  border-radius: 12px; color: #e2e8f0; padding: 10px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.45);
+  display: flex; flex-direction: column; gap: 8px; max-height: 60%; overflow-y: auto;
+}
+.patrol-card[hidden] { display: none !important; }
+.patrol-card.paused { border-left-color: #f59e0b; }
+.patrol-head { display: flex; align-items: center; gap: 8px; }
+.patrol-head .material-symbols-outlined { font-size: 22px; color: #22c55e; }
+.patrol-card.paused .patrol-head .material-symbols-outlined { color: #f59e0b; }
+.patrol-title { flex: 1; min-width: 0; font-weight: 800; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.patrol-count { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+.patrol-toggle { background: none; border: 0; color: #94a3b8; padding: 2px; display: inline-flex; cursor: pointer; }
+.patrol-next { font-size: 15px; font-weight: 700; color: #f8fafc; }
+.patrol-next small { display: block; font-size: 12px; font-weight: 500; color: #94a3b8; margin-top: 2px; }
+.patrol-instr { font-size: 13px; color: #fde68a; background: rgba(245,158,11,.12); border-radius: 8px; padding: 6px 8px; white-space: pre-wrap; }
+.patrol-paused-msg { font-size: 13px; color: #fbbf24; }
+.patrol-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.patrol-actions button {
+  flex: 1; min-width: 90px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 10px 8px; border-radius: 10px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0;
+  font-weight: 700; font-size: 13px; cursor: pointer;
+}
+.patrol-actions button .material-symbols-outlined { font-size: 20px; }
+.patrol-actions .patrol-done { background: #16a34a; border-color: #16a34a; color: #fff; }
+.patrol-actions button:disabled { opacity: .5; }
+.patrol-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.patrol-steps li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.patrol-steps .num { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: #fff; background: #64748b; flex: none; }
+.patrol-steps li.done .num { background: #16a34a; }
+.patrol-steps li.skipped .num { background: #f59e0b; }
+.patrol-steps li.missed .num { background: #dc2626; }
+.patrol-steps li.next { font-weight: 800; color: #fff; }
+.patrol-steps .at { margin-left: auto; color: #94a3b8; font-size: 12px; }
+.patrol-num-marker span { display: flex; width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: 800; font-size: 12px;
+  align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); box-sizing: border-box; }
+.patrol-num-marker.next span { width: 32px; height: 32px; font-size: 14px; box-shadow: 0 0 0 4px rgba(34,197,94,.45); }
+.patrol-prop-points { font-size: 13px; color: #cbd5e1; line-height: 1.5; }

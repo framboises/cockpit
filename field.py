@@ -29,6 +29,7 @@ from functools import wraps
 
 import pcorg_history as PH
 import dispatch_auto as DA
+import patrols as PATROLS
 import event_courant as EC
 
 try:
@@ -1008,6 +1009,10 @@ def _pub_device(device):
         "status": device.get("status") or "patrouille",
         "status_since": _iso(device.get("status_since")),
         "active_fiche_id": device.get("active_fiche_id"),
+        # Patrouilles programmees (patrols.py) : zones de competence (vide =
+        # partout) et patrouille en cours
+        "competence_zones": device.get("competence_zones") or [],
+        "active_patrol_run": device.get("active_patrol_run"),
     }
 
 
@@ -1707,6 +1712,9 @@ def field_status_set():
     pending = (device.get("pending_proposal") or {}).get("fiche_id")
     if pending and new_status != "patrouille":
         DA.refuse(db, pending, device, now=now)
+    pending_patrol = (device.get("patrol_proposal") or {}).get("run_id")
+    if pending_patrol and new_status != "patrouille":
+        PATROLS.refuse(db, pending_patrol, device["_id"], now=now, reason="agent indisponible")
 
     # Interdire passage direct intervention/sur_place -> patrouille
     if new_status == "patrouille" and cur_status in ("intervention", "sur_place"):
@@ -1771,6 +1779,14 @@ def field_status_set():
         step = {"intervention": "engaged_at", "sur_place": "arrived_at"}.get(new_status)
         if step:
             DA.mark_step(db, fiche_id, step, now=now, device_name=device.get("name"))
+
+    # Patrouille programmee en cours : pause pendant une intervention ou une
+    # pause de l'agent, reprise au retour en disponible.
+    if device.get("active_patrol_run"):
+        try:
+            PATROLS.sync_pause(db, db["patrol_runs"].find_one({"_id": device["active_patrol_run"]}), now=now)
+        except Exception as exc:
+            logger.warning("[status] patrouille %s : %s", device.get("active_patrol_run"), exc)
 
     return jsonify({"ok": True, "status": new_status,
                     "active_fiche_id": None if new_status == "patrouille" else fiche_id})
@@ -4753,6 +4769,9 @@ def field_my_fiches():
 
     pairs = device_fiche_pairs(db, dev_fresh)
     and_parts = [EC.pairs_filter(pairs)]
+    # Fiche de main courante d'une patrouille programmee (patrols.py) : suivie
+    # par le bandeau de patrouille, pas une mission.
+    and_parts.append({"content_category.patrol_run": {"$exists": False}})
     base_query = {
         "content_category.patrouille": name,
         "category": {"$regex": "^PCO"},
@@ -4854,9 +4873,19 @@ def field_my_fiches():
                 {"_id": device["_id"]}, {"$set": {"pending_stream_request": None}}
             )
 
+    # Patrouille programmee en cours et proposition de patrouille (patrols.py)
+    patrol = patrol_proposal = None
+    if not declarant:
+        try:
+            patrol, patrol_proposal = PATROLS.tablet_view(db, dev_fresh)
+        except Exception as exc:
+            logger.warning("[my-fiches] patrouille indisponible: %s", exc)
+
     return jsonify({
         "open": open_list,
         "closed": closed_list,
+        "patrol": patrol,
+        "patrol_proposal": patrol_proposal,
         "device_name": name,
         "device_category": device_category,
         "device_metiers": dev_fresh.get("metiers") or [],

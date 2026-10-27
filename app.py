@@ -43,6 +43,7 @@ from crise_auth import crise_auth_bp
 from routing import routing_bp
 from valhalla_admin import valhalla_admin_bp
 from gravite_fiches import gravite_fiches_bp
+from patrols_api import patrols_bp, patrols_field_bp
 from waze_feed import waze_feed_bp
 from cameras import cameras_bp
 from detection import detection_bp
@@ -699,6 +700,8 @@ ADMIN_PAGE_REGISTRY = [
      "paths": ["/admin/itineraire", "/api/admin/itineraire"]},
     {"id": "gravite_fiches", "label": "Gravite des fiches", "icon": "priority_high",
      "paths": ["/admin/gravite-fiches", "/api/gravite-fiches"]},
+    {"id": "patrouilles",    "label": "Patrouilles",     "icon": "route",
+     "paths": ["/patrouilles", "/api/patrols"]},
 ]
 ALL_ADMIN_PAGE_IDS = [p["id"] for p in ADMIN_PAGE_REGISTRY]
 
@@ -2768,6 +2771,11 @@ app.register_blueprint(valhalla_admin_bp)
 # Gravite evaluee des fiches (pcorg_digest.py, lance hors Cockpit) : suivi et
 # controle par sondage sur /admin/gravite-fiches.
 app.register_blueprint(gravite_fiches_bp)
+# Patrouilles programmees (patrols.py) : page /patrouilles (CSRF conserve) et
+# routes tablette /field/patrol/* (cookie field_token, sans CSRF comme field).
+app.register_blueprint(patrols_bp)
+app.register_blueprint(patrols_field_bp)
+csrf.exempt(patrols_field_bp)
 # Fermetures publiees vers Waze for Cities : flux CIFS public relu par Waze
 # (/public/waze/closures.xml, Basic auth) + administration dans la page.
 app.register_blueprint(waze_feed_bp)

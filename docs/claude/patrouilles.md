@@ -1,4 +1,5 @@
-<!-- Cahier des charges. Statut : A CONSTRUIRE (redige le 27/10/2026, choix valides avec Ludo). -->
+<!-- Cahier des charges. Statut : livraisons 0 et 1 en service (27/10/2026), 2 a 4 a construire.
+     Etat reel du code : section 10. Choix valides avec Ludo le 27/10/2026. -->
 
 # Patrouilles programmees et envoi des intrusions aux tablettes
 
@@ -272,7 +273,19 @@ accordable explicitement a un groupe). But : mesurer la justesse du modele et co
 
 ### 6.1 Moteur de propositions (code seul, toujours disponible)
 
-- Entree : l'evenement (toutes editions) et/ou SAISON, categories retenues, nombre de patrouilles.
+- **Dominantes** (choix du 27/10/2026) : chaque scenario porte UNE dominante (`patrol_scenarios.dominante`,
+  `patrols.DOMINANTES`), le theme de la patrouille ; la proposition se fait par dominante et vise le
+  groupe de tablettes adapte :
+  - `surete` : fiches de la categorie Securite (`PCO.Securite`), ponderees par la gravite evaluee ;
+  - `secours` : fiches Secours (`PCO.Secours`, bloc `secours` des fiches structurees) ;
+  - `incendie` : prevention incendie (bloc `alarme` incendie, nature incendie, equipements feu) ;
+  - `prevention` : plan de prevention et lieu de travail, LES DEUX sources : zones de travail actives
+    a la date de la patrouille dans Asker (`asker_plans_prevention.zoneIds`, `asker_planning_montage`
+    zone + periode, zones `asker_zones`, certaines sans geometrie) ET incidents passes lies aux travaux ;
+  - `generale` : sans theme (defaut).
+  « Prevention chaleur » retiree a la demande (27/10/2026). A regler plus tard : rattacher les
+  dominantes aux zones de competence et aux zones de travail.
+- Entree : l'evenement (toutes editions) et/ou SAISON, dominante, nombre de patrouilles.
 - Fiches avec position (`pcorg.gps`) regroupees en **foyers** (rapprochement a moins de X m).
 - Par foyer : nombre d'incidents, nombre d'editions touchees (recurrence), categories et
   sous-classifications, niveaux d'urgence, repartition par heure et par jour, zone de competence.
@@ -364,3 +377,43 @@ Verifie en reel le 27/10/2026 (lecture seule, 5 points autour du circuit) :
 - Livraison 1 (« Envoyer maintenant ») : la proposition est posee par la route, mais son expiration
   et le report a la tablette suivante passent par le moteur : la tache planifiee est donc creee des la
   livraison 1.
+
+## 10. Etat du code (livraison 1, 27/10/2026)
+
+Fichiers : `patrols.py` (coeur sans Flask), `patrols_api.py` (`patrols_bp` page + `/api/patrols/*`,
+CSRF conserve ; `patrols_field_bp` `/field/patrol/*`, exempte de CSRF), `patrol_engine.py` +
+`patrol_engine.bat` (tache « Cockpit - Patrouilles », definition `scripts/tache_patrouilles.xml`,
+compte l.arnault, chaque minute, IgnoreNew), `templates/patrouilles.html`, `static/js/patrouilles.js`,
+`static/css/patrouilles.css`, tablette dans `field.js` (bloc « Patrouilles programmees ») +
+`#patrol-card` de `field.html` + fin de `field.css`. Tests : `tests/test_patrols.py` (MongoDB local).
+
+- Page `/patrouilles` dans le groupe **Terrain** du menu (choix du 27/10 : avec Field dispatch,
+  pas Parametres), page admin accordable `patrouilles`. Onglets Suivi (10 s), Scenarios, Points,
+  Tablettes (zones de competence : ici, PAS dans Field dispatch), Historique, Reglages.
+- **Une proposition a la fois** : `field_devices.patrol_proposal {run_id, proposed_at, expires_at}` a
+  cote de `pending_proposal` (fiche). `dispatch_auto._proposal_pending` et la reservation de
+  `propose_next` regardent les deux. Une tablette en patrouille EN COURS reste proposable au
+  dispatch (choix du 27/10) ; l'accepter met la patrouille en pause.
+- **Pause / reprise** : `patrols.sync_pause` compare le statut de l'agent (intervention, sur place,
+  fin d'intervention, pause = pause) ; appele par `/field/status`, par `/field/my-fiches` et par le
+  moteur (3 s) : tous les chemins d'engagement (proposition acceptee, PC Org, libre-service) sont
+  couverts sans toucher a chacun. Fiche de patrouille close par le PC Org = patrouille annulee.
+- **Fiche de main courante** : `_id` uuid5 de la patrouille (acceptation rejouee = meme fiche),
+  categorie de la tablette (a defaut `PCO.Information`), `niveau_urgence` nul, `content_category`
+  `{patrouille: <nom>, patrol_run, patrol_scenario}` : `patrouille` renseigne l'exclut du dispatch,
+  du libre-service ; `/field/my-fiches` l'ecarte explicitement (`patrol_run` absent).
+- **Points** : etat `pending | done | skipped | missed`, transition par `$elemMatch` sur `pending`
+  (idempotent, rejouable par la file hors ligne). Passer = motif obligatoire. Photo exigee = refus
+  `photo_obligatoire` sans photo ; au passage GPS la tablette DEMANDE la photo au lieu de valider.
+  Dernier point traite = fin automatique (`done` si tout fait, sinon `partial`).
+- **Validation GPS cote tablette** (`checkPatrolProximity`, chaque position de `watchPosition`) :
+  distance <= rayon + min(15 m, precision / 2), apres `dwell_s`. Le serveur ne valide rien seul.
+- **Itineraire** : `/field/patrol/<run>/route` (position -> prochain point), a pied `pedestrian`,
+  vehicule `normal`, ou `normal_piste` si le groupe a l'acces piste. `setRouteDestination` sans
+  fiche (`reconcileRoute` ne l'efface donc pas) ; recalcule a la reprise apres une intervention.
+- **Optimiser** : matrice `/sources_to_targets` + ordre exact (programmation dynamique) jusqu'a 11
+  points, plus proche voisin + 2-opt au-dela ; le premier point reste le depart ; a duree egale
+  l'ordre saisi est garde. Rien n'est enregistre sans « Enregistrer ».
+- **Personne ne prend** (`refused`) : pour l'instant seulement visible au Suivi ; alerte « Patrouille
+  non prise » et fiche Information = livraison 2 (`patrols.on_not_taken`).
+- Dominante enregistree sur le scenario (section 6.1), sans effet avant la livraison 4.
