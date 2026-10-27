@@ -227,7 +227,7 @@
     S.layers.scenario.clearLayers();
     S.layers.live.clearLayers();
     if (S.tab === "points") { renderPoints(); if (IMP.on) drawImport(); else drawAllPoints(true); }
-    else if (S.tab === "scenarios") { renderScenarios(); if (S.sc) drawScenarioEditor(); else drawAllPoints(false); }
+    else if (S.tab === "scenarios") { renderScenarios(); if (S.sc) drawScenarioEditor(); else drawScenarioRoutes(); }
     else if (S.tab === "tablettes") renderDevices();
     else if (S.tab === "suivi") renderLive();
     else if (S.tab === "plans") renderPlans();
@@ -235,14 +235,21 @@
   }
 
   // ---------- Points ----------
-  function drawAllPoints(editable) {
+  // faint : points d'appoint de l'editeur de scenario (petits, pales, sans
+  // cercle de rayon), hors ceux deja dans le scenario
+  function drawAllPoints(editable, faint) {
+    var inSc = {};
+    if (faint && S.sc) S.sc.points.forEach(function (id) { inSc[id] = true; });
     S.data.points.forEach(function (p) {
-      if (!p.active && !$("pt-pt-inactive").checked) return;
+      if (!p.active && (faint || !$("pt-pt-inactive").checked)) return;
+      if (inSc[p.id]) return;
       var editing = S.pt && S.pt.id === p.id;
       if (editing) return;
-      var m = L.marker([p.lat, p.lng], { icon: dotIcon(p.active ? "#2563eb" : "#94a3b8", p.name) })
-        .bindTooltip(esc(p.name), { direction: "top", offset: [0, -6] });
-      L.circle([p.lat, p.lng], { radius: p.radius_m, color: "#2563eb", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(S.layers.points);
+      var m = faint
+        ? L.circleMarker([p.lat, p.lng], { radius: 5, color: "#64748b", weight: 1, fillColor: "#cbd5e1", fillOpacity: 0.9 })
+        : L.marker([p.lat, p.lng], { icon: dotIcon(p.active ? "#2563eb" : "#94a3b8", p.name) });
+      m.bindTooltip(esc(p.name) + (faint ? " - cliquer pour ajouter" : ""), { direction: "top", offset: [0, -6] });
+      if (!faint) L.circle([p.lat, p.lng], { radius: p.radius_m, color: "#2563eb", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(S.layers.points);
       m.on("click", function (e) {
         L.DomEvent.stopPropagation(e);
         if (editable) openPointEditor(p);
@@ -557,6 +564,9 @@
                  points: [], estimate: null };
     $("pt-sc-editor").hidden = false;
     $("pt-sc-listpane").hidden = true;
+    // Nouveau scenario : les points a ajouter sont montres ; scenario existant :
+    // seulement les siens (les autres sur demande)
+    $("pt-sc-others").checked = !s;
     $("pt-sc-name").value = S.sc.name;
     $("pt-sc-dominante").value = S.sc.dominante;
     $("pt-sc-color").value = S.sc.color;
@@ -664,7 +674,7 @@
       });
       ol.appendChild(li);
     });
-    if (!n) ol.appendChild(el("li", "pt-empty", "Aucun point : cliquez-les sur la carte ou utilisez Ajouter des points."));
+    if (!n) ol.appendChild(el("li", "pt-empty", "Aucun point : Ajouter des points, ou cliquez-les sur la carte (Montrer les autres points)."));
     renderZoneHint();
   }
 
@@ -763,8 +773,25 @@
       " Les tablettes sans zone couvrent tout.";
   }
 
+  // Liste des scenarios : le trajet de chacun dans sa couleur (clic = ouvrir),
+  // jamais tous les points de la bibliotheque
+  function drawScenarioRoutes() {
+    var showArch = $("pt-sc-archived").checked;
+    S.data.scenarios.forEach(function (s) {
+      if (s.archived && !showArch) return;
+      var est = s.estimate || {};
+      var ll = est.polyline ? decode6(est.polyline)
+        : s.points.map(pointById).filter(Boolean).map(function (p) { return [p.lat, p.lng]; });
+      if (ll.length < 2) return;
+      var line = L.polyline(ll, { color: safeColor(s.color), weight: 4, opacity: s.archived ? 0.3 : 0.75 })
+        .bindTooltip(esc(s.name), { sticky: true });
+      line.on("click", function () { openScenario(s); });
+      line.addTo(S.layers.scenario);
+    });
+  }
+
   function drawScenarioEditor() {
-    drawAllPoints(false);
+    if ($("pt-sc-others") && $("pt-sc-others").checked) drawAllPoints(false, true);
     var color = $("pt-sc-color").value || S.sc.color;
     S.sc.points.forEach(function (id, i) {
       var p = pointById(id);
@@ -1560,6 +1587,7 @@
     $("pt-sc-new").addEventListener("click", function () { openScenario(null); });
     $("pt-sc-archived").addEventListener("change", render);
     $("pt-sc-add").addEventListener("click", openPicker);
+    $("pt-sc-others").addEventListener("change", render);
     $("pt-pick-search").addEventListener("input", paintPicker);
     $("pt-pick-all").addEventListener("click", function () { PK.visible.forEach(function (id) { PK.sel[id] = true; }); paintPicker(); });
     $("pt-pick-none").addEventListener("click", function () { PK.sel = {}; paintPicker(); });
