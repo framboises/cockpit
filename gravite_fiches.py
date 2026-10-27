@@ -76,8 +76,20 @@ def _pub_digest(d, fiche=None):
 
 def _with_fiches(digests):
     ids = [d["_id"] for d in digests]
-    fiches = {f["_id"]: f for f in _db()["pcorg"].find({"_id": {"$in": ids}}, FICHE_FIELDS)}
-    return [_pub_digest(d, fiches.get(d["_id"], {})) for d in digests]
+    # Fiches jumelles (doublon probable / declare) : lues avec la fiche pour
+    # confirmer le doublon sans quitter le controle
+    twins = {(d.get(k) or {}).get("de") for d in digests for k in ("doublon_probable", "doublon_declare")} - {None}
+    fiches = {f["_id"]: f for f in _db()["pcorg"].find({"_id": {"$in": ids + list(twins)}},
+                                                      dict(FICHE_FIELDS, sql_id=1))}
+    out = []
+    for d in digests:
+        o = _pub_digest(d, fiches.get(d["_id"], {}))
+        for k in ("doublon_probable", "doublon_declare"):
+            t = fiches.get((d.get(k) or {}).get("de"))
+            if t:
+                o[k] = dict(o[k], fiche=dict({x: t.get(x) for x in FICHE_FIELDS}, sql_id=t.get("sql_id")))
+        out.append(o)
+    return out
 
 
 def _asset_version():

@@ -97,6 +97,9 @@
 .gf-chip.gf-on { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
 .gf-chip.gf-yes.gf-on { background: #dcfce7; border-color: #86efac; color: #166534; }
 .gf-dup { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #fff7ed; font-size: 12px; }
+.gf-twin { display: block; margin-top: 4px; }
+.gf-twin-body { margin-top: 4px; padding: 8px 10px; border-left: 3px solid #f97316; background: #fff; border-radius: 4px; }
+.gf-twin-body .gf-deroule { max-height: 320px; }
 .gf-chips-line { display: flex; flex-wrap: wrap; gap: 6px; }
 .gf-why { margin-bottom: 6px; }
 .gf-batch-toggle { margin-bottom: 10px; }

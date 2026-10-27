@@ -566,7 +566,11 @@
       row("Prise de service", [p2.type, p2.poste, p2.debut && p2.fin ? p2.debut + " - " + p2.fin : (p2.debut || p2.fin),
         (p2.materiel || []).length ? "materiel : " + p2.materiel.join(", ") : null].filter(Boolean).join(" - "));
     }
-    if (it.doublon_declare) row("Doublon declare", "de la fiche n " + it.doublon_declare.sql_id);
+    if (it.doublon_declare) {
+      var dd = el("span", null, "de la fiche n " + it.doublon_declare.sql_id + " ");
+      if (it.doublon_declare.fiche) dd.appendChild(renderTwin(it.doublon_declare.fiche, false));
+      row("Doublon declare", dd);
+    }
     if ((it.donnees_personnelles || []).length) row("Donnees perso", tags(it.donnees_personnelles, "gf-warn"));
     if (it.completude) {
       row("Completude", it.completude.score + " / " + it.completude.max +
@@ -593,7 +597,9 @@
   function renderDuplicate(it) {
     var box = el("div", "gf-dup");
     var dp = it.doublon_probable;
-    box.appendChild(el("span", null, "Doublon probable de la fiche " + String(dp.de).slice(0, 8) +
+    var tf = dp.fiche || null;
+    box.appendChild(el("span", null, "Doublon probable de la fiche " +
+      (tf && tf.sql_id ? "n " + tf.sql_id : String(dp.de).slice(0, 8)) +
       " (score " + Math.round((dp.score || 0) * 100) + " %) : "));
     [["oui", "Oui"], ["non", "Non"]].forEach(function (o) {
       var b = el("button", "gf-chip" + (o[0] === "oui" ? " gf-yes" : ""), o[1]);
@@ -607,7 +613,29 @@
       });
       box.appendChild(b);
     });
+    if (tf) box.appendChild(renderTwin(tf, false));
     return box;
+  }
+
+  // Fiche jumelle (doublon) lisible sur place : bouton qui deplie son contenu
+  function renderTwin(f, open) {
+    var wrap = el("div", "gf-twin");
+    var btn = el("button", "gf-link", open ? "Masquer la fiche" : "Lire la fiche");
+    btn.type = "button";
+    var body = el("div", "gf-twin-body");
+    body.hidden = !open;
+    body.appendChild(el("div", "gf-meta", [f.date_local, f.time_local].filter(Boolean).join(" ") +
+      "  |  " + (f.category || "sans categorie") + (f.sql_id ? "  |  n " + f.sql_id : "")));
+    body.appendChild(el("div", "gf-title", f.text || "(sans titre)"));
+    body.appendChild(el("div", "gf-deroule gf-open", f.comment || "(pas de deroule)"));
+    btn.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      body.hidden = !body.hidden;
+      btn.textContent = body.hidden ? "Lire la fiche" : "Masquer la fiche";
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(body);
+    return wrap;
   }
 
   function paintReview(card, it) {
