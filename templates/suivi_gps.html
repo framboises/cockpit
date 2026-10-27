@@ -25,6 +25,8 @@
   - centre : carte interactive (Carte / Satellite IGN, noms, trainees,
     recadrage, suivi d'une unite) ;
   - droite : fiche de l'unite selectionnee, sinon synthese par groupe.
+  Telephone : carte plein ecran, panneau du bas (Unites / Synthese / fiche)
+  a trois hauteurs ; paysage : panneau lateral.
   Activite : statut de la tablette Field ou fiche PC Org ouverte qui nomme la
   balise (balises_mur._activite). Rendu : static/js/suivi_gps.js.
 #}
@@ -49,8 +51,8 @@
       <div class="sg-totaux" id="sg-totaux"></div>
       <div class="header-spacer"></div>
       <div class="sg-seg" id="sg-fond" role="tablist" aria-label="Fond de carte">
-        <button type="button" data-fond="plan" class="active"><span class="material-symbols-outlined">map</span>Carte</button>
-        <button type="button" data-fond="ortho"><span class="material-symbols-outlined">satellite_alt</span>Satellite IGN</button>
+        <button type="button" data-fond="plan" class="active"><span class="material-symbols-outlined">map</span><span class="sg-txt">Carte</span></button>
+        <button type="button" data-fond="ortho"><span class="material-symbols-outlined">satellite_alt</span><span class="sg-txt">Satellite IGN</span></button>
       </div>
       <a class="sg-icon-btn" id="sg-mur" href="/balises-mur" target="_blank" rel="noopener" title="Ouvrir le mur TV avec les 3 premiers groupes affichés">
         <span class="material-symbols-outlined">tv</span><span class="sg-btn-label">Mur TV</span>
@@ -75,9 +77,9 @@
       <section class="sg-carte" aria-label="Carte">
         <div id="sg-map"></div>
         <div class="sg-map-outils">
-          <button type="button" class="sg-map-btn active" id="sg-noms" title="Afficher les noms"><span class="material-symbols-outlined">label</span>Noms</button>
-          <button type="button" class="sg-map-btn active" id="sg-traces" title="Traînée des 10 dernières minutes"><span class="material-symbols-outlined">timeline</span>Traînées</button>
-          <button type="button" class="sg-map-btn" id="sg-recadrer" title="Recadrer sur les unités en ligne"><span class="material-symbols-outlined">fit_screen</span>Recadrer</button>
+          <button type="button" class="sg-map-btn active" id="sg-noms" title="Afficher les noms"><span class="material-symbols-outlined">label</span><span class="sg-txt">Noms</span></button>
+          <button type="button" class="sg-map-btn active" id="sg-traces" title="Traînée des 10 dernières minutes"><span class="material-symbols-outlined">timeline</span><span class="sg-txt">Traînées</span></button>
+          <button type="button" class="sg-map-btn" id="sg-recadrer" title="Recadrer sur les unités en ligne"><span class="material-symbols-outlined">fit_screen</span><span class="sg-txt">Recadrer</span></button>
         </div>
         <div class="sg-legende">
           <span><i style="background:#22c55e"></i>Libre</span>
@@ -90,6 +92,18 @@
       </section>
 
       <aside class="sg-detail" id="sg-detail" aria-label="Detail"></aside>
+
+      {# Telephone (<= 820 px) : liste et fiche dans un panneau du bas a
+         trois hauteurs (glisser la poignee ou la toucher) ; paysage : panneau
+         lateral. Masque sur ordinateur. #}
+      <div class="sg-poignee" id="sg-poignee">
+        <span class="barre" aria-hidden="true"></span>
+        <div class="sg-onglets" role="tablist">
+          <button type="button" data-onglet="liste" class="active">Unités <b id="sg-o-nb"></b></button>
+          <button type="button" data-onglet="synthese">Synthèse <b id="sg-o-alertes"></b></button>
+        </div>
+        <div class="sg-mini" id="sg-mini"></div>
+      </div>
 
     </main>
 

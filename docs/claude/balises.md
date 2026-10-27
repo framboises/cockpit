@@ -176,6 +176,12 @@ de `PAGE_REGISTRY`. Template `suivi_gps.html`, `static/js/suivi_gps.js`, `static
 - Droite : fiche de l'unite (activite et sa source, liaison, vitesse et cap, batterie, GPS,
   derniere trame, reseau GSM Teltonika, position, Centrer / Suivre / Google Maps), sinon synthese
   par groupe et "A surveiller" (engagee muette, batterie faible, decrochage < 1 h).
+- Telephone (<= 820 px, iPhone) : carte plein ecran, panneau du bas a trois hauteurs (bas / mi /
+  haut, `--feuille-h` posee par `majVue`, poignee a glisser ou toucher) avec onglets Unites /
+  Synthese ; la fiche d'une unite remplace la liste dans le panneau, la carte la centre dans la
+  partie visible (`pointCentre`, recadrage avec marge basse) ; noms permanents a partir du zoom 15 ;
+  bulle du chat Alfred remontee au-dessus du panneau (`--sg-occupe`) ; recherche en 16 px (pas de
+  zoom Safari). Paysage bas (<= 500 px de haut) : panneau lateral gauche, carte a droite.
 - Lien profond `?unite=<id>` : selectionne et centre l'unite. Bouton Mur TV : `/balises-mur` avec
   les 3 premiers groupes et le fond choisis.
 

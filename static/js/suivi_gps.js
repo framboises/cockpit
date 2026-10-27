@@ -42,8 +42,15 @@
     noms: memoire("noms") !== "0", traces: memoire("traces") !== "0",
     fond: memoire("fond") === "ortho" ? "ortho" : "plan",
     plies: lireJson("plies", {}), anciennes: {},
-    marqueurs: {}, cadre: false
+    marqueurs: {}, cadre: false,
+    feuille: "mi", onglet: "liste", nbAlertes: 0   // telephone : hauteur du panneau, onglet
   };
+  // Telephone : portrait (panneau du bas) ou paysage bas (panneau lateral),
+  // memes seuils que suivi_gps.css
+  var MQ_TEL = window.matchMedia("(max-width: 820px)");
+  var MQ_PAYSAGE = window.matchMedia("(max-width: 940px) and (max-height: 500px) and (orientation: landscape)");
+  function tel() { return MQ_TEL.matches || MQ_PAYSAGE.matches; }
+  function portrait() { return tel() && !MQ_PAYSAGE.matches; }
   var carte, coucheTraces, coucheBalises, couchesFond = [];
 
   /* ---------------- utilitaires ---------------- */
@@ -176,6 +183,7 @@
     coucheBalises = L.layerGroup().addTo(carte);
     poserFond(S.fond);
     carte.on("dragstart", function () { if (S.suivre) { S.suivre = false; rendreDetail(); } });
+    carte.on("zoomend", function () { if (S.data && tel()) dessinerCarte(); });
     // Grille posee apres la creation de la carte (polices, barre laterale) :
     // sans ce recalcul, les tuiles ne couvrent qu'une partie du cadre
     if (window.ResizeObserver) new ResizeObserver(function () { carte.invalidateSize(); }).observe($("sg-map"));
@@ -209,6 +217,8 @@
 
   function dessinerCarte() {
     var vus = {};
+    // Telephone : noms permanents a partir du zoom 15 seulement (sinon illisibles)
+    var nomsVisibles = S.noms && (!tel() || carte.getZoom() >= 15);
     coucheTraces.clearLayers();
     toutes().forEach(function (o) {
       var b = o.b;
@@ -221,7 +231,7 @@
             lineCap: "round", interactive: false }).addTo(coucheTraces);
         }
       }
-      var cle = [b.en_ligne, b.mouvement, b.cap, b.vitesse, b.activite, o.g.couleur, S.sel === b.id, S.noms].join("|");
+      var cle = [b.en_ligne, b.mouvement, b.cap, b.vitesse, b.activite, o.g.couleur, S.sel === b.id, nomsVisibles].join("|");
       var m = S.marqueurs[b.id];
       var z = S.sel === b.id ? 5000 : engagee(b) ? 4000 : b.mouvement ? 3000 : b.en_ligne ? 2000 : 0;
       if (!m) {
@@ -242,7 +252,7 @@
           tag.style.setProperty("--a", ACT[b.activite].c);
           t.appendChild(tag);
         }
-        m.bindTooltip(t, { permanent: S.noms && (b.en_ligne || engagee(b)), direction: "bottom",
+        m.bindTooltip(t, { permanent: nomsVisibles && (b.en_ligne || engagee(b)), direction: "bottom",
           offset: [0, b.mouvement ? 15 : 13], className: "sg-nom" });
         var tip = m.getTooltip();
         if (tip && tip.getElement && tip.getElement()) tip.getElement().style.setProperty("--c", couleurSure(o.g.couleur));
@@ -254,7 +264,7 @@
     });
     if (!S.cadre) S.cadre = recadrer(true);
     var s = selection();
-    if (S.suivre && s && aPosition(s.b)) carte.panTo([s.b.lat, s.b.lng], { animate: true });
+    if (S.suivre && s && aPosition(s.b)) carte.panTo(pointCentre([s.b.lat, s.b.lng], carte.getZoom()), { animate: true });
   }
 
   function recadrer(silencieux, liste) {
@@ -262,10 +272,24 @@
       .filter(function (o) { return aPosition(o.b) && (liste || o.b.en_ligne); })
       .map(function (o) { return [o.b.lat, o.b.lng]; });
     if (!pts.length) return false;
-    if (pts.length === 1) carte.setView(pts[0], 16, { animate: !silencieux });
-    else carte.fitBounds(pts, { padding: [50, 50], maxZoom: 17, animate: !silencieux });
+    if (pts.length === 1) carte.setView(pointCentre(pts[0], 16), 16, { animate: !silencieux });
+    else carte.fitBounds(pts, { paddingTopLeft: [50, 50], paddingBottomRight: [portrait() ? 60 : 50, 50 + decalBas()],
+                                maxZoom: 17, animate: !silencieux });
     return true;
   }
+
+  // Telephone portrait : hauteur de carte cachee par le panneau du bas. Le
+  // point a montrer est place au milieu de la partie visible, pas sous le panneau.
+  function decalBas() {
+    if (!portrait()) return 0;
+    return hauteurFeuille(S.feuille) + ($("sg-poignee").offsetHeight || 0);
+  }
+  function pointCentre(ll, z) {
+    var b = decalBas();
+    if (!b) return L.latLng(ll);
+    return carte.unproject(carte.project(L.latLng(ll), z).add([0, b / 2]), z);
+  }
+  function centrerSur(ll, z) { carte.setView(pointCentre(ll, z), z); }
 
   /* ---------------- selection ---------------- */
   function selection() {
@@ -277,8 +301,10 @@
   function selectionner(id, centrer) {
     S.sel = S.sel === id && !centrer ? null : id;
     if (!S.sel) S.suivre = false;
+    // Telephone : fiche dans le panneau, a mi-hauteur pour garder la carte
+    if (S.sel && tel() && S.feuille !== "mi") { S.feuille = "mi"; majVue(); }
     var s = selection();
-    if (s && centrer !== false && aPosition(s.b)) carte.setView([s.b.lat, s.b.lng], Math.max(carte.getZoom(), 16));
+    if (s && aPosition(s.b) && (centrer !== false || tel())) centrerSur([s.b.lat, s.b.lng], Math.max(carte.getZoom(), 16));
     rendreTout();
   }
 
@@ -441,7 +467,12 @@
 
   /* ---------------- en-tete ---------------- */
   function rendreTotaux() {
-    var box = $("sg-totaux");
+    ["sg-totaux", "sg-mini"].forEach(function (id) { remplirTotaux($(id)); });
+    var n = 0;
+    groupesAffiches().forEach(function (g) { n += g.total; });
+    $("sg-o-nb").textContent = String(n);
+  }
+  function remplirTotaux(box) {
     box.textContent = "";
     var t = { eng: 0, lib: 0, en: 0, tot: 0, mv: 0 };
     groupesAffiches().forEach(function (g) {
@@ -500,7 +531,7 @@
     tete.appendChild(tx);
     var f = el("button", "sg-icon-btn fermer");
     f.type = "button"; f.title = "Fermer"; f.appendChild(ico("close"));
-    f.addEventListener("click", function () { S.sel = null; S.suivre = false; rendreTout(); });
+    f.addEventListener("click", function () { S.sel = null; S.suivre = false; S.onglet = "liste"; rendreTout(); });
     tete.appendChild(f);
     box.appendChild(tete);
 
@@ -529,11 +560,11 @@
     var ac = el("div", "sg-d-actions");
     if (aPosition(b)) {
       ac.appendChild(bouton("center_focus_strong", "Centrer", false, function () {
-        carte.setView([b.lat, b.lng], Math.max(carte.getZoom(), 17));
+        centrerSur([b.lat, b.lng], Math.max(carte.getZoom(), 17));
       }));
       ac.appendChild(bouton("my_location", S.suivre ? "Suivi actif" : "Suivre", S.suivre, function () {
         S.suivre = !S.suivre;
-        if (S.suivre) carte.setView([b.lat, b.lng], Math.max(carte.getZoom(), 16));
+        if (S.suivre) centrerSur([b.lat, b.lng], Math.max(carte.getZoom(), 16));
         rendreDetail();
       }, "Garder la carte centrée sur cette unité"));
       var gm = el("a", "sg-d-btn");
@@ -588,6 +619,9 @@
       else if (!b.en_ligne && b.age_s != null && b.age_s < 3600) alertes.push({ o: o, crit: false, t: b.label + " muette depuis " + age(b.age_s), i: "signal_disconnected" });
     });
     alertes.sort(function (a, b) { return (b.crit ? 1 : 0) - (a.crit ? 1 : 0); });
+    var na = $("sg-o-alertes");
+    na.textContent = alertes.length ? String(alertes.length) : "";
+    na.className = alertes.some(function (x) { return x.crit; }) ? "alerte" : "";
     box.appendChild(el("div", "sg-d-titre", "À surveiller" + (alertes.length ? " (" + alertes.length + ")" : "")));
     var la = el("div", "sg-alertes");
     if (!alertes.length) la.appendChild(el("div", "sg-vide", "Rien à signaler."));
@@ -603,7 +637,79 @@
   }
 
   /* ---------------- boucle ---------------- */
+  /* ---------------- telephone : panneau du bas ---------------- */
+  function hauteurFeuille(etat) {
+    var main = document.querySelector(".sg-main").clientHeight;
+    var p = $("sg-poignee").offsetHeight || 0;
+    if (etat === "bas") return 0;
+    if (etat === "haut") return Math.max(0, main - p - 6);
+    return Math.round(main * 0.46);
+  }
+  function majVue() {
+    var b = document.body, main = document.querySelector(".sg-main");
+    b.classList.toggle("sg-vue-detail", tel() && (!!S.sel || S.onglet === "synthese"));
+    ["bas", "mi", "haut"].forEach(function (e) { b.classList.toggle("sg-feuille-" + e, tel() && S.feuille === e); });
+    if (portrait()) main.style.setProperty("--feuille-h", hauteurFeuille(S.feuille) + "px");
+    else main.style.removeProperty("--feuille-h");
+    // Bulle du chat Alfred posee au-dessus du panneau (sauf plein ecran)
+    b.style.setProperty("--sg-occupe", (S.feuille === "haut" ? 0 : decalBas()) + "px");
+    document.querySelectorAll("#sg-poignee [data-onglet]").forEach(function (x) {
+      x.classList.toggle("active", !S.sel && x.getAttribute("data-onglet") === S.onglet);
+    });
+  }
+  (function () {
+    var pg = $("sg-poignee"), main = document.querySelector(".sg-main");
+    var depart = null;
+    pg.addEventListener("pointerdown", function (e) {
+      if (!portrait() || e.target.closest("button")) return;
+      depart = { y: e.clientY, h: hauteurFeuille(S.feuille), bouge: false };
+      pg.setPointerCapture(e.pointerId);
+    });
+    pg.addEventListener("pointermove", function (e) {
+      if (!depart) return;
+      var dy = depart.y - e.clientY;
+      if (Math.abs(dy) > 6) depart.bouge = true;
+      if (!depart.bouge) return;
+      main.classList.add("glisse");
+      var h = Math.max(0, Math.min(hauteurFeuille("haut"), depart.h + dy));
+      main.style.setProperty("--feuille-h", h + "px");
+      document.body.classList.toggle("sg-feuille-bas", h < 20);
+    });
+    function fin(e) {
+      if (!depart) return;
+      var d = depart;
+      depart = null;
+      main.classList.remove("glisse");
+      if (!d.bouge) {
+        // Toucher : bas -> mi -> haut -> mi
+        S.feuille = S.feuille === "mi" ? "haut" : "mi";
+      } else {
+        var h = d.h + (d.y - e.clientY), mieux = "mi", ecart = 1e9;
+        ["bas", "mi", "haut"].forEach(function (x) {
+          var v = Math.abs(hauteurFeuille(x) - h);
+          if (v < ecart) { ecart = v; mieux = x; }
+        });
+        S.feuille = mieux;
+      }
+      majVue();
+    }
+    pg.addEventListener("pointerup", fin);
+    pg.addEventListener("pointercancel", fin);
+    pg.querySelectorAll("[data-onglet]").forEach(function (x) {
+      x.addEventListener("click", function () {
+        S.onglet = x.getAttribute("data-onglet");
+        S.sel = null; S.suivre = false;
+        if (S.feuille === "bas") S.feuille = "mi";
+        rendreTout();
+      });
+    });
+    window.addEventListener("resize", function () { majVue(); });
+    MQ_TEL.addEventListener && MQ_TEL.addEventListener("change", function () { majVue(); });
+    MQ_PAYSAGE.addEventListener && MQ_PAYSAGE.addEventListener("change", function () { majVue(); });
+  })();
+
   function rendreTout() {
+    majVue();
     if (!S.data) return;
     rendreGroupes();
     rendreFiltres();
@@ -631,7 +737,7 @@
           params.delete("unite");
           S.sel = u;
           var o = selection();
-          if (o && aPosition(o.b)) { S.cadre = true; carte.setView([o.b.lat, o.b.lng], 16); }
+          if (o && aPosition(o.b)) { S.cadre = true; majVue(); centrerSur([o.b.lat, o.b.lng], 16); }
         }
         rendreTout();
         majLienMur();
@@ -670,6 +776,8 @@
   setInterval(rendreFlux, 1000);
 
   S.groupes = lireChoix();
+  document.body.classList.add("sg-page");
+  majVue();
   initCarte();
   majLienMur();
   charger();

@@ -275,3 +275,118 @@ body.sg-ortho .leaflet-tile-pane { filter: brightness(.85); }
   .sg-detail.ouvert { display: block; }
   .sg-totaux { display: none; }
 }
+
+/* ==========================================================================
+   TELEPHONE (<= 820 px, iPhone) : carte plein ecran, panneau du bas a trois
+   hauteurs (--feuille-h posee par suivi_gps.js : bas / mi / haut). La
+   poignee (onglets Unites / Synthese, totaux) est collee au-dessus du
+   panneau ; la fiche d'une unite remplace la liste dans le meme panneau.
+   Paysage bas (<= 500 px de haut) : panneau lateral gauche, sans hauteurs.
+   ========================================================================== */
+.sg-poignee { display: none; }
+/* Onglets et totaux de la poignee (visibles seulement quand elle l'est) */
+.sg-onglets { display: flex; background: var(--bg); border-radius: 10px; padding: 3px; gap: 2px; }
+.sg-onglets button {
+  flex: 1; height: 34px; border: none; background: transparent; border-radius: 8px;
+  font: inherit; font-size: .86rem; font-weight: 700; color: var(--muted);
+}
+.sg-onglets button b { font-weight: 800; color: var(--text); margin-left: 3px; }
+.sg-onglets button b.alerte { color: var(--danger); }
+.sg-onglets button.active { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(15, 23, 42, .12); }
+.sg-mini { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto; scrollbar-width: none; }
+.sg-mini::-webkit-scrollbar { display: none; }
+.sg-mini .sg-tot { font-size: .72rem; padding: 2px 9px; }
+
+@media (max-width: 820px) {
+  .app-layout { height: 100vh; height: 100dvh; }
+  .sg-app .app-footer { display: none; }
+  body.sg-page .ac-fab { right: 12px; bottom: calc(var(--sg-occupe, 0px) + 12px); width: 46px; height: 46px; transition: bottom .25s; }
+  .sg-header { gap: 6px; padding: 6px 8px; overflow: hidden; }
+  .sg-header-ico, #sg-mur, .sg-totaux, .sg-txt { display: none !important; }
+  .sg-live { padding: 0 9px; height: 28px; }
+  .sg-live #sg-live-text { display: none; }
+  .sg-seg button { padding: 6px 9px; }
+  .sg-seg button .material-symbols-outlined { font-size: 20px; }
+
+  .sg-main { position: relative; display: block; --feuille-h: 45vh; }
+  .sg-carte { position: absolute; inset: 0; }
+  .leaflet-control-zoom, .sg-legende { display: none; }
+  .sg-map-outils { flex-direction: column; top: 10px; right: 10px; }
+  .sg-map-btn { width: 42px; height: 42px; padding: 0; justify-content: center; border-radius: 12px; }
+  .sg-map-btn .material-symbols-outlined { font-size: 22px; }
+
+  /* Poignee : barre, onglets, mini totaux */
+  .sg-poignee {
+    display: block; position: absolute; left: 0; right: 0; bottom: var(--feuille-h); z-index: 1001;
+    background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -6px 20px rgba(15, 23, 42, .18);
+    padding: 6px 12px 8px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab;
+  }
+  .sg-poignee .barre { display: block; width: 42px; height: 5px; border-radius: 3px; background: #cbd5e1; margin: 0 auto 8px; }
+
+  /* Panneaux (liste, fiche / synthese) : sous la poignee */
+  .sg-liste, .sg-detail {
+    position: absolute !important; left: 0; right: 0; bottom: 0; top: auto !important; width: auto !important;
+    height: var(--feuille-h); z-index: 1000; border: none; box-shadow: none !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .sg-main:not(.glisse) .sg-liste, .sg-main:not(.glisse) .sg-detail, .sg-main:not(.glisse) .sg-poignee {
+    transition: height .25s var(--ease-sidebar, ease), bottom .25s var(--ease-sidebar, ease);
+  }
+  .sg-detail { display: none !important; }
+  body.sg-vue-detail .sg-detail { display: block !important; }
+  body.sg-vue-detail .sg-liste { display: none; }
+  body.sg-feuille-bas .sg-liste, body.sg-feuille-bas .sg-detail { visibility: hidden; }
+
+  .sg-groupes { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 8px 12px; }
+  .sg-groupes::-webkit-scrollbar { display: none; }
+  .sg-gpuce { height: 32px; font-size: .8rem; flex: 0 0 auto; }
+  .sg-outils { padding: 8px 12px; }
+  .sg-search { height: 40px; }
+  .sg-search input { font-size: 16px; }   /* >= 16 px : pas de zoom auto Safari iOS */
+  .sg-kbd { display: none; }
+  .sg-filtres { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .sg-filtres::-webkit-scrollbar { display: none; }
+  .sg-filtre { height: 32px; font-size: .8rem; flex: 0 0 auto; }
+  .sg-blocs { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-bottom: 30px; }
+  .sg-bloc-tete { top: 0; padding: 10px 12px; }
+  .sg-bloc-tete .zoom { padding: 6px; }
+  .sg-u { padding: 9px 8px; }
+  .sg-u .nm { font-size: .9rem; }
+  .sg-u .dr { font-size: .78rem; }
+  .sg-u .sous { font-size: .76rem; }
+  .sg-anciennes { padding: 10px 8px; font-size: .8rem; }
+
+  .sg-detail { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  .sg-d-tete { padding: 10px 14px; }
+  .sg-d-btn { height: 40px; padding: 0 14px; font-size: .85rem; flex: 1 1 auto; justify-content: center; }
+  .sg-synth { font-size: .82rem; }
+  .sg-synth td { padding: 9px 5px; }
+  .sg-alerte { padding: 10px 12px; font-size: .84rem; }
+}
+
+/* Telephone en paysage : panneau lateral gauche, carte a droite */
+@media (max-width: 940px) and (max-height: 500px) and (orientation: landscape) {
+  .app-layout { height: 100vh; height: 100dvh; }
+  .sg-app .app-footer { display: none; }
+  .sg-onglets button { height: 30px; }
+  .sg-header { min-height: 44px; padding: 4px 8px; }
+  .sg-main { position: relative; display: block; --feuille-h: auto; }
+  .sg-carte { position: absolute; inset: 0 0 0 min(380px, 46vw); }
+  .sg-poignee {
+    display: block; left: 0; right: auto; top: 0; bottom: auto; width: min(380px, 46vw);
+    border-radius: 0; box-shadow: none; border-right: 1px solid var(--line); cursor: default; padding: 6px 10px;
+  }
+  .sg-poignee .barre, .sg-mini { display: none; }
+  .sg-header-ico, #sg-mur, .sg-totaux, .sg-txt, .sg-live #sg-live-text, .sg-legende { display: none !important; }
+  .sg-liste, .sg-detail {
+    position: absolute !important; left: 0; top: 48px !important; bottom: 0; height: auto !important; right: auto;
+    width: min(380px, 46vw) !important; z-index: 1000; border-right: 1px solid var(--line); box-shadow: none !important;
+    transform: none;
+  }
+  .sg-detail { display: none !important; overflow-y: auto; }
+  body.sg-vue-detail .sg-detail { display: block !important; }
+  body.sg-vue-detail .sg-liste { display: none; }
+  body.sg-feuille-bas .sg-liste, body.sg-feuille-bas .sg-detail { visibility: visible; }
+  .sg-search input { font-size: 16px; }
+  .leaflet-control-zoom { display: none; }
+}
