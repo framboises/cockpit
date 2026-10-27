@@ -83,6 +83,15 @@ class TestLectureAfficheur:
         rep = _avec(client, _jeton(env)).get("/meteo-mur")
         assert rep.status_code == 200
         assert b"/api/meteo/mur" in rep.data
+        # Session expiree : le mur se recharge seul (static/js/session_portail.js)
+        assert b"js/session_portail.js" in rep.data
+
+    def test_afficheur_sans_jeton_renvoye_au_portail_avec_retour(self, env, client):
+        # L'agent du Pi ramene l'ecran sur son tableau (guide 05 §10.1) : pas de boucle
+        rep = client.get("/meteo-mur", headers={"Accept": "text/html"})
+        assert rep.status_code == 302 and "/login?next=" in rep.location and "meteo-mur" in rep.location
+        rep = client.get("/api/meteo/mur")
+        assert rep.status_code == 401 and rep.get_json()["erreur"] == "auth_requise"
 
     def test_afficheur_accepte_sur_les_donnees_du_mur(self, env, client):
         rep = _avec(client, _jeton(env)).get("/api/meteo/mur")

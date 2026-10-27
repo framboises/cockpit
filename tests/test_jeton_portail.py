@@ -10,6 +10,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import jwt
 import pytest
@@ -25,6 +26,11 @@ from titan_shared.revocation import cache_par_defaut
 import app as A
 
 KID = "ed-20261025-test0001"
+NAVIGATEUR = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+
+
+def _connexion(url_retour):
+    return "%s/login?next=%s" % (A.BASE_URL, quote(url_retour, safe=""))
 
 
 def _b64(data):
@@ -281,6 +287,11 @@ def client(env):
     def protege():
         return "ok"
 
+    @flask_app.route("/api/protege")
+    @A.role_required("user")
+    def api_protege():
+        return "ok"
+
     @flask_app.route("/peek")
     def peek():
         p = A._request_payload_peek()
@@ -297,16 +308,51 @@ class TestAppelants:
     def test_role_required_jeton_revoque_renvoie_au_portail(self, env, client):
         env["db"]["home_jetons_revoques"].insert_one({"jti": env["claims"]["jti"]})
         client.set_cookie("access_token", _hs256(env["claims"]))
-        rep = client.get("/protege")
-        assert rep.status_code == 302
-        assert rep.location.startswith(A.BASE_URL + "/home?")
-        assert "session a été fermée" in rep.location or "session%20a%20" in rep.location
+        rep = client.get("/protege", headers=NAVIGATEUR)
+        assert rep.status_code == 302 and rep.location == _connexion("http://localhost/protege")
+        rep = client.get("/api/protege")
+        assert rep.status_code == 401 and rep.get_json()["erreur"] == "session_revoquee"
 
     def test_role_required_alg_none_renvoie_au_portail(self, env, client):
         client.set_cookie("access_token", _forge({"alg": "none"}, env["claims"]))
-        rep = client.get("/protege")
+        rep = client.get("/protege", headers=NAVIGATEUR)
+        assert rep.status_code == 302 and rep.location == _connexion("http://localhost/protege")
+        rep = client.get("/api/protege")
+        assert rep.status_code == 401 and rep.get_json()["erreur"] == "auth_invalide"
+
+    def test_role_required_expire(self, env, client):
+        claims = dict(env["claims"], exp=int(time.time()) - 10)
+        client.set_cookie("access_token", _hs256(claims))
+        assert client.get("/protege", headers=NAVIGATEUR).location == _connexion("http://localhost/protege")
+        rep = client.get("/api/protege")
+        assert rep.status_code == 401 and rep.get_json()["erreur"] == "session_expiree"
+
+    def test_sans_cookie_page_retour_avec_parametres(self, env, client):
+        rep = client.get("/protege?event=24H%20AUTOS&year=2026", headers=NAVIGATEUR)
         assert rep.status_code == 302
-        assert "Authentification" in rep.location or "Authentification%20" in rep.location
+        assert rep.location == _connexion("http://localhost/protege?event=24H%20AUTOS&year=2026")
+        assert "/home" not in rep.location
+        rep = client.get("/protege", headers=NAVIGATEUR)
+        assert rep.location == _connexion("http://localhost/protege")  # sans "?" final
+
+    def test_sans_cookie_api_401_json_sans_redirection(self, env, client):
+        rep = client.get("/api/protege")
+        assert rep.status_code == 401 and "Location" not in rep.headers
+        corps = rep.get_json()
+        assert corps["ok"] is False and corps["erreur"] == "auth_requise"
+        assert corps["login"] == _connexion("http://localhost/api/protege")
+
+    def test_sans_cookie_appel_js_hors_api_401(self, env, client):
+        # session_portail.js ajoute X-Requested-With a tous les appels vers Cockpit
+        for entetes in ({"X-Requested-With": "XMLHttpRequest"}, {"Accept": "application/json"}):
+            rep = client.get("/protege", headers=entetes)
+            assert rep.status_code == 401 and rep.get_json()["erreur"] == "auth_requise"
+
+    def test_retour_vers_l_origine_publique_en_production(self, env, client, monkeypatch):
+        # Sans ProxyFix, request.url serait en 127.0.0.1 : le portail le refuserait
+        monkeypatch.setattr(A, "IS_PROD", True)
+        rep = client.get("/protege?x=1", headers=NAVIGATEUR)
+        assert rep.location == _connexion("https://cockpit.lemans.org/protege?x=1")
 
     def test_peek_jeton_revoque_ignore(self, env, client):
         client.set_cookie("access_token", _hs256(env["claims"]))

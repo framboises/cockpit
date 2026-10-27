@@ -20,6 +20,7 @@ from flask import (
 from flask_cors import CORS
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from functools import wraps
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
 from astral.sun import sun
@@ -466,6 +467,37 @@ def est_afficheur(payload):
     return est_jeton_borne(payload) and bool(payload.get("afficheur_id"))
 
 
+# Origine publique de Cockpit (site IIS "COCKPIT") : sans ProxyFix, request.url vaut
+# http://127.0.0.1:<port>/..., que le portail refuserait comme `next`.
+ORIGINE_PUBLIQUE = "https://cockpit.lemans.org"
+
+
+def _veut_json():
+    """Appel d'API (401 JSON) plutot que page (302 vers le portail)."""
+    return (
+        request.path.startswith("/api/")
+        or request.is_json
+        or request.accept_mimetypes.best == "application/json"
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
+def _url_connexion():
+    """Connexion au portail avec retour vers l'adresse demandee (guide 05 §6)."""
+    origine = ORIGINE_PUBLIQUE if IS_PROD else request.host_url.rstrip("/")
+    chemin = request.full_path if request.query_string else request.path
+    return f"{BASE_URL}/login?next={quote(origine + chemin, safe='')}"
+
+
+def _refus_authentification(code, message):
+    """Jeton absent, expire, revoque ou invalide : 401 JSON pour l'API (lu par
+    static/js/session_portail.js), sinon portail. Un afficheur sans jeton passe
+    aussi par /login : l'agent du Pi ramene l'ecran sur son tableau (guide 05 §10.1)."""
+    if _veut_json():
+        return jsonify({"ok": False, "erreur": code, "message": message, "login": _url_connexion()}), 401
+    return redirect(_url_connexion())
+
+
 def role_required(required_role):
     def decorator(f):
         @wraps(f)
@@ -499,20 +531,16 @@ def role_required(required_role):
             token = request.cookies.get("access_token")
             if not token:
                 logger.info("Access token manquant. Redirection vers le portail.")
-                redirect_url = f"{BASE_URL}/home?message=Authentification requise pour accéder à l'application&category=error"
-                return redirect(redirect_url)
+                return _refus_authentification("auth_requise", "Authentification requise pour accéder à l'application.")
 
             try:
                 payload = decoder_jeton_portail(token)
             except jwt.ExpiredSignatureError:
-                redirect_url = f"{BASE_URL}/home?message=Votre session a expiré. Veuillez vous reconnecter.&category=warning"
-                return redirect(redirect_url)
+                return _refus_authentification("session_expiree", "Votre session a expiré. Veuillez vous reconnecter.")
             except JetonRevoque:
-                redirect_url = f"{BASE_URL}/home?message=Votre session a été fermée. Veuillez vous reconnecter.&category=warning"
-                return redirect(redirect_url)
+                return _refus_authentification("session_revoquee", "Votre session a été fermée. Veuillez vous reconnecter.")
             except jwt.InvalidTokenError:
-                redirect_url = f"{BASE_URL}/home?message=Authentification invalide. Veuillez vous reconnecter.&category=error"
-                return redirect(redirect_url)
+                return _refus_authentification("auth_invalide", "Authentification invalide. Veuillez vous reconnecter.")
 
             global_roles = payload.get("global_roles", []) or []
             is_super_admin = SUPER_ADMIN_ROLE in global_roles
