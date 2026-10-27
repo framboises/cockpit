@@ -339,20 +339,25 @@ accordable explicitement a un groupe). But : mesurer la justesse du modele et co
 
 Constats en base du 27/10/2026 (lecture seule) :
 
-- **Couche de zones** : configuree (`operateurs.zones_collection = "competences"`, libelle `Nom`) mais
-  **un seul polygone**. Les zones de competence sont a dessiner dans Looker avant d'etre utiles.
+- **Couche de zones** : configuree (`operateurs.zones_collection = "competences"`, libelle `Nom`),
+  **56 zones** retenues par `operateurs.zones` (55 `MultiPolygon` + 1 `Polygon`, toutes avec
+  `_id_feature`) : departements, lots, secteurs. Recompte du 27/10/2026 par le code lui-meme ; un
+  premier constat « un seul polygone » etait faux (il ne comptait que les `Polygon`).
 - **Fiches avec position** (`pcorg.gps`, GeoJSON `Point` `[lng, lat]`) : 2 868 sur 30 578 ; 24H AUTOS
   2026 901, GPF 2026 448, 24H MOTOS 2026 405, GP EXPLORER 2025 351, LE MANS CLASSIC 2026 321, 24H CAMIONS
   2025 215 / 2026 180, SAISON 2026 8. Assez pour l'IA sur les grandes epreuves, insuffisant en SAISON.
-- ⚠️ **Positions des cameras : 3 sur 337** (`cockpit_cameras.map`). BLOQUANT pour les intrusions
-  (lieu, tablette la plus proche, zone de competence) : placer au minimum les cameras des groupes de
-  detection (page Detection > position) avant la livraison 3.
+- **Positions des cameras** : TOUJOURS passer par `detection._device_position` (position manuelle
+  `cockpit_cameras.map`, sinon couche `titan.cameras` par IP puis nom). 220 appareils sur 337 ont une
+  position (3 manuelles, 217 par la couche) et **les 32 canaux de detection en ont tous une** : rien ne
+  bloque la livraison 3. (Un premier constat « 3 sur 337 » ne lisait que `cockpit_cameras.map`.)
 
-Restent a verifier en technique :
+Verifie en reel le 27/10/2026 (lecture seule, 5 points autour du circuit) :
 
-- `/optimized_route` de notre Valhalla avec les recettes des modes (sinon : ordre optimise par une
-  matrice `/sources_to_targets` et un calcul cote Cockpit).
-- Costing `pedestrian` sur notre graphe (regles du scenario appliquees d'office, cf. routing.md).
+- `/route`, `/optimized_route` et `/sources_to_targets` repondent avec les recettes `normal` (`auto`)
+  et `normal_piste` (`taxi`) et en `pedestrian` (13,7 km en ordre saisi, 13,5 km en ordre optimise en
+  vehicule ; 10 km / 2 h a pied). `/optimized_route` garde le PREMIER et le DERNIER point fixes et
+  reordonne ceux du milieu : pour une boucle, mettre le depart aussi en dernier ; pour un ordre libre
+  de bout en bout, passer par la matrice et un calcul cote Cockpit.
 - Toute modification de `field.js` passe par la nouvelle empreinte du service worker (automatique).
 - Delai d'une proposition (60 s intrusion, 120 s patrouille) : expire au passage suivant du moteur
   (3 s pres), y compris entre deux executions de la tache (bail du verrou).
