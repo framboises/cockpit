@@ -418,7 +418,7 @@
       [f.event, f.year, f.date_local, f.time_local].filter(Boolean).join(" ") +
       "  |  " + (f.category || "sans categorie") + "  |  urgence saisie : " + (f.niveau_urgence || "aucune")));
     left.appendChild(el("div", "gf-title", f.text || "(sans titre)"));
-    var der = el("div", "gf-deroule", f.comment || "(pas de deroule)");
+    var der = renderDeroule(f.comment, it);
     left.appendChild(der);
     if ((f.comment || "").length > 700) {
       var more = el("button", "gf-link", "Tout afficher");
@@ -497,6 +497,109 @@
     card.appendChild(right);
     paintReview(card, it);
     return card;
+  }
+
+  // ---------- Deroule : une entree par operateur, notable (qualite de redaction) ----------
+  // En-tete d'entree : « 12/06/2025 09:04:19 , NOM Prenom » (ancien format : « ..., NOM Prenom: »)
+  var ENTRY_RE = /^(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2})\s*,\s*([^\r\n]+?)\s*:?\s*$/gm;
+  var NOTES = [["bien", "Bien", "Texte clair et complet"], ["moyen", "Moyen", "Comprehensible mais incomplet"],
+               ["nul", "Nul", "Illisible, vide ou inutilisable"]];
+
+  // Meme cle que gravite_fiches._auteur_key (pcorg_enrich.norm en majuscules)
+  function auteurKey(name) {
+    return String(name || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ").trim().toUpperCase();
+  }
+
+  function renderDeroule(text, it) {
+    var der = el("div", "gf-deroule");
+    text = text || "";
+    var heads = [], m;
+    ENTRY_RE.lastIndex = 0;
+    while ((m = ENTRY_RE.exec(text)) !== null) heads.push({ ts: m[1], auteur: m[2], start: m.index, end: m.index + m[0].length });
+    if (!heads.length) {
+      der.textContent = text || "(pas de deroule)";
+      return der;
+    }
+    if (heads[0].start > 0) der.appendChild(el("div", "gf-entry-body", text.slice(0, heads[0].start).trim()));
+    var notes = it.notes_operateurs || {};
+    heads.forEach(function (h, i) {
+      var entry = el("div", "gf-entry");
+      var head = el("div", "gf-entry-head");
+      head.appendChild(el("span", "gf-muted", h.ts.slice(0, 16)));
+      head.appendChild(el("strong", null, h.auteur));
+      var rate = el("span", "gf-rate");
+      var cur = notes[h.ts + "|" + auteurKey(h.auteur)] || null;
+      NOTES.forEach(function (n) {
+        var b = el("button", "gf-rate-btn gf-rate-" + n[0] + (cur === n[0] ? " gf-on" : ""), n[1]);
+        b.type = "button";
+        b.title = "Redaction : " + n[2] + " (retoucher pour retirer)";
+        b.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          var next = b.classList.contains("gf-on") ? null : n[0];
+          apiPost("/api/gravite-fiches/" + encodeURIComponent(it.id) + "/note-operateur",
+            { ts: h.ts, auteur: h.auteur, note: next }).then(function () {
+            rate.querySelectorAll(".gf-rate-btn").forEach(function (x) { x.classList.remove("gf-on"); });
+            if (next) b.classList.add("gf-on");
+            var k = h.ts + "|" + auteurKey(h.auteur);
+            if (next) notes[k] = next; else delete notes[k];
+            it.notes_operateurs = notes;
+            loadOperateurs();
+          }).catch(function (e) { toast("error", "Note non enregistree : " + e.message); });
+        });
+        rate.appendChild(b);
+      });
+      head.appendChild(rate);
+      entry.appendChild(head);
+      var body = text.slice(h.end, i + 1 < heads.length ? heads[i + 1].start : text.length).replace(/^\s+|\s+$/g, "");
+      entry.appendChild(el("div", "gf-entry-body", body || "(vide)"));
+      der.appendChild(entry);
+    });
+    return der;
+  }
+
+  // ---------- Bilan des operateurs ----------
+  function loadOperateurs() {
+    var sel = document.getElementById("gf-op-year");
+    var y = sel ? sel.value : "";
+    return apiGet("/api/gravite-fiches/operateurs" + (y ? "?year=" + encodeURIComponent(y) : "")).then(function (r) {
+      if (sel && sel.options.length <= 1) {
+        (r.years || []).forEach(function (yr) { var o = el("option", null, yr); o.value = yr; sel.appendChild(o); });
+      }
+      var body = document.getElementById("gf-op-body");
+      clear(body);
+      if (!(r.operateurs || []).length) {
+        var tr0 = el("tr");
+        var td0 = el("td", "gf-muted", "Aucune note : notez la redaction a cote du nom dans le deroule d'une fiche.");
+        td0.colSpan = 7;
+        tr0.appendChild(td0);
+        body.appendChild(tr0);
+        return;
+      }
+      r.operateurs.forEach(function (o) {
+        var tr = el("tr");
+        tr.appendChild(el("td", null, o.auteur));
+        tr.appendChild(el("td", "gf-num", o.score === null ? "-" : o.score + " / 100"));
+        tr.appendChild(el("td", "gf-num gf-rate-txt-bien", o.bien));
+        tr.appendChild(el("td", "gf-num gf-rate-txt-moyen", o.moyen));
+        tr.appendChild(el("td", "gf-num gf-rate-txt-nul", o.nul));
+        tr.appendChild(el("td", "gf-num", o.fiches));
+        var td = el("td");
+        var b = el("button", "btn", "Voir");
+        b.type = "button";
+        b.addEventListener("click", function () { openOperateur(o, y); });
+        td.appendChild(b);
+        tr.appendChild(td);
+        body.appendChild(tr);
+      });
+    }).catch(function (e) { toast("error", "Bilan des operateurs illisible : " + e.message); });
+  }
+
+  function openOperateur(o, y) {
+    state.batch = null;
+    apiGet("/api/gravite-fiches/operateur?key=" + encodeURIComponent(o.key) + (y ? "&year=" + encodeURIComponent(y) : ""))
+      .then(function (r) { showItems("Fiches notees de " + o.auteur + (y ? " (" + y + ")" : ""), r.items); })
+      .catch(function (e) { toast("error", "Fiches illisibles : " + e.message); });
   }
 
   function tags(list, cls) {
@@ -827,7 +930,7 @@
       var io = new IntersectionObserver(function (entries) {
         entries.forEach(function (e) { if (e.isIntersecting) setTab(e.target.id); });
       }, { rootMargin: "-40% 0px -55% 0px" });
-      ["gf-sec-suivi", "gf-sec-controle", "gf-sec-qualite", "gf-sec-lots"].forEach(function (id) {
+      ["gf-sec-suivi", "gf-sec-controle", "gf-sec-qualite", "gf-sec-lots", "gf-sec-operateurs"].forEach(function (id) {
         var s = document.getElementById(id);
         if (s) io.observe(s);
       });
@@ -918,6 +1021,8 @@
     document.getElementById("gf-night").addEventListener("change", toggleNight);
     initMobileBar();
     document.addEventListener("keydown", onKey);
+    document.getElementById("gf-op-year").addEventListener("change", loadOperateurs);
     loadSummary();
+    loadOperateurs();
   });
 })();

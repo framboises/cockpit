@@ -82,6 +82,19 @@
 .gf-mb-ignore { margin-left: 6px; padding: 3px 8px; border-radius: 8px; border: 1px dashed var(--border); background: #f8fafc;
     font: inherit; font-size: 11px; color: var(--text); }
 .gf-comp-path { font-weight: 600; }
+/* Deroule par entree, note de redaction de l'operateur a cote du nom */
+.gf-entry { padding: 4px 0 6px; border-bottom: 1px dashed var(--border); }
+.gf-entry:last-child { border-bottom: 0; }
+.gf-entry-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; white-space: normal; }
+.gf-entry-body { white-space: pre-wrap; margin-top: 2px; }
+.gf-rate { display: inline-flex; gap: 3px; margin-left: auto; }
+.gf-rate-btn { font: inherit; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--border); background: #fff; color: var(--text); opacity: .7; }
+.gf-rate-btn:hover { opacity: 1; }
+.gf-rate-btn.gf-on { opacity: 1; color: #fff; border-color: transparent; }
+.gf-rate-bien.gf-on { background: #16a34a; } .gf-rate-moyen.gf-on { background: #d97706; } .gf-rate-nul.gf-on { background: #dc2626; }
+.gf-rate-txt-bien { color: #16a34a; } .gf-rate-txt-moyen { color: #d97706; } .gf-rate-txt-nul { color: #dc2626; }
+@media (pointer: coarse) { .gf-rate-btn { padding: 7px 10px; font-size: 12px; } }
 .gf-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; margin-left: 8px; cursor: pointer; }
 .gf-note { flex: 1; min-width: 160px; font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; }
 .gf-verdict { font-size: 12px; font-weight: 600; margin-left: auto; }
@@ -162,12 +175,12 @@ body.gf-reviewing .gf-batch-toggle { width: 100%; }
   .gf-mobile-start .gf-muted { text-align: center; margin-top: 2px; font-size: 13px; }
 
   /* Barre d'onglets a icones en bas (hors controle) */
-  .gf-tabbar { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0;
+  .gf-tabbar { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0;
       z-index: 40; background: rgba(255, 255, 255, .96); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
       border-top: 1px solid var(--border);
       padding: 4px max(6px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)); }
   .gf-tabbar button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-      min-height: 50px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px;
+      min-height: 50px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 10px; min-width: 0;
       border-radius: 10px; padding: 2px 0; }
   .gf-tabbar button .material-symbols-outlined { font-size: 26px; }
   .gf-tabbar button.gf-tab-on { color: var(--brand); font-weight: 600; }

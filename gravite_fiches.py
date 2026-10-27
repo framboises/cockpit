@@ -83,9 +83,11 @@ def _with_fiches(digests):
     twins = {(d.get(k) or {}).get("de") for d in digests for k in ("doublon_probable", "doublon_declare")} - {None}
     fiches = {f["_id"]: f for f in _db()["pcorg"].find({"_id": {"$in": ids + list(twins)}},
                                                       dict(FICHE_FIELDS, sql_id=1))}
+    notes = _notes_of(ids)
     out = []
     for d in digests:
         o = _pub_digest(d, fiches.get(d["_id"], {}))
+        o["notes_operateurs"] = notes.get(d["_id"], {})
         for k in ("doublon_probable", "doublon_declare"):
             t = fiches.get((d.get(k) or {}).get("de"))
             if t:
@@ -528,6 +530,100 @@ def gravite_fiches_launch():
     if not (res.modified_count or res.upserted_id):
         return jsonify({"error": "demande_deja_en_attente"}), 409
     return jsonify({"ok": True, "batch_size": size, "batches": batches})
+
+
+# ---------------------------------------------------------------------------
+# Qualite de redaction des operateurs (note par entree du deroule, pour les
+# selections de fin d'annee). Collection propre, jamais dans pcorg.
+# ---------------------------------------------------------------------------
+NOTES_COLL = "pcorg_operateur_notes"
+NOTES = ("bien", "moyen", "nul")
+NOTE_POINTS = {"bien": 2, "moyen": 1, "nul": 0}
+
+
+def _auteur_key(name):
+    from pcorg_enrich import norm
+    return norm(name).upper()
+
+
+def _notes_of(fiche_ids):
+    """{fiche_id: {"<ts>|<AUTEUR>": note}}"""
+    out = {}
+    for n in _db()[NOTES_COLL].find({"fiche_id": {"$in": list(fiche_ids)}}, {"fiche_id": 1, "ts": 1, "auteur_key": 1, "note": 1}):
+        out.setdefault(n["fiche_id"], {})["%s|%s" % (n["ts"], n["auteur_key"])] = n["note"]
+    return out
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/<fiche_id>/note-operateur", methods=["POST"])
+@admin_required
+def gravite_fiches_note_operateur(fiche_id):
+    data = request.get_json(silent=True) or {}
+    ts = str(data.get("ts") or "").strip()[:19]
+    auteur = str(data.get("auteur") or "").strip()[:80]
+    note = data.get("note")
+    if not ts or not auteur or (note is not None and note not in NOTES):
+        return jsonify({"error": "invalid"}), 400
+    fiche = _db()["pcorg"].find_one({"_id": fiche_id}, {"event": 1, "year": 1})
+    if not fiche:
+        return jsonify({"error": "not_found"}), 404
+    key = _auteur_key(auteur)
+    _id = "%s|%s|%s" % (fiche_id, ts, key)
+    col = _db()[NOTES_COLL]
+    if note is None:
+        col.delete_one({"_id": _id})
+    else:
+        col.update_one({"_id": _id}, {"$set": {
+            "fiche_id": fiche_id, "ts": ts, "auteur": auteur, "auteur_key": key, "note": note,
+            "event": fiche.get("event"), "year": fiche.get("year"),
+            "by": (getattr(request, "admin_user", None) or {}).get("email", "?"),
+            "at": datetime.now(timezone.utc)}}, upsert=True)
+    return jsonify({"ok": True, "note": note})
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/operateurs")
+@admin_required
+def gravite_fiches_operateurs():
+    """Bilan par operateur des notes de redaction, filtrable par annee."""
+    col = _db()[NOTES_COLL]
+    match = {}
+    year = request.args.get("year")
+    if year and year.isdigit():
+        match["year"] = {"$in": [int(year), year]}
+    rows = list(col.aggregate([
+        {"$match": match},
+        {"$group": {"_id": "$auteur_key", "auteur": {"$last": "$auteur"},
+                    "bien": {"$sum": {"$cond": [{"$eq": ["$note", "bien"]}, 1, 0]}},
+                    "moyen": {"$sum": {"$cond": [{"$eq": ["$note", "moyen"]}, 1, 0]}},
+                    "nul": {"$sum": {"$cond": [{"$eq": ["$note", "nul"]}, 1, 0]}},
+                    "fiches": {"$addToSet": "$fiche_id"}, "last": {"$max": "$at"}}}]))
+    out = []
+    for r in rows:
+        n = r["bien"] + r["moyen"] + r["nul"]
+        out.append({"key": r["_id"], "auteur": r["auteur"], "bien": r["bien"], "moyen": r["moyen"], "nul": r["nul"],
+                    "n": n, "fiches": len(r["fiches"]), "last": _iso(r["last"]),
+                    # 0-100 : bien = 100, moyen = 50, nul = 0
+                    "score": round(sum(NOTE_POINTS[k] * r[k] for k in NOTES) * 50 / n) if n else None})
+    out.sort(key=lambda x: (x["score"] if x["score"] is not None else 101, -x["n"]))
+    years = sorted({y for y in col.distinct("year") if y is not None}, key=str, reverse=True)
+    return jsonify({"operateurs": out, "years": years})
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/operateur")
+@admin_required
+def gravite_fiches_operateur():
+    """Fiches notees d'un operateur (les plus recentes d'abord), pour s'en souvenir."""
+    key = str(request.args.get("key") or "")
+    q = {"auteur_key": key}
+    year = request.args.get("year")
+    if year and year.isdigit():
+        q["year"] = {"$in": [int(year), year]}
+    ids = []
+    for n in _db()[NOTES_COLL].find(q, {"fiche_id": 1}).sort("ts", -1):
+        if n["fiche_id"] not in ids:
+            ids.append(n["fiche_id"])
+    ids = ids[:50]
+    digests = {d["_id"]: d for d in _db()[PD.COLL].find({"_id": {"$in": ids}})}
+    return jsonify({"items": _with_fiches([digests[i] for i in ids if i in digests])})
 
 
 @gravite_fiches_bp.route("/api/gravite-fiches/night", methods=["POST"])

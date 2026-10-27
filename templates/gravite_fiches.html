@@ -143,6 +143,25 @@
                 </div>
             </section>
 
+            <section class="widget-card gf-dash" id="gf-sec-operateurs" style="margin-top:16px;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle;">group</span> Redaction des operateurs</h3>
+                    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+                        <span class="gf-muted">Notes posees a cote des noms dans le deroule</span>
+                        <select id="gf-op-year" class="gf-select" title="Annee des fiches"><option value="">Toutes les annees</option></select>
+                    </div>
+                </header>
+                <div class="widget-body gf-scroll">
+                    <table class="table table-striped gf-operateurs">
+                        <thead><tr>
+                            <th>Operateur</th><th class="gf-num">Score</th><th class="gf-num">Bien</th><th class="gf-num">Moyen</th>
+                            <th class="gf-num">Nul</th><th class="gf-num">Fiches</th><th></th>
+                        </tr></thead>
+                        <tbody id="gf-op-body"><tr><td colspan="7" class="gf-muted">Chargement...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
             <section class="widget-card" style="margin-top:16px;" id="gf-items-card" hidden>
                 <header class="widget-header">
                     <h3 id="gf-items-title">Fiches</h3>
@@ -171,6 +190,9 @@
     </button>
     <button type="button" data-target="gf-sec-controle">
         <span class="material-symbols-outlined">verified</span><span>Justesse</span>
+    </button>
+    <button type="button" data-target="gf-sec-operateurs">
+        <span class="material-symbols-outlined">group</span><span>Operateurs</span>
     </button>
 </nav>
 
