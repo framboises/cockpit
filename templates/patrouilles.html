@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/schedule_grid.css') }}?v={{ asset_v }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/patrouilles.css') }}?v={{ asset_v }}">
 </head>
 
@@ -41,6 +42,7 @@
         <div id="main-content" class="pt-main">
             <nav class="pt-tabs" id="pt-tabs">
                 <button type="button" data-tab="suivi" class="active"><span class="material-symbols-outlined">monitoring</span> Suivi</button>
+                <button type="button" data-tab="plans"><span class="material-symbols-outlined">event_repeat</span> Planifications</button>
                 <button type="button" data-tab="scenarios"><span class="material-symbols-outlined">route</span> Scenarios</button>
                 <button type="button" data-tab="points"><span class="material-symbols-outlined">location_on</span> Points</button>
                 <button type="button" data-tab="tablettes"><span class="material-symbols-outlined">tablet_android</span> Tablettes</button>
@@ -52,8 +54,21 @@
                 <section class="pt-panel" id="pt-panel">
                     <!-- Suivi -->
                     <div class="pt-tab" data-tab="suivi">
-                        <div class="pt-hint">Patrouilles proposees et en cours, et celles des 18 dernieres heures. Rafraichi toutes les 10 s.</div>
+                        <div class="pt-row">
+                            <button type="button" class="btn btn-primary" id="pt-live-send"><span class="material-symbols-outlined">send</span> Envoyer une patrouille</button>
+                        </div>
+                        <div id="pt-live-summary" class="pt-summary"></div>
+                        <div class="pt-hint">Patrouilles proposees et en cours, et celles des 18 dernieres heures. Rafraichi toutes les 10 s. Cliquez une patrouille pour la voir sur la carte.</div>
                         <div id="pt-live"></div>
+                    </div>
+
+                    <!-- Planifications -->
+                    <div class="pt-tab" data-tab="plans" hidden>
+                        <div class="pt-row">
+                            <button type="button" class="btn btn-primary" id="pt-plan-new"><span class="material-symbols-outlined">add</span> Nouvelle planification</button>
+                        </div>
+                        <div class="pt-hint">Une planification envoie un scenario automatiquement, a une tablette ou au premier disponible d'un groupe, selon un planning recurrent (semaine type, exceptions, epreuves, jours feries). Le moteur verifie chaque minute.</div>
+                        <div id="pt-plan-list" class="pt-list"></div>
                     </div>
 
                     <!-- Scenarios -->
@@ -166,10 +181,57 @@
     </div>
 </div>
 
+<!-- Planification (edition) -->
+<div class="pt-modal" id="pt-plan-modal" hidden>
+    <div class="pt-modal-box pt-modal-wide">
+        <div class="pt-modal-head">
+            <h3><span class="material-symbols-outlined">event_repeat</span> <span id="pt-plan-title">Planification</span></h3>
+            <span class="pt-spacer"></span>
+            <span id="pt-plan-dirty" class="pt-muted"></span>
+            <button type="button" class="btn" id="pt-plan-cancel">Fermer</button>
+            <button type="button" class="btn btn-primary" id="pt-plan-save"><span class="material-symbols-outlined">save</span> Enregistrer</button>
+        </div>
+        <div class="pt-plan-body">
+            <div class="pt-plan-side">
+                <label class="pt-field">Nom<input type="text" id="pt-plan-name" class="pt-input" maxlength="80" placeholder="Ex. Ronde du soir, parkings"></label>
+                <div class="pt-step-title"><span>1</span> Quelle patrouille ?</div>
+                <select id="pt-plan-sc" class="pt-input"></select>
+                <div class="pt-step-title"><span>2</span> A qui ?</div>
+                <label class="pt-radio"><input type="radio" name="pt-plan-kind" value="group" checked> Premiere tablette disponible du groupe</label>
+                <select id="pt-plan-group" class="pt-input"></select>
+                <label class="pt-radio"><input type="radio" name="pt-plan-kind" value="device"> Toujours la meme tablette</label>
+                <select id="pt-plan-device" class="pt-input"></select>
+                <div class="pt-step-title"><span>3</span> Combien de fois ?</div>
+                <label class="pt-radio"><input type="radio" name="pt-plan-rule" value="span_start" checked> Une fois au debut de chaque plage</label>
+                <label class="pt-radio"><input type="radio" name="pt-plan-rule" value="every"> Pendant la plage, toutes les
+                    <select id="pt-plan-every" class="pt-input pt-inline">
+                        <option value="30">30 min</option><option value="45">45 min</option><option value="60">1 h</option>
+                        <option value="90">1 h 30</option><option value="120" selected>2 h</option><option value="180">3 h</option>
+                        <option value="240">4 h</option><option value="360">6 h</option>
+                    </select></label>
+                <div class="pt-hint">Une patrouille encore en cours n'est jamais doublee : le creneau suivant est saute.</div>
+                <div class="pt-step-title"><span>4</span> Periode (facultatif)</div>
+                <div class="pt-grid2">
+                    <label class="pt-field">A partir du<input type="date" id="pt-plan-from" class="pt-input"></label>
+                    <label class="pt-field">Jusqu'au<input type="date" id="pt-plan-until" class="pt-input"></label>
+                </div>
+                <label class="pt-check"><input type="checkbox" id="pt-plan-enabled" checked> Planification active</label>
+                <textarea id="pt-plan-note" class="pt-input" rows="2" maxlength="500" placeholder="Note (facultatif)"></textarea>
+                <button type="button" class="btn pt-danger" id="pt-plan-delete">Supprimer la planification</button>
+            </div>
+            <div class="pt-plan-main">
+                <div class="pt-step-title"><span>5</span> Quand ? (plages peintes = lancements possibles)</div>
+                <div id="pt-plan-grid"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Envoyer maintenant -->
 <div class="pt-modal" id="pt-send-modal" hidden>
     <div class="pt-modal-box">
         <h3><span class="material-symbols-outlined">send</span> Envoyer la patrouille</h3>
+        <select id="pt-send-scsel" class="pt-input" hidden></select>
         <div class="pt-hint" id="pt-send-sc"></div>
         <label class="pt-radio"><input type="radio" name="pt-send-kind" value="group" checked> Premiere tablette disponible d'un groupe</label>
         <select id="pt-send-group" class="pt-input"></select>
@@ -188,6 +250,7 @@
         integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/schedule_grid.js') }}?v={{ asset_v }}"></script>
 <script src="{{ url_for('static', filename='js/patrouilles.js') }}?v={{ asset_v }}"></script>
 <script>
   window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};

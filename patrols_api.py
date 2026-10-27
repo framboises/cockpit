@@ -55,7 +55,8 @@ def _err(code, status=400, **extra):
 def _asset_version():
     from flask import current_app
     v = 0
-    for parts in (("js", "patrouilles.js"), ("css", "patrouilles.css")):
+    for parts in (("js", "patrouilles.js"), ("css", "patrouilles.css"),
+                  ("js", "schedule_grid.js"), ("css", "schedule_grid.css")):
         try:
             v = max(v, int(os.path.getmtime(os.path.join(current_app.static_folder, *parts))))
         except OSError:
@@ -76,6 +77,14 @@ def patrouilles_page():
                            user_firstname=payload.get("firstname", ""),
                            user_lastname=payload.get("lastname", ""),
                            user_email=payload.get("email", ""))
+
+
+def _event_names(db):
+    import detection_arming as DAR
+    try:
+        return sorted({str(w.get("event")) for w in DAR._event_windows(db)})
+    except Exception:
+        return []
 
 
 def _zone_labels(zones):
@@ -121,6 +130,8 @@ def patrols_bootstrap():
     return jsonify({
         "ok": True, "settings": st, "points": points, "scenarios": scenarios, "devices": devices,
         "dominantes": [{"id": k, "label": v} for k, v in P.DOMINANTES.items()],
+        # Epreuves connues (exceptions de planning calees sur une epreuve)
+        "events": _event_names(db),
         "zones": [{"id": z["id"], "label": z["label"], "geometry": z["geometry"]} for z in zones],
         "groups": [{"id": gid, "label": g.get("label") or gid, "color": g.get("color") or "#6366f1",
                     "declarant": bool(g.get("declarant")), "disabled": g.get("enabled") is False}
@@ -325,6 +336,104 @@ def patrols_run_cancel(run_id):
     if not ok:
         return _err(code, 404 if code == "not_found" else 400)
     return jsonify({"ok": True, "code": code})
+
+
+# ---------------------------------------------------------------------------
+# Planifications
+# ---------------------------------------------------------------------------
+
+PLAN_ERRORS = {"nom_obligatoire", "scenario_introuvable", "cible_invalide", "date_invalide"}
+
+
+@patrols_bp.route("/api/patrols/plans")
+@admin_required
+def patrols_plans():
+    db = _db()
+    scs = {str(s["_id"]): s for s in db["patrol_scenarios"].find({}, {"name": 1, "color": 1})}
+    now = P._now()
+    plans = [P.pub_plan(db, p, scs, now) for p in db["patrol_plans"].find().sort("name", 1)]
+    return jsonify({"ok": True, "plans": plans})
+
+
+@patrols_bp.route("/api/patrols/plans", methods=["POST"])
+@admin_required
+def patrols_plan_create():
+    db = _db()
+    plan, err = P.save_plan(db, request.get_json(silent=True) or {}, _who())
+    if err:
+        return _err(err)
+    return jsonify({"ok": True, "plan": P.pub_plan(db, plan)})
+
+
+@patrols_bp.route("/api/patrols/plans/<plan_id>", methods=["PUT"])
+@admin_required
+def patrols_plan_update(plan_id):
+    db = _db()
+    plan, err = P.save_plan(db, request.get_json(silent=True) or {}, _who(), plan_id=plan_id)
+    if err:
+        return _err(err, 404 if err == "not_found" else 400)
+    return jsonify({"ok": True, "plan": P.pub_plan(db, plan)})
+
+
+@patrols_bp.route("/api/patrols/plans/<plan_id>", methods=["DELETE"])
+@admin_required
+def patrols_plan_delete(plan_id):
+    r = _db()["patrol_plans"].delete_one({"_id": P._oid(plan_id)})
+    if not r.deleted_count:
+        return _err("not_found", 404)
+    logger.info("Patrouilles : planification %s supprimee par %s", plan_id, _who())
+    return jsonify({"ok": True})
+
+
+@patrols_bp.route("/api/patrols/plans/<plan_id>/enabled", methods=["POST"])
+@admin_required
+def patrols_plan_enabled(plan_id):
+    db = _db()
+    enabled = bool((request.get_json(silent=True) or {}).get("enabled"))
+    r = db["patrol_plans"].update_one({"_id": P._oid(plan_id)},
+                                      {"$set": {"enabled": enabled, "updated_at": P._now(), "updated_by": _who()}})
+    if not r.matched_count:
+        return _err("not_found", 404)
+    return jsonify({"ok": True, "plan": P.pub_plan(db, db["patrol_plans"].find_one({"_id": P._oid(plan_id)}))})
+
+
+@patrols_bp.route("/api/patrols/plans/<plan_id>/override", methods=["POST"])
+@admin_required
+def patrols_plan_override(plan_id):
+    db = _db()
+    data = request.get_json(silent=True) or {}
+    if not P.set_plan_override(db, plan_id, data.get("state"), data.get("hours"), _who()):
+        return _err("not_found", 404)
+    return jsonify({"ok": True, "plan": P.pub_plan(db, db["patrol_plans"].find_one({"_id": P._oid(plan_id)}))})
+
+
+@patrols_bp.route("/api/patrols/plans/preview", methods=["POST"])
+@admin_required
+def patrols_plan_preview():
+    """Calendrier du mois et prochains lancements d'une planification en
+    cours d'edition (rien n'est enregistre)."""
+    import detection_arming as DAR
+    db = _db()
+    data = request.get_json(silent=True) or {}
+    clean, err = P._clean_plan(db, dict(data, name=data.get("name") or "apercu"))
+    if err and err not in ("scenario_introuvable", "cible_invalide"):
+        return _err(err)
+    if err:     # apercu possible avant d'avoir choisi scenario et cible
+        clean = {"arming": DAR.normalize(data.get("arming")), "launch": data.get("launch") or {},
+                 "valid_from": data.get("valid_from") or None, "valid_until": data.get("valid_until") or None}
+    clean["enabled"] = True
+    now = P._now()
+    month = str(request.args.get("month") or now.astimezone(P.PARIS).strftime("%Y-%m"))
+    try:
+        y, m = int(month[:4]), int(month[5:7])
+    except ValueError:
+        return _err("mois_invalide")
+    days = DAR.month_view({"arming": clean["arming"]}, y, m, db)
+    for d in days:
+        if not P._in_validity(clean, datetime.fromisoformat(d["date"] + "T12:00:00").replace(tzinfo=P.PARIS)):
+            d.update(spans=[], active_quarters=0, label="Hors periode de validite", source="validity", kind="off")
+    return jsonify({"ok": True, "month": "%04d-%02d" % (y, m), "days": days,
+                    "next": [P._iso(t) for t in P.next_launches(db, clean, now, limit=10)]})
 
 
 @patrols_bp.route("/api/patrols/devices/<device_id>/zones", methods=["POST"])

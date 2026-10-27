@@ -394,6 +394,21 @@ _ALERT_SEEDS = [
         "groups": [],
         "priority": 0,
     },
+    {
+        # Levee par patrol_engine.py (patrols.on_not_taken) : refus, silence
+        # ou aucune tablette pour une patrouille programmee.
+        "slug": "patrol_not_taken",
+        "name": "Patrouille non prise",
+        "description": "Aucune tablette n'a accepte une patrouille programmee (refus, silence ou personne de disponible)",
+        "icon": "route",
+        "color": "#d97706",
+        "detection_type": "patrol_not_taken",
+        "display_mode": "fullscreen",
+        "params": {},
+        "enabled": True,
+        "groups": [],
+        "priority": 20,
+    },
 ]
 for _seed in _ALERT_SEEDS:
     COL_ALERT_DEFS.update_one(

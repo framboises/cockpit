@@ -107,3 +107,33 @@
   .pt-map-wrap { height: 55vh; order: -1; }
   .pt-grid2, .pt-zone-grid { grid-template-columns: 1fr; }
 }
+
+/* Suivi : resume du jour */
+.pt-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.pt-kpi { flex: 1; min-width: 78px; background: #fff; border: 1px solid #e2e8f0; border-radius: 9px; padding: 6px 8px; display: flex; flex-direction: column; }
+.pt-kpi b { font-size: 20px; line-height: 1.1; }
+.pt-kpi span { font-size: 11px; color: #64748b; }
+.pt-next-launches { flex-basis: 100%; font-size: 12.5px; color: #475569; }
+
+/* Planifications */
+.pt-plan { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; display: flex; flex-direction: column; gap: 6px; }
+.pt-plan.off { opacity: .65; }
+.pt-plan-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pt-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; cursor: pointer; }
+.pt-switch input { opacity: 0; width: 0; height: 0; }
+.pt-switch span { position: absolute; inset: 0; background: #cbd5e1; border-radius: 999px; transition: background .15s; }
+.pt-switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .15s; }
+.pt-switch input:checked + span { background: #16a34a; }
+.pt-switch input:checked + span::before { transform: translateX(18px); }
+
+.pt-modal-wide { max-width: 1180px; max-height: calc(100vh - 32px); overflow: hidden; }
+.pt-modal-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pt-modal-head h3 { margin: 0; }
+.pt-plan-body { display: grid; grid-template-columns: 320px 1fr; gap: 16px; overflow-y: auto; min-height: 0; padding-right: 4px; }
+.pt-plan-side, .pt-plan-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pt-step-title { display: flex; align-items: center; gap: 8px; font-weight: 700; color: #1e293b; margin-top: 6px; }
+.pt-step-title span { width: 22px; height: 22px; border-radius: 50%; background: #2563eb; color: #fff; font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.pt-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #475569; }
+.pt-inline { width: auto !important; display: inline-block; padding: 3px 6px; }
+@media (max-width: 900px) { .pt-plan-body { grid-template-columns: 1fr; } }

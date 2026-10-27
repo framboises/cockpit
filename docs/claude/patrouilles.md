@@ -417,3 +417,29 @@ compte l.arnault, chaque minute, IgnoreNew), `templates/patrouilles.html`, `stat
 - **Personne ne prend** (`refused`) : pour l'instant seulement visible au Suivi ; alerte « Patrouille
   non prise » et fiche Information = livraison 2 (`patrols.on_not_taken`).
 - Dominante enregistree sur le scenario (section 6.1), sans effet avant la livraison 4.
+
+### Livraison 2 : planifications (27/10/2026)
+
+- `patrol_plans {name, scenario_id, target, enabled, launch {rule: span_start | every, every_min},
+  arming, valid_from, valid_until, note, last_launch {slot_key, at, slot, result}}`. Le planning
+  (`arming`) est au format de la detection et evalue par **`detection_arming.py` importe tel quel**
+  (`group_state`, `month_view`, `explain` sur `{"arming": ...}`) : jamais de copie de la regle.
+  Recurrence : semaines types au quart d'heure, exceptions datees (une fois ou chaque annee),
+  exceptions calees sur une epreuve (montage-demontage ou jours publics, chaque annee), jours
+  feries, forcage temporaire (Suspendre 4 h / Lancer pendant 4 h), periode de validite.
+- Lancement (`patrols.launch_plans`, a chaque passage du moteur) : `span_start` = au debut de chaque
+  plage, `every` = toutes les N minutes (au quart d'heure) depuis le debut de la plage (mode « tout
+  le temps » : depuis minuit). Creneau rate de plus de 10 min (moteur arrete) : pas rattrape. Une
+  patrouille precedente du meme plan encore proposee / en cours : creneau saute (`last_launch.result`).
+  `slot_key = "<plan>|<debut UTC>"` unique (index) : jamais deux lancements du meme creneau.
+- Personne ne prend (refus, silence, aucune tablette, tablette imposee occupee) : `on_not_taken`
+  leve l'alerte `patrol_not_taken` (definition semee dans `_ALERT_SEEDS` d'app.py, plein ecran) et
+  cree une fiche `PCO.Information` close (`content_category.patrol_not_taken`), une seule fois.
+- Page : onglet Planifications (cartes avec interrupteur, etat du moment, prochains lancements,
+  dernier resultat, forcages), editeur en 5 etapes (quelle patrouille, a qui, combien de fois,
+  periode, quand) avec le composant **`static/js/schedule_grid.js`** (+ `schedule_grid.css`) :
+  modeles, saisie « de... a... », grille a peindre, semaines types, exceptions, feries, calendrier
+  du mois + prochains lancements (`/api/patrols/plans/preview`). La page Detection garde sa propre
+  copie de l'editeur (a migrer sur ce composant plus tard, sans changer son format).
+- Suivi : resume du jour (en cours, en pause, en attente, terminees, non prises), prochains
+  lancements, bouton « Envoyer une patrouille » direct.

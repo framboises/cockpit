@@ -175,7 +175,8 @@
     document.querySelectorAll(".pt-tab").forEach(function (t) { t.hidden = t.dataset.tab !== tab; });
     try { localStorage.setItem("pt_tab", tab); } catch (e) { /* noop */ }
     if (S.liveTimer) { clearInterval(S.liveTimer); S.liveTimer = null; }
-    if (tab === "suivi") { loadLive(); S.liveTimer = setInterval(loadLive, 10000); }
+    if (tab === "suivi") { loadPlans(); loadLive(); S.liveTimer = setInterval(loadLive, 10000); }
+    if (tab === "plans") { loadPlans(); S.liveTimer = setInterval(loadPlans, 30000); }
     if (tab === "historique") loadHistory();
     render();
     setTimeout(function () { S.map.invalidateSize(); }, 50);
@@ -190,6 +191,7 @@
     else if (S.tab === "scenarios") { renderScenarios(); if (S.sc) drawScenarioEditor(); else drawAllPoints(false); }
     else if (S.tab === "tablettes") renderDevices();
     else if (S.tab === "suivi") renderLive();
+    else if (S.tab === "plans") renderPlans();
     drawZones();
   }
 
@@ -511,9 +513,18 @@
   var STATUS_LABELS = { patrouille: "disponible", intervention: "en intervention", sur_place: "sur place",
                         pause: "en pause", fin_intervention: "fin d'intervention" };
 
-  function openSend() {
-    var sc = S.data.scenarios.find(function (s) { return s.id === S.sc.id; });
-    $("pt-send-sc").textContent = (sc ? sc.name : "") + " - " + S.sc.points.length + " points";
+  // scenarioId absent : choix du scenario dans la fenetre (depuis le Suivi)
+  function openSend(scenarioId) {
+    var sel = $("pt-send-scsel");
+    var live = S.data.scenarios.filter(function (s) { return !s.archived && s.points.length; });
+    if (!scenarioId && !live.length) { toast("info", "Creez d'abord un scenario (onglet Scenarios)"); return; }
+    sel.hidden = !!scenarioId;
+    clear(sel);
+    live.forEach(function (s) { sel.appendChild(new Option(s.name + " - " + s.points.length + " points", s.id)); });
+    S.sendSc = scenarioId || sel.value;
+    sel.onchange = function () { S.sendSc = sel.value; };
+    var sc = S.data.scenarios.find(function (s) { return s.id === S.sendSc; });
+    $("pt-send-sc").textContent = scenarioId && sc ? sc.name + " - " + sc.points.length + " points" : "";
     var gs = $("pt-send-group");
     clear(gs);
     S.data.groups.filter(function (g) { return !g.declarant && !g.disabled; }).forEach(function (g) {
@@ -536,7 +547,7 @@
                                   : { kind: "device", device_id: $("pt-send-device").value };
     var res = $("pt-send-result");
     $("pt-send-go").disabled = true;
-    apiPost("/api/patrols/scenarios/" + S.sc.id + "/send", { target: target }).then(function (r) {
+    apiPost("/api/patrols/scenarios/" + S.sendSc + "/send", { target: target }).then(function (r) {
       res.hidden = false; clear(res);
       res.className = "pt-send-result ok";
       res.appendChild(el("div", null, "Proposee a " + (r.run.current ? r.run.current.device_name : "?") +
@@ -623,6 +634,7 @@
   }
 
   function renderLive() {
+    renderLiveSummary();
     var box = $("pt-live");
     clear(box);
     if (!S.live.length) box.appendChild(el("div", "pt-empty", "Aucune patrouille en cours ni recente. Envoyez-en une depuis l'onglet Scenarios."));
@@ -693,6 +705,229 @@
     }).catch(function (e) { toast("error", errLabel(e)); });
   }
 
+  // ---------- Planifications ----------
+  var RULE_LABELS = { span_start: "une fois au debut de chaque plage", every: "toutes les " };
+  function fmtEvery(m) { return m % 60 ? (m >= 60 ? Math.floor(m / 60) + " h " + (m % 60) : m + " min") : (m / 60) + " h"; }
+  function fmtWhen(iso) {
+    var d = new Date(iso), today = new Date();
+    var same = d.toDateString() === today.toDateString();
+    var tmr = new Date(today.getTime() + 86400000).toDateString() === d.toDateString();
+    return (same ? "aujourd'hui" : tmr ? "demain" : d.toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })) + " " + fmtTime(iso);
+  }
+  function targetLabel(t) {
+    if (!t) return "-";
+    if (t.kind === "device") {
+      var d = S.data.devices.find(function (x) { return x.id === t.device_id; });
+      return "tablette " + (d ? d.name : "(supprimee)");
+    }
+    var g = S.data.groups.find(function (x) { return x.id === t.beacon_group_id; });
+    return "groupe " + (g ? g.label : t.beacon_group_id);
+  }
+  function explainLabel(p) {
+    var e = p.explain || "";
+    if (e === "desactivee") return "Desactivee";
+    if (e === "override") return p.arming.override ? (p.arming.override.state === "on" ? "Forcee active" : "Suspendue") + " jusqu'a " + fmtWhen(p.arming.override.until) : "";
+    if (e === "always") return "Tout le temps";
+    if (e === "off") return "En pause";
+    var parts = e.split(":");
+    return (p.active_now ? "En plage" : "Hors plage") + (parts[1] ? " - " + parts.slice(1).join(":") : "");
+  }
+
+  function loadPlans() {
+    return apiGet("/api/patrols/plans").then(function (r) {
+      S.plans = r.plans;
+      if (S.tab === "plans") renderPlans();
+      if (S.tab === "suivi") renderLiveSummary();
+    }).catch(function () { /* silencieux */ });
+  }
+
+  function renderPlans() {
+    var list = $("pt-plan-list");
+    clear(list);
+    if (!S.plans || !S.plans.length) {
+      list.appendChild(el("div", "pt-empty", "Aucune planification. Exemple : la ronde des parkings toutes les 2 h de 8 h a 20 h, envoyee au groupe Securite."));
+      return;
+    }
+    S.plans.forEach(function (p) {
+      var card = el("div", "pt-plan" + (p.enabled ? "" : " off"));
+      var head = el("div", "pt-run-head");
+      var sw = el("span", "pt-swatch"); sw.style.background = p.scenario_color || "#2563eb"; head.appendChild(sw);
+      var t = el("div", "pt-run-title", p.name);
+      head.appendChild(t);
+      var tog = el("label", "pt-switch");
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = p.enabled;
+      cb.addEventListener("change", function () {
+        apiPost("/api/patrols/plans/" + p.id + "/enabled", { enabled: cb.checked }).then(function () {
+          toast("success", cb.checked ? "Planification activee" : "Planification desactivee"); loadPlans();
+        }).catch(function (e) { cb.checked = !cb.checked; toast("error", errLabel(e)); });
+      });
+      tog.appendChild(cb); tog.appendChild(el("span"));
+      tog.title = p.enabled ? "Active (cliquer pour desactiver)" : "Desactivee (cliquer pour activer)";
+      head.appendChild(tog);
+      card.appendChild(head);
+      card.appendChild(el("div", "pt-item-sub", (p.scenario_name || "(scenario supprime)") + " - " + targetLabel(p.target) + " - " +
+        (p.launch.rule === "every" ? RULE_LABELS.every + fmtEvery(p.launch.every_min) + " pendant les plages" : RULE_LABELS.span_start) +
+        (p.valid_from || p.valid_until ? " - du " + (p.valid_from || "...") + " au " + (p.valid_until || "...") : "")));
+      var state = el("div", "pt-plan-state");
+      state.appendChild(el("span", "pt-badge " + (p.active_now ? "st-running" : (p.enabled ? "" : "st-cancelled")), explainLabel(p)));
+      state.appendChild(el("span", "pt-muted", p.next.length ? "Prochain : " + p.next.slice(0, 3).map(fmtWhen).join(", ") : "Aucun lancement prevu sous 14 jours"));
+      card.appendChild(state);
+      if (p.last_launch) card.appendChild(el("div", "pt-muted", "Dernier lancement " + fmtWhen(p.last_launch.at) + " : " + p.last_launch.result));
+      var acts = el("div", "pt-row pt-actions");
+      var ed = el("button", "btn", ""); ed.type = "button"; ed.appendChild(icon("edit")); ed.appendChild(document.createTextNode(" Modifier"));
+      ed.addEventListener("click", function () { openPlan(p); });
+      acts.appendChild(ed);
+      if (p.enabled) {
+        if (p.arming.override) {
+          var back = el("button", "btn", "Revenir au planning"); back.type = "button";
+          back.addEventListener("click", function () { overridePlan(p, null); });
+          acts.appendChild(back);
+        } else {
+          var off = el("button", "btn", "Suspendre 4 h"); off.type = "button"; off.title = "Aucun lancement pendant 4 h";
+          off.addEventListener("click", function () { overridePlan(p, "off"); });
+          var on = el("button", "btn", "Lancer pendant 4 h"); on.type = "button"; on.title = "Comme si la plage etait active pendant 4 h (lancement immediat)";
+          on.addEventListener("click", function () { overridePlan(p, "on"); });
+          acts.appendChild(off); acts.appendChild(on);
+        }
+      }
+      card.appendChild(acts);
+      list.appendChild(card);
+    });
+  }
+
+  function overridePlan(p, state) {
+    apiPost("/api/patrols/plans/" + p.id + "/override", { state: state, hours: 4 }).then(function () {
+      toast("success", state === "off" ? "Suspendue 4 h" : state === "on" ? "Lancements actives pendant 4 h" : "Retour au planning");
+      loadPlans();
+    }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
+  var PLAN = null;   // {id, grid}
+  function planDirty() { $("pt-plan-dirty").textContent = "Modifications non enregistrees"; }
+
+  function fillPlanSelects() {
+    var sc = $("pt-plan-sc");
+    clear(sc);
+    S.data.scenarios.filter(function (s) { return !s.archived; }).forEach(function (s) {
+      sc.appendChild(new Option(s.name + " (" + s.points.length + " points" + (s.estimate && s.estimate.duration_s ? ", " + fmtMin(s.estimate.duration_s) : "") + ")", s.id));
+    });
+    var gs = $("pt-plan-group");
+    clear(gs);
+    S.data.groups.filter(function (g) { return !g.declarant && !g.disabled; }).forEach(function (g) { gs.appendChild(new Option(g.label, g.id)); });
+    var ds = $("pt-plan-device");
+    clear(ds);
+    S.data.devices.filter(function (d) { return !d.declarant; }).forEach(function (d) { ds.appendChild(new Option(d.name + (d.group_label ? " (" + d.group_label + ")" : ""), d.id)); });
+  }
+
+  function planBody() {
+    var kind = document.querySelector('input[name="pt-plan-kind"]:checked').value;
+    return {
+      name: $("pt-plan-name").value, scenario_id: $("pt-plan-sc").value,
+      target: kind === "group" ? { kind: "group", beacon_group_id: $("pt-plan-group").value } : { kind: "device", device_id: $("pt-plan-device").value },
+      launch: { rule: document.querySelector('input[name="pt-plan-rule"]:checked').value, every_min: Number($("pt-plan-every").value) },
+      valid_from: $("pt-plan-from").value || null, valid_until: $("pt-plan-until").value || null,
+      enabled: $("pt-plan-enabled").checked, note: $("pt-plan-note").value,
+      arming: PLAN.grid.arming(),
+    };
+  }
+
+  function openPlan(p) {
+    if (!S.data.scenarios.some(function (s) { return !s.archived; })) { toast("info", "Creez d'abord un scenario (onglet Scenarios)"); return; }
+    fillPlanSelects();
+    PLAN = { id: p ? p.id : null };
+    $("pt-plan-title").textContent = p ? p.name : "Nouvelle planification";
+    $("pt-plan-name").value = p ? p.name : "";
+    if (p && p.scenario_id) $("pt-plan-sc").value = p.scenario_id;
+    var t = (p && p.target) || { kind: "group" };
+    document.querySelectorAll('input[name="pt-plan-kind"]').forEach(function (r) { r.checked = r.value === t.kind; });
+    if (t.beacon_group_id) $("pt-plan-group").value = t.beacon_group_id;
+    if (t.device_id) $("pt-plan-device").value = t.device_id;
+    var l = (p && p.launch) || { rule: "span_start", every_min: 120 };
+    document.querySelectorAll('input[name="pt-plan-rule"]').forEach(function (r) { r.checked = r.value === l.rule; });
+    $("pt-plan-every").value = String(l.every_min || 120);
+    if (!$("pt-plan-every").value) $("pt-plan-every").value = "120";
+    $("pt-plan-from").value = (p && p.valid_from) || "";
+    $("pt-plan-until").value = (p && p.valid_until) || "";
+    $("pt-plan-enabled").checked = p ? p.enabled : true;
+    $("pt-plan-note").value = (p && p.note) || "";
+    $("pt-plan-delete").hidden = !p;
+    PLAN.grid = window.ScheduleGrid.create($("pt-plan-grid"), p ? p.arming : null, {
+      events: S.data.events || [], onLabel: "Plage",
+      onChange: planDirty,
+      preview: function (month) {
+        return apiPost("/api/patrols/plans/preview?month=" + month, planBody());
+      },
+    });
+    $("pt-plan-dirty").textContent = "";
+    $("pt-plan-modal").hidden = false;
+  }
+
+  function closePlan() {
+    if ($("pt-plan-dirty").textContent && typeof window.showConfirmToast === "function") {
+      window.showConfirmToast("Fermer sans enregistrer les modifications ?", { okLabel: "Fermer", type: "warning" }).then(function (ok) {
+        if (ok) $("pt-plan-modal").hidden = true;
+      });
+    } else $("pt-plan-modal").hidden = true;
+  }
+
+  function savePlan() {
+    var body = planBody();
+    if (!body.name.trim()) { toast("warning", "Donnez un nom a la planification"); $("pt-plan-name").focus(); return; }
+    var req = PLAN.id ? apiPut("/api/patrols/plans/" + PLAN.id, body) : apiPost("/api/patrols/plans", body);
+    req.then(function (r) {
+      var p = r.plan;
+      toast("success", "Planification enregistree" + (p.next.length ? " - prochain lancement " + fmtWhen(p.next[0]) : ""));
+      $("pt-plan-dirty").textContent = "";
+      $("pt-plan-modal").hidden = true;
+      loadPlans();
+    }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
+  function deletePlan() {
+    var go = typeof window.showConfirmToast === "function"
+      ? window.showConfirmToast("Supprimer cette planification ? Les patrouilles deja envoyees restent dans l'historique.", { okLabel: "Supprimer", type: "warning" })
+      : Promise.resolve(true);
+    go.then(function (ok) {
+      if (!ok) return;
+      apiSend("DELETE", "/api/patrols/plans/" + PLAN.id).then(function () {
+        toast("success", "Planification supprimee");
+        $("pt-plan-dirty").textContent = "";
+        $("pt-plan-modal").hidden = true;
+        loadPlans();
+      }).catch(function (e) { toast("error", errLabel(e)); });
+    });
+  }
+
+  function renderLiveSummary() {
+    var box = $("pt-live-summary");
+    if (!box) return;
+    clear(box);
+    var c = { running: 0, paused: 0, proposed: 0, done: 0, notTaken: 0 };
+    (S.live || []).forEach(function (r) {
+      if (r.state === "running") c.running++;
+      else if (r.state === "paused") c.paused++;
+      else if (r.state === "proposed") c.proposed++;
+      else if (r.state === "done" || r.state === "partial") c.done++;
+      else if (r.state === "refused" || r.state === "expired") c.notTaken++;
+    });
+    [["En cours", c.running, "#16a34a"], ["En pause", c.paused, "#d97706"], ["En attente de reponse", c.proposed, "#2563eb"],
+     ["Terminees", c.done, "#475569"], ["Non prises", c.notTaken, "#dc2626"]].forEach(function (x) {
+      var k = el("div", "pt-kpi");
+      var v = el("b", null, x[1]); v.style.color = x[1] ? x[2] : "#94a3b8";
+      k.appendChild(v); k.appendChild(el("span", null, x[0]));
+      box.appendChild(k);
+    });
+    var nexts = [];
+    (S.plans || []).forEach(function (p) { if (p.enabled && p.next.length) nexts.push({ at: p.next[0], name: p.name }); });
+    nexts.sort(function (a, b) { return a.at < b.at ? -1 : 1; });
+    if (nexts.length) {
+      var n = el("div", "pt-next-launches");
+      n.appendChild(el("b", null, "Prochains lancements : "));
+      n.appendChild(document.createTextNode(nexts.slice(0, 4).map(function (x) { return x.name + " " + fmtWhen(x.at); }).join(" - ")));
+      box.appendChild(n);
+    }
+  }
+
   // ---------- Tablettes ----------
   function renderDevices() {
     var list = $("pt-dev-list");
@@ -751,7 +986,9 @@
   // ---------- Init ----------
   function bind() {
     document.querySelectorAll("#pt-tabs button").forEach(function (b) { b.addEventListener("click", function () { setTab(b.dataset.tab); }); });
-    $("pt-refresh").addEventListener("click", function () { load().then(function () { if (S.tab === "suivi") loadLive(); if (S.tab === "historique") loadHistory(); }); });
+    $("pt-refresh").addEventListener("click", function () {
+      load().then(function () { loadPlans(); if (S.tab === "suivi") loadLive(); if (S.tab === "historique") loadHistory(); });
+    });
     $("pt-pt-search").addEventListener("input", renderPoints);
     $("pt-pt-inactive").addEventListener("change", render);
     $("pt-pt-save").addEventListener("click", savePoint);
@@ -765,7 +1002,15 @@
     $("pt-sc-save").addEventListener("click", saveScenario);
     $("pt-sc-optimize").addEventListener("click", optimize);
     $("pt-sc-archive").addEventListener("click", archiveScenario);
-    $("pt-sc-send").addEventListener("click", openSend);
+    $("pt-sc-send").addEventListener("click", function () { openSend(S.sc.id); });
+    $("pt-live-send").addEventListener("click", function () { openSend(null); });
+    $("pt-plan-new").addEventListener("click", function () { openPlan(null); });
+    $("pt-plan-save").addEventListener("click", savePlan);
+    $("pt-plan-cancel").addEventListener("click", closePlan);
+    $("pt-plan-delete").addEventListener("click", deletePlan);
+    ["pt-plan-name", "pt-plan-sc", "pt-plan-group", "pt-plan-device", "pt-plan-every", "pt-plan-from", "pt-plan-until",
+     "pt-plan-enabled", "pt-plan-note"].forEach(function (id) { $(id).addEventListener("change", planDirty); });
+    document.querySelectorAll('input[name="pt-plan-kind"], input[name="pt-plan-rule"]').forEach(function (r) { r.addEventListener("change", planDirty); });
     $("pt-sc-loop").addEventListener("change", preview);
     $("pt-sc-color").addEventListener("change", function () { readScenarioForm(); render(); });
     document.querySelectorAll('input[name="pt-sc-travel"]').forEach(function (r) { r.addEventListener("change", preview); });

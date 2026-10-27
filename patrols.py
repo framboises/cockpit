@@ -121,6 +121,7 @@ def ensure_indexes(db):
         db["patrol_runs"].create_index([("device_id", 1), ("state", 1)], name="device_state")
         db["patrol_runs"].create_index("slot_key", unique=True, sparse=True, name="slot_key_unique")
         db["patrol_runs"].create_index([("created_at", -1)], name="created_desc")
+        db["patrol_runs"].create_index([("plan_id", 1), ("state", 1)], name="plan_state")
     except Exception as e:  # pragma: no cover - droits / index deja la
         logger.debug("index patrol_runs : %s", e)
 
@@ -651,10 +652,65 @@ def propose_next(db, run_id, now=None):
     return "proposed", skipped
 
 
+ALERT_SLUG = "patrol_not_taken"
+
+
 def on_not_taken(db, run_id, now):
-    """Personne n'a pris la patrouille. Livraison 2 : alerte "Patrouille non
-    prise" a la centrale et fiche Information. Pour l'instant, trace seule."""
-    logger.info("patrouille %s non prise", run_id)
+    """Personne n'a pris la patrouille (refus, silence, aucune tablette) :
+    alerte "Patrouille non prise" a la centrale et fiche Information close
+    dans la main courante. Une seule fois par patrouille."""
+    r = db["patrol_runs"].update_one({"_id": run_id, "not_taken_at": {"$exists": False}},
+                                     {"$set": {"not_taken_at": now}})
+    if not r.modified_count:
+        return
+    run = db["patrol_runs"].find_one({"_id": run_id}) or {}
+    sc = run.get("scenario") or {}
+    tried = ", ".join("%s (%s)" % (a.get("device_name"), {"refused": "refus", "timeout": "sans reponse"}
+                                   .get(a.get("answer"), a.get("answer"))) for a in run.get("attempts") or [])
+    why = run.get("end_reason") or "aucune tablette disponible"
+    plan = db["patrol_plans"].find_one({"_id": _oid(run.get("plan_id"))}, {"name": 1}) if run.get("plan_id") else None
+    origin = ("planification " + plan["name"]) if plan else ("envoi de " + (run.get("created_by") or "?"))
+    try:
+        event, year = _current_event(db, now)
+    except Exception:
+        event, year = None, None
+    text = "Patrouille non prise : %s (%s)" % (sc.get("name") or "?", origin)
+    body = why + ((". Sollicitees : " + tried) if tried else "")
+    fid = str(uuid.uuid5(uuid.NAMESPACE_URL, "patrol-not-taken|" + run_id))
+    doc = {
+        "_id": fid, "event": event, "year": year, "ts": now,
+        "timestamp_iso": now.astimezone(PARIS).isoformat(), "close_ts": now,
+        "close_iso": now.astimezone(PARIS).isoformat(), "category": "PCO.Information",
+        "source": "PCO.Information", "text": text, "text_full": text, "comment": "", "comment_history": [],
+        "operator": BOT, "operator_id_create": "patrol:" + run_id, "operator_close": BOT,
+        "operator_id_close": "patrol:" + run_id, "status_code": 10, "severity": 0, "niveau_urgence": None,
+        "is_incident": False, "area": None, "gps": None, "group": None,
+        "content_category": {"patrol_not_taken": run_id, "patrol_scenario": sc.get("id")},
+        "extracted": {"phones": None, "plates": None}, "tags": ["patrouille"],
+        "synced_at": None, "sql_id": None, "guid": None, "server": "COCKPIT", "bounce_rev": 1,
+    }
+    try:
+        db["pcorg"].insert_one(doc)
+        PH.append_entry(db["pcorg"], fid, PH.make_entry(BOT, body, ts=now, system=True))
+    except Exception as e:
+        logger.warning("patrouille %s : fiche non prise (%s)", run_id, e)
+    try:
+        db["cockpit_active_alerts"].insert_one({
+            "definition_slug": ALERT_SLUG, "event": event, "year": str(year) if year is not None else None,
+            "title": "Patrouille non prise - " + (sc.get("name") or "?"), "message": body[:300],
+            "timeStr": now.astimezone(PARIS).strftime("%H:%M"), "dedup_key": "patrol-not-taken-" + run_id,
+            "triggeredAt": now, "expiresAt": now + timedelta(hours=2), "status": "active",
+            "actionData": {"run_id": run_id, "plan_id": run.get("plan_id"), "pcorg_id": fid,
+                           "scenario": sc.get("name")},
+        })
+    except Exception as e:
+        logger.warning("patrouille %s : alerte non levee (%s)", run_id, e)
+    logger.info("patrouille %s non prise : %s", run_id, body)
+
+
+def _current_event(db, now=None):
+    import event_courant as EC
+    return EC.current_event(db, now)
 
 
 def _release_proposal(db, device_id, run_id):
@@ -983,14 +1039,254 @@ def sync_pause(db, run, device=None, now=None):
 
 
 # ---------------------------------------------------------------------------
+# Planifications (livraison 2)
+# ---------------------------------------------------------------------------
+# Planning = format de la detection (detection_arming.py, REUTILISE tel quel,
+# jamais copie) : semaines types peintes au quart d'heure, exceptions datees
+# (une fois ou chaque annee) ou calees sur une epreuve (chaque annee), jours
+# feries, forcage temporaire. Une plage active declenche un lancement a son
+# debut (`span_start`) ou toutes les `every_min` minutes (`every`), dans la
+# periode de validite facultative [valid_from, valid_until]. `slot_key`
+# unique : jamais deux lancements pour le meme creneau, meme si deux
+# executions du moteur se chevauchent.
+
+LAUNCH_RULES = ("span_start", "every")
+LAUNCH_GRACE_MIN = 10        # un creneau rate de plus de 10 min (moteur arrete) n'est pas rattrape
+MAX_SPAN_LOOKBACK_Q = 7 * 96
+
+
+def _clean_plan(db, data):
+    import detection_arming as DAR
+    name = str(data.get("name") or "").strip()[:80]
+    if not name:
+        return None, "nom_obligatoire"
+    sc = db["patrol_scenarios"].find_one({"_id": _oid(data.get("scenario_id")), "archived": {"$ne": True}})
+    if not sc:
+        return None, "scenario_introuvable"
+    t = data.get("target") or {}
+    if t.get("kind") == "device" and t.get("device_id"):
+        target = {"kind": "device", "device_id": str(t["device_id"])}
+    elif t.get("kind") == "group" and t.get("beacon_group_id"):
+        target = {"kind": "group", "beacon_group_id": str(t["beacon_group_id"])}
+    else:
+        return None, "cible_invalide"
+    launch = data.get("launch") or {}
+    rule = launch.get("rule") if launch.get("rule") in LAUNCH_RULES else "span_start"
+    try:
+        every = max(15, min(24 * 60, int(launch.get("every_min") or 120)))
+    except (TypeError, ValueError):
+        every = 120
+    every = max(15, int(round(every / 15.0)) * 15)     # au quart d'heure, comme la grille
+    arming = DAR.normalize(data.get("arming"))
+    arming.pop("override", None)
+    vf, vu = (str(data.get(k) or "").strip()[:10] or None for k in ("valid_from", "valid_until"))
+    for v in (vf, vu):
+        if v:
+            try:
+                datetime.strptime(v, "%Y-%m-%d")
+            except ValueError:
+                return None, "date_invalide"
+    if vf and vu and vu < vf:
+        return None, "date_invalide"
+    return {"name": name, "scenario_id": str(sc["_id"]), "target": target, "enabled": bool(data.get("enabled", True)),
+            "launch": {"rule": rule, "every_min": every}, "arming": arming,
+            "valid_from": vf, "valid_until": vu, "note": str(data.get("note") or "").strip()[:500]}, None
+
+
+def save_plan(db, data, by, plan_id=None):
+    clean, err = _clean_plan(db, data or {})
+    if err:
+        return None, err
+    now = _now()
+    clean.update(updated_at=now, updated_by=by)
+    if plan_id:
+        oid = _oid(plan_id)
+        if not oid:
+            return None, "not_found"
+        old = db["patrol_plans"].find_one({"_id": oid}, {"arming.override": 1})
+        if not old:
+            return None, "not_found"
+        clean["arming"]["override"] = (old.get("arming") or {}).get("override")
+        db["patrol_plans"].update_one({"_id": oid}, {"$set": clean})
+        return db["patrol_plans"].find_one({"_id": oid}), None
+    clean["arming"]["override"] = None
+    clean.update(_id=ObjectId(), created_by=by, created_at=now)
+    db["patrol_plans"].insert_one(clean)
+    return clean, None
+
+
+def set_plan_override(db, plan_id, state, hours, by):
+    """Forcage temporaire : `on` (lancements comme si la plage etait active),
+    `off` (suspendue), None = retour au planning."""
+    oid = _oid(plan_id)
+    ov = None
+    if state in ("on", "off"):
+        try:
+            h = max(1, min(24 * 14, int(hours or 4)))
+        except (TypeError, ValueError):
+            h = 4
+        ov = {"state": state, "until": _now() + timedelta(hours=h), "by": by}
+    r = db["patrol_plans"].update_one({"_id": oid}, {"$set": {"arming.override": ov}})
+    return bool(r.matched_count)
+
+
+def _plan_group(plan):
+    """Objet attendu par detection_arming (cle `arming`)."""
+    return {"arming": plan.get("arming") or {}}
+
+
+def _in_validity(plan, now):
+    day = now.astimezone(PARIS).date().isoformat()
+    if plan.get("valid_from") and day < plan["valid_from"]:
+        return False
+    if plan.get("valid_until") and day > plan["valid_until"]:
+        return False
+    return True
+
+
+def plan_active(db, plan, now):
+    import detection_arming as DAR
+    if not plan.get("enabled") or not _in_validity(plan, now):
+        return False
+    return DAR.group_state(_plan_group(plan), now, db)[0]
+
+
+def _span_start(db, plan, now):
+    """Debut de la plage active en cours (quart d'heure pres). Mode
+    "toujours" : minuit (heure de Paris), pour que `every` reste regulier."""
+    import detection_arming as DAR
+    g = _plan_group(plan)
+    loc = now.astimezone(PARIS)
+    t = loc.replace(minute=loc.minute - loc.minute % 15, second=0, microsecond=0).astimezone(timezone.utc)
+    midnight = loc.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    for _ in range(MAX_SPAN_LOOKBACK_Q):
+        prev = t - timedelta(minutes=15)
+        if not DAR.group_state(g, prev, db)[0] or not _in_validity(plan, prev):
+            return t
+        if (plan.get("arming") or {}).get("mode") == "always" and t <= midnight:
+            return midnight
+        t = prev
+    return t
+
+
+def due_slot(db, plan, now):
+    """Creneau a lancer maintenant : debut du creneau (UTC) ou None."""
+    if not plan_active(db, plan, now):
+        return None
+    start = _span_start(db, plan, now)
+    launch = plan.get("launch") or {}
+    if launch.get("rule") == "every":
+        step = timedelta(minutes=int(launch.get("every_min") or 120))
+        k = int((now - start) / step)
+        slot = start + k * step
+    else:
+        slot = start
+    if now - slot > timedelta(minutes=LAUNCH_GRACE_MIN):
+        return None
+    return slot
+
+
+def launch_plans(db, now=None):
+    """Lance les creneaux dus. Une patrouille precedente du meme plan encore
+    proposee ou en cours : le creneau est saute (trace dans `last_launch`)."""
+    now = now or _now()
+    n = 0
+    for plan in list(db["patrol_plans"].find({"enabled": True})):
+        try:
+            slot = due_slot(db, plan, now)
+        except Exception as e:
+            logger.warning("planification %s : %s", plan.get("name"), e)
+            continue
+        if not slot:
+            continue
+        key = "%s|%s" % (plan["_id"], slot.strftime("%Y-%m-%dT%H:%M"))
+        if (plan.get("last_launch") or {}).get("slot_key") == key:
+            continue
+        busy = db["patrol_runs"].find_one({"plan_id": str(plan["_id"]), "state": {"$in": list(RUN_OPEN)}}, {"_id": 1})
+        if busy:
+            result = "sautee : patrouille precedente encore en cours"
+        else:
+            try:
+                run, code, _ = create_run(db, plan["scenario_id"], plan.get("target"), "Planification " + plan["name"],
+                                          plan_id=str(plan["_id"]), slot_key=key, now=now)
+            except Exception as e:
+                if "duplicate key" in str(e).lower():     # autre execution du moteur, meme creneau
+                    continue
+                logger.warning("planification %s : lancement en echec (%s)", plan.get("name"), e)
+                continue
+            result = {"proposed": "proposee", "no_device": "aucune tablette disponible"}.get(code, code)
+            n += 1
+        db["patrol_plans"].update_one({"_id": plan["_id"]},
+                                      {"$set": {"last_launch": {"slot_key": key, "at": now, "slot": slot, "result": result}}})
+        logger.info("planification %s, creneau %s : %s", plan.get("name"), slot.isoformat(), result)
+    return n
+
+
+def next_launches(db, plan, start=None, limit=8, days=14):
+    """Prochains lancements prevus [(instant UTC)] (apercu de la page), au
+    quart d'heure, dans la periode de validite."""
+    import detection_arming as DAR
+    start = (start or _now()).replace(second=0, microsecond=0)
+    if not plan.get("enabled"):
+        return []
+    g = _plan_group(plan)
+    launch = plan.get("launch") or {}
+    every = timedelta(minutes=int(launch.get("every_min") or 120))
+    out = []
+    loc = start.astimezone(PARIS)
+    t = loc.replace(minute=loc.minute - loc.minute % 15).astimezone(timezone.utc)
+    prev_on = DAR.group_state(g, t - timedelta(minutes=15), db)[0] and _in_validity(plan, t - timedelta(minutes=15))
+    span_start = _span_start(db, plan, t) if prev_on else None
+    end = start + timedelta(days=days)
+    while t < end and len(out) < limit:
+        on = DAR.group_state(g, t, db)[0] and _in_validity(plan, t)
+        if on and not prev_on:
+            span_start = t
+            if t >= start:
+                out.append(t)
+        elif on and launch.get("rule") == "every" and span_start is not None:
+            if (t - span_start) % every == timedelta(0) and t >= start and t != span_start:
+                out.append(t)
+        prev_on = on
+        t += timedelta(minutes=15)
+    return out
+
+
+def pub_plan(db, plan, scenarios=None, now=None):
+    import detection_arming as DAR
+    now = now or _now()
+    sc = (scenarios or {}).get(plan.get("scenario_id"))
+    if sc is None:
+        sc = db["patrol_scenarios"].find_one({"_id": _oid(plan.get("scenario_id"))}, {"name": 1, "color": 1})
+    ll = plan.get("last_launch") or {}
+    arming = DAR.normalize(plan.get("arming"))
+    ov = (plan.get("arming") or {}).get("override") or None
+    if ov and isinstance(ov.get("until"), datetime) and _aware(ov["until"]) <= now:
+        ov = None
+    arming["override"] = {"state": ov["state"], "until": _iso(ov["until"]), "by": ov.get("by")} if ov else None
+    active = plan_active(db, plan, now)
+    return {
+        "id": str(plan["_id"]), "name": plan.get("name"), "scenario_id": plan.get("scenario_id"),
+        "scenario_name": (sc or {}).get("name"), "scenario_color": (sc or {}).get("color"),
+        "target": plan.get("target"), "enabled": bool(plan.get("enabled")), "launch": plan.get("launch"),
+        "arming": arming, "valid_from": plan.get("valid_from"), "valid_until": plan.get("valid_until"),
+        "note": plan.get("note") or "", "active_now": active,
+        "explain": DAR.explain(_plan_group(plan), now, db) if plan.get("enabled") else "desactivee",
+        "next": [_iso(t) for t in next_launches(db, plan, now, limit=5)],
+        "last_launch": {"at": _iso(ll.get("at")), "slot": _iso(ll.get("slot")), "result": ll.get("result")} if ll else None,
+        "updated_at": _iso(plan.get("updated_at")), "updated_by": plan.get("updated_by"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Moteur (patrol_engine.py)
 # ---------------------------------------------------------------------------
 
 def tick(db, now=None):
-    """Propositions expirees -> tablette suivante ; pauses et fiches closes.
-    Retourne le nombre d'actions."""
+    """Lancements planifies, propositions expirees -> tablette suivante,
+    pauses et fiches closes. Retourne le nombre d'actions."""
     now = now or _now()
-    n = 0
+    n = launch_plans(db, now)
     for run in list(db["patrol_runs"].find(
             {"state": "proposed", "current.expires_at": {"$lt": now - timedelta(seconds=ANSWER_GRACE_S)}},
             {"current": 1}).limit(50)):

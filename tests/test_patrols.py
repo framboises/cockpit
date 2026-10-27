@@ -219,6 +219,17 @@ class TestExecution:
         r = _run(db, run["_id"])
         assert r["state"] == "cancelled" and r["cancelled_by"] == "Op"
 
+    def test_non_prise_alerte_et_fiche(self, db):
+        a = _dev(db, "A", status="pause")
+        run, code, _ = P.create_run(db, str(_scenario(db)["_id"]), {"kind": "device", "device_id": str(a["_id"])}, "op")
+        assert code == "no_device"
+        al = db["cockpit_active_alerts"].find_one({"definition_slug": "patrol_not_taken"})
+        assert al and al["actionData"]["run_id"] == run["_id"]
+        f = db["pcorg"].find_one({"_id": al["actionData"]["pcorg_id"]})
+        assert f["category"] == "PCO.Information" and f["status_code"] == 10
+        P.on_not_taken(db, run["_id"], NOW)          # une seule fois
+        assert db["cockpit_active_alerts"].count_documents({}) == 1
+
     def test_vue_tablette(self, db):
         a = _dev(db, "A")
         run, _, _ = P.create_run(db, str(_scenario(db)["_id"]), {"kind": "device", "device_id": str(a["_id"])}, "op")
@@ -227,3 +238,89 @@ class TestExecution:
         P.accept(db, run["_id"], a)
         active, prop = P.tablet_view(db, db["field_devices"].find_one({"_id": a["_id"]}))
         assert prop is None and active["state"] == "running" and len(active["steps"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# Planifications (livraison 2)
+# ---------------------------------------------------------------------------
+from zoneinfo import ZoneInfo
+
+PARIS = ZoneInfo("Europe/Paris")
+# Lundi 2 novembre 2026 (heure d'hiver)
+def _paris(h, m=0, day=2):
+    return datetime(2026, 11, day, h, m, tzinfo=PARIS).astimezone(timezone.utc)
+
+
+def _week(fr, to):
+    d = "".join("1" if fr * 4 <= q < to * 4 else "0" for q in range(96))
+    return [d] * 7
+
+
+def _plan(db, rule="span_start", every=60, fr=10, to=12, target=None, **kw):
+    sc = _scenario(db)
+    data = {"name": "Ronde du matin", "scenario_id": str(sc["_id"]),
+            "target": target or {"kind": "group", "beacon_group_id": "g1"},
+            "launch": {"rule": rule, "every_min": every},
+            "arming": {"mode": "schedule", "weeks": [{"id": "w1", "name": "S", "grid": _week(fr, to)}],
+                       "default_week": "w1", "exceptions": [], "holidays": "normal"}}
+    data.update(kw)
+    plan, err = P.save_plan(db, data, "test")
+    assert not err, err
+    # Tablettes "vues" a la date simulee des lancements (2 novembre)
+    db["field_devices"].update_many({}, {"$set": {"last_seen": _paris(23)}})
+    return plan
+
+
+class TestPlanifications:
+    def test_lancement_au_debut_de_plage_une_seule_fois(self, db):
+        _dev(db, "A")
+        plan = _plan(db)
+        assert P.launch_plans(db, _paris(9, 50)) == 0
+        assert P.launch_plans(db, _paris(10, 2)) == 1
+        assert P.launch_plans(db, _paris(10, 5)) == 0          # meme creneau
+        runs = list(db["patrol_runs"].find({"plan_id": str(plan["_id"])}))
+        assert len(runs) == 1 and runs[0]["slot_key"].endswith("T09:00")   # 10:00 Paris = 09:00 UTC
+        assert db["patrol_plans"].find_one({"_id": plan["_id"]})["last_launch"]["result"] == "proposee"
+
+    def test_creneau_rate_pas_rattrape(self, db):
+        _dev(db, "A")
+        _plan(db)
+        assert P.launch_plans(db, _paris(10, 40)) == 0
+
+    def test_toutes_les_heures_et_precedente_en_cours(self, db):
+        a = _dev(db, "A")
+        plan = _plan(db, rule="every", every=60, fr=10, to=13)
+        assert P.launch_plans(db, _paris(10, 1)) == 1
+        run = db["patrol_runs"].find_one({"plan_id": str(plan["_id"])})
+        P.accept(db, run["_id"], a)
+        assert P.launch_plans(db, _paris(11, 1)) == 0          # precedente en cours : sautee
+        assert "sautee" in db["patrol_plans"].find_one({"_id": plan["_id"]})["last_launch"]["result"]
+        P.finish(db, run["_id"], a, reason="fin", abandon=True)
+        assert P.launch_plans(db, _paris(12, 3)) == 1
+
+    def test_validite_et_desactivation(self, db):
+        _dev(db, "A")
+        plan = _plan(db, valid_from="2026-11-03")
+        assert P.launch_plans(db, _paris(10, 2)) == 0          # avant la periode
+        db["patrol_plans"].update_one({"_id": plan["_id"]}, {"$set": {"valid_from": None, "enabled": False}})
+        assert P.launch_plans(db, _paris(10, 2)) == 0
+
+    def test_exception_annuelle_en_pause(self, db):
+        _dev(db, "A")
+        _plan(db, arming={"mode": "schedule", "weeks": [{"id": "w1", "name": "S", "grid": _week(10, 12)}],
+                          "default_week": "w1", "holidays": "normal",
+                          "exceptions": [{"id": "x", "label": "Toussaint", "kind": "dates", "start": "2025-11-02",
+                                          "end": "2025-11-02", "yearly": True, "action": "off"}]})
+        assert P.launch_plans(db, _paris(10, 2)) == 0          # 2 novembre, chaque annee
+        assert P.launch_plans(db, _paris(10, 2, day=9)) == 1
+
+    def test_prochains_lancements(self, db):
+        plan = _plan(db, rule="every", every=60, fr=10, to=12)
+        nxt = P.next_launches(db, plan, _paris(8), limit=4)
+        assert [t.astimezone(PARIS).strftime("%d %H:%M") for t in nxt] == ["02 10:00", "02 11:00", "03 10:00", "03 11:00"]
+
+    def test_forcage(self, db):
+        _dev(db, "A")
+        plan = _plan(db)
+        assert P.set_plan_override(db, str(plan["_id"]), "off", 4, "op")
+        assert not P.plan_active(db, db["patrol_plans"].find_one({"_id": plan["_id"]}), P._now())
