@@ -1357,7 +1357,27 @@
         return g;
     }
 
+    // Fiche ouverte depuis la galerie : barre "Retour a la galerie / Suivante"
+    // et retour a la galerie a la fermeture (back.id = la fiche concernee)
+    var back = null;
+    function backBar() {
+        if (!back) return null;
+        var bar = el("div", "dt-backbar");
+        var b = el("button", "dt-btn"); b.type = "button";
+        b.appendChild(icon("arrow_back")); b.appendChild(document.createTextNode("Retour a la galerie"));
+        b.addEventListener("click", function () { closeDetail(); });
+        bar.appendChild(b);
+        var nx = el("button", "dt-btn dt-btn-primary"); nx.type = "button";
+        var has = back.hasNext && back.hasNext();
+        nx.disabled = !has;
+        nx.title = has ? "Intrusion suivante de la galerie encore sans avis" : "Plus d'intrusion sans avis dans les photos chargees";
+        nx.appendChild(document.createTextNode("Suivante")); nx.appendChild(icon("arrow_forward"));
+        nx.addEventListener("click", function () { var bk = back; if (bk && bk.onNext) bk.onNext(); });
+        bar.appendChild(nx);
+        return bar;
+    }
     function openDetail(id) {
+        if (back && back.id !== id) back = null;
         S.openId = id;
         renderList();
         var box = $("dt-detail"), body = $("dt-detail-body"), foot = $("dt-detail-foot");
@@ -1369,6 +1389,8 @@
         getJSON(API.episodes + "/" + id).then(function (ep) {
             if (S.openId !== id) return;
             body.textContent = "";
+            var bb = backBar();
+            if (bb) body.appendChild(bb);
             var title = $("dt-detail-title");
             title.textContent = "";
             ep.types.forEach(function (t) { var s = TYPE[t] || TYPE.other; title.appendChild(badge(s.cls, s.icon, s.label)); });
@@ -1451,7 +1473,12 @@
             body.appendChild(el("p", "dt-help", "Fiche indisponible (" + e.message + ")."));
         });
     }
-    function closeDetail() { $("dt-detail").hidden = true; S.openId = null; gallery = null; syncSheet(); renderList(); }
+    function closeDetail(stay) {
+        var bk = back;
+        back = null;
+        $("dt-detail").hidden = true; S.openId = null; gallery = null; syncSheet(); renderList();
+        if (bk && !stay && bk.onBack) bk.onBack();
+    }
     function closeLightbox() { $("dt-lightbox").hidden = true; syncSheet(); }
 
     // Visionneuse plein ecran : scene ou zoom, navigation entre les photos
@@ -1504,7 +1531,7 @@
         if (on && isPhone()) setView("map");
         syncSheet();
         if (map) setTimeout(function () { map.invalidateSize(); }, 80);
-        if (on) { closeDetail(); renderConfig(); } else { stopPlacing(); cancelDrawing(); S.editZone = null; }
+        if (on) { closeDetail(true); renderConfig(); } else { stopPlacing(); cancelDrawing(); S.editZone = null; }
         drawCams();
         drawZones();
     }
@@ -2374,7 +2401,7 @@
                 refreshAll();
             }).catch(function (e) { toast("error", e.message); });
         });
-        $("dt-detail-close").addEventListener("click", closeDetail);
+        $("dt-detail-close").addEventListener("click", function () { closeDetail(); });
         $("dt-edit-btn").addEventListener("click", function () { setEdit(!S.edit); });
         $("dt-config-close").addEventListener("click", function () { setEdit(false); });
         $("dt-lightbox").addEventListener("click", closeLightbox);
@@ -2455,7 +2482,11 @@
             }
             updateFilterCount();
         },
-        openEpisode: function (id) { setView("list"); this.refresh(); openDetail(id); },
+        // opts.back {onBack, onNext, hasNext} : fiche ouverte depuis la galerie
+        openEpisode: function (id, opts) {
+            back = opts && opts.back ? Object.assign({ id: id }, opts.back) : null;
+            setView("list"); this.refresh(); openDetail(id);
+        },
         refresh: function () {
             refreshAll();
             if (!map) return;

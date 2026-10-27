@@ -121,7 +121,8 @@
 
     /* ---------------- modes ---------------- */
     var MODES = ["carte", "intrusions", "trafic", "foule", "secours", "galerie"];
-    function setMode(m) {
+    // keep : retour a la galerie depuis une fiche, sans la recharger
+    function setMode(m, keep) {
         M.mode = m;
         MODES.forEach(function (x) { document.body.classList.toggle("ia-mode-" + x, x === m); });
         Array.prototype.forEach.call(document.querySelectorAll("#ia-modes button"), function (b) {
@@ -135,7 +136,7 @@
         clearInterval(M.timer);
         if (m === "carte") { loadGmap(); M.timer = setInterval(loadGmap, 60000); }
         else if (m === "trafic" || m === "foule" || m === "secours") { loadTrafic(); M.timer = setInterval(loadTrafic, 60000); }
-        else if (m === "galerie") loadGallery(true);
+        else if (m === "galerie") { if (!keep || !M.gal.items) loadGallery(true); }
         else if (window.IADetection) window.IADetection.refresh();
     }
 
@@ -1707,8 +1708,47 @@
             showConfirmToast("Dire \"Oui, l'IA a raison\" pour les " + todo.length + " photo(s) affichee(s) encore sans avis ?", { okLabel: "Oui a tout", type: "info" }).then(function (y) { if (y) go(); });
         else go();
     }
+    // Fiche d'une intrusion depuis la galerie : "Retour a la galerie" (meme
+    // position, carte mise a jour) et "Suivante" (prochaine intrusion chargee
+    // encore sans avis), sans repasser par le mode Galerie a chaque photo
+    function galPendingIntrusion(x) {
+        if (x.kind === "capture") return false;
+        var ai = x.ai || {};
+        if (!ai.truth && !ai.vote) return true;
+        return x.photos_n > 1 && (x.answered_n || 0) < x.photos_n;
+    }
+    function galNext(it) {
+        var items = M.gal.items || [], i = items.indexOf(it);
+        for (var j = i + 1; j < items.length; j++) if (galPendingIntrusion(items[j])) return items[j];
+        return null;
+    }
+    function galRefreshItem(it) {
+        return getJSON(API.episodes + "/" + it.id).then(function (ep) {
+            it.ai = ep.ai;
+            it.answered_n = (ep.photos || []).filter(function (p) { return p.truth; }).length;
+            it.labeled = it.labeled || (ep.photos || []).some(function (p) { return p.label; });
+            if (it._card && it._card.parentNode) it._card.replaceWith(galItem(it));
+        }).catch(function () { /* carte laissee telle quelle */ });
+    }
+    function galOpen(it) {
+        var pane = $("ia-galerie");
+        if (M.mode === "galerie") M.gal.scroll = pane.scrollTop;
+        setMode("intrusions");
+        if (!window.IADetection) return;
+        window.IADetection.openEpisode(it.id, { back: {
+            hasNext: function () { return !!galNext(it); },
+            onNext: function () { var nx = galNext(it); galRefreshItem(it); if (nx) galOpen(nx); },
+            onBack: function () {
+                galRefreshItem(it);
+                setMode("galerie", true);
+                pane.scrollTop = M.gal.scroll || 0;
+                if (it._card) it._card.scrollIntoView({ block: "nearest" });
+            },
+        } });
+    }
     function galItem(it) {
         var card = el("div", "ia-gal-item");
+        it._card = card;
         var kc = it.kind === "capture" && isCrowd(it);
         var kr = it.kind === "capture" && isRescue(it);
         var imgBox = el("div", "ia-gal-img");
@@ -1796,10 +1836,7 @@
             });
             var other = el("button", "ia-itruth is-other", "Autre..."); other.type = "button";
             other.title = "Ouvrir la fiche : toutes les reponses, commentaire, cadres";
-            other.addEventListener("click", function () {
-                setMode("intrusions");
-                if (window.IADetection) window.IADetection.openEpisode(it.id);
-            });
+            other.addEventListener("click", function () { galOpen(it); });
             row.appendChild(other);
             b.appendChild(row);
             if (ai.vote && !ai.truth) b.appendChild(el("div", "ia-meta", "Ancien avis : " + (ai.vote === "up" ? "bien vu" : "erreur")));
@@ -1807,18 +1844,12 @@
                 // Une photo = une cible : la reponse photo par photo se donne dans la fiche
                 var pp = el("button", "ia-itruth is-other", it.photos_n + " cibles : " + (it.answered_n || 0) + "/" + it.photos_n + " repondues, repondre photo par photo");
                 pp.type = "button";
-                pp.addEventListener("click", function () {
-                    setMode("intrusions");
-                    if (window.IADetection) window.IADetection.openEpisode(it.id);
-                });
+                pp.addEventListener("click", function () { galOpen(it); });
                 b.appendChild(pp);
             }
             if (ai.vote) markDone();
             imgBox.title = "Ouvrir la fiche (cadres, toutes les photos)";
-            imgBox.addEventListener("click", function () {
-                setMode("intrusions");
-                if (window.IADetection) window.IADetection.openEpisode(it.id);
-            });
+            imgBox.addEventListener("click", function () { galOpen(it); });
         }
         if (it.kind === "capture" && (it.vote || Object.keys(it.zone_votes || {}).length)) markDone();
         return card;

@@ -665,7 +665,13 @@ sans `review` (avant le rattrapage) : regle des 30 jours.
 (`captures` = trafic + foule) : intrusions (photo de couverture, verdict
 IA, pouces) et captures (etat, "juste ? oui / non -> vrai etat")
 melangees, plus recentes d'abord, filtre "sans avis". Clic sur une
-intrusion : fiche en mode Intrusions (cadres). Bouton "Oui a tout le
+intrusion : fiche en mode Intrusions (cadres). Depuis le 27/10/2026
+(`galOpen`, `IADetection.openEpisode(id, {back})`) : barre "Retour a la
+galerie" / "Suivante" en haut de la fiche, et toute fermeture (croix,
+Echap, Cloturer) ramene a la galerie SANS la recharger (meme defilement,
+carte mise a jour par `GET /episodes/<id>`). "Suivante" = prochaine
+intrusion chargee encore sans avis (ou photos non toutes repondues). Un
+clic sur une autre fiche de la liste annule ce lien avec la galerie. Bouton "Oui a tout le
 reste" : l'operateur marque d'abord les erreurs (Non), puis valide d'un
 clic les photos AFFICHEES encore sans avis (hors intrusions non verifiees
 et niveaux "inconnu"), un appel par photo.
