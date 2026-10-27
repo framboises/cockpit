@@ -407,19 +407,33 @@ def patrols_propose():
         except (ValueError, TypeError):
             hour = None
     source = d.get("source") if d.get("source") in PP.SOURCE_PREFIX else "pcs"
-    scores = reasons = None
-    comment = None
+    dominante = d.get("dominante") or "generale"
+    travel = d.get("travel") if d.get("travel") in PP.TRAVEL else "pedestrian"
+    # Avis de l'IA : paye une fois (`ai: true`), garde en base et reutilise
+    # gratuitement (`use_ai: true`) pour la meme source / evenement /
+    # dominante / deplacement, meme apres un changement de duree ou de lieux.
+    review = None
     if d.get("ai"):
         if not _is_real_admin():
             return _err("admin_requis", 403)
         try:
-            scores, reasons, comment = PP.ai_rescore(db, event, d.get("dominante"), d.get("travel"), hour, source=source)
+            import pcorg_summary as PS
+            scores, reasons, comment, top = PP.ai_rescore(db, event, dominante, travel, hour, source=source)
+            review = PP.save_review(db, source, event, dominante, travel, top, scores, reasons, comment, _who(),
+                                    PS.CLAUDE_MODEL)
         except Exception as e:
             logger.warning("Patrouilles : affinage IA en echec (%s)", e)
             return _err("ia_indisponible", 502, detail=str(e)[:200])
-    out = PP.propose(db, d.get("dominante") or "generale", d.get("duration_min"), d.get("travel"), event,
-                     loop=bool(d.get("loop")), hour=hour, ai_scores=scores, ai_reasons=reasons, source=source)
-    out["ai_comment"] = comment
+    else:
+        stored = PP.get_review(db, source, event, dominante, travel)
+        if stored and d.get("use_ai"):
+            review = stored
+    out = PP.propose(db, dominante, d.get("duration_min"), travel, event, loop=bool(d.get("loop")), hour=hour,
+                     ai_review=(review or {}).get("foyers"), source=source)
+    shown = review or PP.get_review(db, source, event, dominante, travel)
+    out["ai_review"] = {"at": P._iso(shown["at"]), "by": shown.get("by"), "n": len(shown.get("foyers") or []),
+                        "used": bool(review)} if shown else None
+    out["ai_comment"] = (review or {}).get("comment")
     out["ok"] = True
     return jsonify(out)
 

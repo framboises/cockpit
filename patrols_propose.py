@@ -37,7 +37,7 @@ import json
 import logging
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import patrols as P
@@ -436,22 +436,61 @@ def _greedy(cands, budget_s, travel, loop):
     return tour
 
 
-def propose(db, dominante, duration_min, travel, event, loop=False, hour=None, ai_scores=None, ai_reasons=None,
-            source="pcs"):
-    """Proposition complete : {stops, estimate, foyers (carte), stats, notes}."""
+def _apply_review(foyers, review, travel):
+    """Scores de l'IA (0-100) rattaches aux foyers PAR POSITION : un avis paye
+    reste valable apres l'ajout ou le deplacement d'un lieu (les numeros de
+    foyers changent, pas leurs positions). Foyer non relu (nouveau lieu) :
+    score du code ramene sur 0-50, signale."""
+    radius = TRAVEL[travel]["radius"] * 1.5
+    top_code = max([f["score"] for f in foyers] or [1]) or 1
+    for f in foyers:
+        best, bd = None, radius
+        for r in review:
+            d = P.haversine_m(f["lat"], f["lng"], r["lat"], r["lng"])
+            if d <= bd:
+                best, bd = r, d
+        f["score_code"] = f["score"]
+        if best:
+            f["score"] = float(best["score"])
+            if best.get("reason"):
+                f["ai_reason"] = best["reason"]
+        else:
+            f["score"] = round(50.0 * f["score"] / top_code, 1)
+            f["ai_reason"] = "Non relu par l'IA (lieu place apres son avis) : score du moteur."
+    foyers.sort(key=lambda c: -c["score"])
+
+
+def review_key(source, event, dominante, travel):
+    return "%s|%s|%s|%s" % (source, event, dominante, travel)
+
+
+def get_review(db, source, event, dominante, travel):
+    return db["patrol_ai_reviews"].find_one({"_id": review_key(source, event, dominante, travel)})
+
+
+def save_review(db, source, event, dominante, travel, foyers, scores, reasons, comment, by, model):
+    now = datetime.now(timezone.utc)
+    doc = {"_id": review_key(source, event, dominante, travel), "at": now, "by": by, "model": model,
+           "comment": comment, "expires_at": now + timedelta(days=60),
+           "foyers": [{"lat": f["lat"], "lng": f["lng"], "name": f.get("lieu"), "score": scores[f["id"]],
+                       "reason": reasons.get(f["id"]) or ""} for f in foyers if f["id"] in scores]}
+    try:
+        db["patrol_ai_reviews"].create_index("expires_at", expireAfterSeconds=0)
+    except Exception:
+        pass
+    db["patrol_ai_reviews"].replace_one({"_id": doc["_id"]}, doc, upsert=True)
+    return doc
+
+
+def propose(db, dominante, duration_min, travel, event, loop=False, hour=None, ai_review=None, source="pcs"):
+    """Proposition complete : {stops, estimate, foyers (carte), stats, notes}.
+    `ai_review` : foyers notes par l'IA [{lat, lng, score, reason}]."""
     source = source if source in SOURCE_PREFIX else "pcs"
     travel = travel if travel in TRAVEL else "pedestrian"
     budget = max(5, min(240, int(duration_min or 45))) * 60
     foyers, stats = build_foyers(db, event, dominante, travel, hour, source)
-    if ai_scores:
-        # Scores de l'IA (0-100) : les foyers qu'elle n'a pas notes passent derriere
-        for f in foyers:
-            s = ai_scores.get(f["id"])
-            f["score_code"] = f["score"]
-            f["score"] = max(0.0, float(s)) if s is not None else 0.0
-            if ai_reasons and ai_reasons.get(f["id"]):
-                f["ai_reason"] = ai_reasons[f["id"]]
-        foyers.sort(key=lambda c: -c["score"])
+    if ai_review:
+        _apply_review(foyers, ai_review, travel)
     notes = []
     gaz = _gazetteer(db)
     for f in foyers[:60]:
@@ -637,7 +676,7 @@ def ai_rescore(db, event, dominante, travel, hour=None, model=None, source="pcs"
     foyers, _stats = build_foyers(db, event, dominante, travel, hour, source)
     top = foyers[:30]
     if not top:
-        return {}, {}, "Aucun foyer."
+        return {}, {}, "Aucun foyer.", []
     ids = [fid for f in top for fid in f["fiche_ids"][:6]]
     fiches = {f["_id"]: f for f in db["pcorg"].find({"_id": {"$in": ids}},
                                                     {"text": 1, "text_full": 1, "category": 1, "niveau_urgence": 1,
@@ -686,4 +725,4 @@ def ai_rescore(db, event, dominante, travel, hour=None, model=None, source="pcs"
         except (TypeError, ValueError):
             continue
         reasons[fid] = str(it.get("raison") or "")[:300]
-    return scores, reasons, str(data.get("commentaire") or "")[:600]
+    return scores, reasons, str(data.get("commentaire") or "")[:600], top

@@ -373,7 +373,18 @@
     loadProposalEvents();
     document.querySelectorAll('input[name="pr-src"]').forEach(function (r) { r.addEventListener("change", loadProposalEvents); });
     $("pr-go").addEventListener("click", function () { runProposal(false); });
-    $("pr-ai").addEventListener("click", function () { runProposal(true); });
+    $("pr-ai").addEventListener("click", function () {
+      // Un avis deja paye pour ces criteres : on le reprend, sauf demande expresse
+      var rv = PR.result && PR.result.ai_review;
+      if (rv && sameCriteria() && typeof window.showConfirmToast === "function") {
+        window.showConfirmToast("Un avis de l'IA existe deja pour ces criteres (" + fmtWhen(rv.at) + "). Le reprendre gratuitement ?",
+          { okLabel: "Reprendre (gratuit)", cancelLabel: "Nouvel avis (payant)", type: "info" }).then(function (reuse) {
+          if (reuse) { PR.useAi = true; runProposal(false); } else runProposal(true);
+        });
+        return;
+      }
+      runProposal(true);
+    });
     $("pr-create").addEventListener("click", createFromProposal);
     renderProposal();
   }
@@ -403,7 +414,19 @@
       dominante: $("pr-dom").value, duration_min: Number($("pr-dur").value),
       travel: document.querySelector('input[name="pr-travel"]:checked').value, event: $("pr-event").value,
       loop: $("pr-loop").checked, hour: $("pr-same-hour").checked ? $("pr-hour").value : null, ai: !!ai,
+      use_ai: !ai && PR.useAi !== false,
     };
+  }
+
+  // Memes criteres que l'avis IA affiche (source, evenement, dominante, deplacement)
+  function sameCriteria() {
+    var a = PR.body || {}, b = proposalBody(false);
+    return a.source === b.source && a.event === b.event && a.dominante === b.dominante && a.travel === b.travel;
+  }
+
+  function fmtWhen(iso) {
+    var d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleDateString("fr-FR") + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
   }
 
   function runProposal(ai) {
@@ -414,11 +437,12 @@
     box.appendChild(el("div", "pt-hint", ai ? "Relecture des foyers par l'IA (30 s a 1 min)..." : "Calcul de la ronde..."));
     $("pr-go").disabled = $("pr-ai").disabled = true;
     apiPost("/api/patrols/propose", body).then(function (r) {
+      if (ai) PR.useAi = true;
       PR.result = r;
       PR.body = body;
       PR.fitted = false;
       var dl = (S.data.dominantes || []).find(function (d) { return d.id === body.dominante; });
-      $("pr-name").value = "Ronde " + (dl ? dl.label.toLowerCase() : "") + " " + body.duration_min + " min" + (ai ? " (IA)" : "");
+      $("pr-name").value = "Ronde " + (dl ? dl.label.toLowerCase() : "") + " " + body.duration_min + " min" + (r.ai_review && r.ai_review.used ? " (IA)" : "");
       renderProposal();
       render();
     }).catch(function (e) {
@@ -443,6 +467,16 @@
     box.appendChild(sum);
     box.appendChild(el("div", "pt-hint", (r.foyers || []).length + " foyer(s) sur la carte (cercles gris, taille = importance)."));
     (r.notes || []).forEach(function (n) { box.appendChild(el("div", "pt-hint", n)); });
+    if (r.ai_review) {
+      // Avis IA garde en base : on le garde ou non sans repayer
+      var lab = el("label", "pr-ai-keep");
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!r.ai_review.used;
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(" Utiliser l'avis de l'IA du " + fmtWhen(r.ai_review.at) +
+        (r.ai_review.by ? " (" + r.ai_review.by + ")" : "") + ", deja paye : " + r.ai_review.n + " foyers relus"));
+      cb.addEventListener("change", function () { PR.useAi = cb.checked; runProposal(false); });
+      box.appendChild(lab);
+    }
     renderMissing(box, r);
     if (r.ai_comment) {
       var c = el("div", "pt-callout");

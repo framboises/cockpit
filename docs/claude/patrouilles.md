@@ -438,6 +438,11 @@ doublon = 0 ; information 0,3 ; ronde 0,5 (anomalie 3) ; points d'une ronde qual
 Nom de foyer = lieu le plus cite ; motif = motif d'intervention (la classification PCS « Intervention
 Surete » est ignoree), sinon nombre d'incidents / rondes. Le traitement de nuit d'Alfred traite aussi
 les PCS (apres les fiches avec GPS) : la couverture et la qualite montent au fil des nuits.
+**Avis de l'IA garde** (`patrol_ai_reviews`, `_id` = source|evenement|dominante|deplacement, TTL 60 j) :
+paye une fois, rattache aux foyers PAR POSITION (rayon x1,5), donc reutilise gratuitement apres un
+changement de duree, de boucle, d'horaire ou de lieux places ; foyer non relu = score du moteur ramene
+sur 0-50 et signale. Case « Utiliser l'avis de l'IA » dans le resultat ; le bouton IA propose de le
+reprendre avant de repayer.
 Valhalla : 20 points au plus par trajet (`VALHALLA_MAX_LOCATIONS`), `route_through` decoupe en
 troncons ; arret injoignable dans le mode (no_route) retire.
 

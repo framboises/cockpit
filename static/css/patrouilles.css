@@ -262,3 +262,4 @@
 .pr-place { border: 1px solid #93c5fd; background: #eff6ff; border-radius: 9px; padding: 8px 10px; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
 .pr-place-bar { display: flex; gap: 8px; }
 .pr-stop .btn-sm { font-size: 12px; padding: 3px 8px; align-self: center; white-space: nowrap; }
+.pr-ai-keep { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 9px; padding: 6px 10px; }

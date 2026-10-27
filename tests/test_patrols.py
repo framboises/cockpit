@@ -507,3 +507,19 @@ class TestPropositionsPCS:
         P.save_point(db, {"name": "PEC", "lat": LAT, "lng": LNG, "aliases": "pole europeen"}, "t")
         foyers, st = PP.build_foyers(db, "SAISON", "surete", "pedestrian", source="pcs")
         assert st["placees"] == 6 and foyers[0]["lieu"] == "PEC" and foyers[0]["kinds"] == {"incident": 5, "ronde": 1}
+
+
+class TestAvisIA:
+    def test_avis_garde_et_rattache_par_position(self, db, monkeypatch):
+        import patrols_propose as PP
+        monkeypatch.setattr(P, "_matrix", lambda coords, travel: (None, "skip"))
+        foyers = [{"id": "f0", "lat": LAT, "lng": LNG, "lieu": "A"}, {"id": "f1", "lat": LAT + 0.01, "lng": LNG, "lieu": "B"}]
+        PP.save_review(db, "pcs", "SAISON", "surete", "pedestrian", foyers, {"f0": 90, "f1": 10}, {"f0": "grave"}, "ok", "t", "m")
+        rv = PP.get_review(db, "pcs", "SAISON", "surete", "pedestrian")
+        assert rv["comment"] == "ok" and len(rv["foyers"]) == 2
+        # Numeros de foyers changes, positions identiques (+ un nouveau foyer non relu)
+        new = [{"id": "f5", "lat": LAT + 0.01, "lng": LNG, "score": 40}, {"id": "f7", "lat": LAT + 0.0001, "lng": LNG, "score": 2},
+               {"id": "f9", "lat": LAT + 0.05, "lng": LNG, "score": 20}]
+        PP._apply_review(new, rv["foyers"], "pedestrian")
+        assert [f["id"] for f in new] == ["f7", "f9", "f1"[:0] + "f5"]
+        assert new[0]["score"] == 90 and new[0]["ai_reason"] == "grave" and new[1]["score"] == 25.0
