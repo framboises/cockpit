@@ -235,3 +235,19 @@
 .pt-imp-txt .pt-muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pt-layer-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 260px; overflow-y: auto; }
 #pt-pt-zones { white-space: pre-line; }
+
+/* Tablette sur la carte : rond + nom */
+.pt-dev-dot { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; font-weight: 700; color: #1e293b;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
+.pt-dev-dot i { width: 14px; height: 14px; border-radius: 50%; border: 3px solid #fff; display: inline-block; flex: none; }
+
+/* Fenetre de fiche */
+.pt-fiche-box { max-width: 860px; }
+.pt-fiche-body { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.pt-fiche-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pt-chrono { display: flex; flex-direction: column; gap: 6px; }
+.pt-chrono-row { display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f1f5f9; }
+.pt-chrono-ts { font-size: 12px; color: #64748b; font-variant-numeric: tabular-nums; }
+.pt-chrono-op { font-size: 12px; font-weight: 700; color: #334155; }
+.pt-chrono-text { font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pt-chrono-img { max-width: 140px; border-radius: 6px; margin-top: 4px; }

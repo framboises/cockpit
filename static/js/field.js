@@ -4975,7 +4975,9 @@
     var row2 = _n("div", "test-row");
     var sp = _n("select", "test-select");
     [["5", "A pied 5 km/h"], ["25", "A pied accelere x5"], ["30", "Vehicule 30 km/h"], ["150", "Vehicule accelere x5"]].forEach(function (o) { sp.appendChild(new Option(o[1], o[0])); });
-    if (_patrol.run && _patrol.run.travel !== "pedestrian") sp.value = "30";
+    // Vitesse choisie gardee (le panneau se redessine : elle revenait a 5 km/h)
+    sp.value = _tp.speed || (_patrol.run && _patrol.run.travel !== "pedestrian" ? "30" : "5");
+    sp.addEventListener("change", function () { _tp.speed = sp.value; });
     row2.appendChild(sp);
     body.appendChild(row2);
     var g3 = _n("div", "test-grid");

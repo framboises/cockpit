@@ -239,6 +239,8 @@ def wants_auto(cfg, fiche):
         return False
     if ((fiche.get("content_category") or {}).get("patrouille") or "").strip():
         return False
+    if (fiche.get("content_category") or {}).get("patrol_run"):   # fiche d'une patrouille programmee
+        return False
     ccfg = category_config(cfg, fiche.get("category"))
     mode = ccfg.get("mode")
     if mode == "always":
@@ -373,6 +375,8 @@ def start(db, fiche_id, trigger="auto", operator=None, now=None):
         return False, "fiche_closee"
     if ((fiche.get("content_category") or {}).get("patrouille") or "").strip():
         return False, "deja_engagee"
+    if (fiche.get("content_category") or {}).get("patrol_run"):    # suivie par la patrouille
+        return False, "fiche_de_patrouille"
     d = fiche.get("dispatch") or {}
     res = db["pcorg"].update_one(
         {"_id": fiche_id, "dispatch.state": {"$ne": "proposing"}},
@@ -739,6 +743,8 @@ def available_for_device(db, device, limit=100, now=None):
             EC.pairs_filter(F.device_fiche_pairs(db, device, now)),
             {"$or": [{"content_category.patrouille": {"$in": ["", None]}},
                      {"content_category.patrouille": {"$exists": False}}]},
+            # Fiche d'une patrouille programmee : jamais une mission a prendre
+            {"content_category.patrol_run": {"$exists": False}},
         ],
         "category": cat, "status_code": {"$ne": 10},
         "ts": {"$gte": now - timedelta(days=AVAILABLE_MAX_AGE_DAYS)},

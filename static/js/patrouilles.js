@@ -16,7 +16,7 @@
     data: null, tab: "suivi", map: null, layers: {}, zonesLayer: null,
     sc: null,          // scenario en edition {id, name, travel, loop, color, note, points:[ids]}
     pt: null,          // point en edition {id, name, lat, lng, ...}
-    live: [], liveTimer: null, previewTimer: null, previewSeq: 0,
+    live: [], liveTimer: null, previewTimer: null, previewSeq: 0, liveSeen: {}, liveSeenInit: false,
   };
 
   // ---------- HTTP ----------
@@ -200,7 +200,7 @@
     $("pt-work").classList.toggle("nomap", !MAP_TABS[tab]);
     try { localStorage.setItem("pt_tab", tab); } catch (e) { /* noop */ }
     if (S.liveTimer) { clearInterval(S.liveTimer); S.liveTimer = null; }
-    if (tab === "suivi") { loadPlans(); loadLive(); S.liveTimer = setInterval(loadLive, 10000); }
+    if (tab === "suivi") { loadPlans(); loadLive(); }
     if (tab === "plans") { loadPlans(); S.liveTimer = setInterval(loadPlans, 30000); }
     if (tab === "historique") loadHistory();
     render();
@@ -896,12 +896,15 @@
     $("pt-send-go").disabled = true;
     apiPost("/api/patrols/scenarios/" + S.sendSc + "/send", { target: target }).then(function (r) {
       res.hidden = false; clear(res);
-      res.className = "pt-send-result ok";
-      res.appendChild(el("div", null, "Proposee a " + (r.run.current ? r.run.current.device_name : "?") +
+      // Envoi reussi : la fenetre se ferme, la suite (acceptation, refus) arrive
+      // en message sur cette page et dans le Suivi
+      res.hidden = true;
+      $("pt-send-modal").hidden = true;
+      toast("success", "Patrouille proposee a " + (r.run.current ? r.run.current.device_name : "?") +
         (r.run.current && r.run.current.distance_m != null ? " (" + fmtKm(r.run.current.distance_m) + " du depart)" : "") +
-        ", reponse attendue sous " + S.data.settings.accept_timeout_s + " s. Suivi dans l'onglet Suivi."));
-      showSkipped(res, r.skipped);
-      toast("success", "Patrouille proposee");
+        " : reponse attendue sous " + S.data.settings.accept_timeout_s + " s");
+      S.liveSeen[r.run.id] = r.run.state;
+      setTab("suivi");
     }).catch(function (e) {
       var b = e.body || {};
       res.hidden = false; clear(res);
@@ -920,9 +923,35 @@
   }
 
   // ---------- Suivi ----------
+  // Messages sur cette page quand une patrouille change d'etat (acceptee,
+  // non prise, terminee...) : plus besoin de l'accueil pour voir un refus.
+  // Le premier chargement ne fait que memoriser les etats.
+  var LIVE_MSG = {
+    running: ["success", function (r) { return r.device_name + " a accepte la patrouille " + r.scenario.name; }],
+    paused: ["info", function (r) { return "Patrouille " + r.scenario.name + " en pause (" + r.device_name + " engage ailleurs)"; }],
+    refused: ["error", function (r) { return "Patrouille non prise : " + r.scenario.name + (r.end_reason ? " - " + r.end_reason : ""); }],
+    done: ["success", function (r) { return "Patrouille " + r.scenario.name + " terminee (" + r.counts.done + "/" + r.steps.length + " points)"; }],
+    partial: ["warning", function (r) { return "Patrouille " + r.scenario.name + " terminee incomplete (" + r.counts.done + "/" + r.steps.length + " points)"; }],
+    cancelled: ["info", function (r) { return "Patrouille " + r.scenario.name + " annulee"; }],
+  };
+  function notifyLive(runs) {
+    var first = !S.liveSeenInit;
+    S.liveSeenInit = true;
+    runs.forEach(function (r) {
+      var before = S.liveSeen[r.id];
+      S.liveSeen[r.id] = r.state;
+      if (first || before === r.state) return;
+      // Reprise apres pause : message seulement pour une vraie acceptation
+      if (r.state === "running" && before === "paused") { toast("info", "Patrouille " + r.scenario.name + " reprise"); return; }
+      var m = LIVE_MSG[r.state];
+      if (m) toast(m[0], m[1](r));
+    });
+  }
+
   function loadLive() {
     apiGet("/api/patrols/runs?scope=live").then(function (r) {
       S.live = r.runs;
+      notifyLive(r.runs);
       updateCounts();
       if (S.tab === "suivi") render();
     }).catch(function () { /* silencieux : prochain passage */ });
@@ -986,16 +1015,57 @@
     return card;
   }
 
-  // Ouvre la fiche sur l'accueil Cockpit (lien direct /?fiche=<id>, pcorg.js)
+  // Bouton "Voir la fiche" : fenetre de lecture sur cette page (en-tete,
+  // bloc patrouille avec sa carte, chronologie) ; lien vers l'accueil dedans.
   function ficheLink(id, label) {
-    var a = el("a", "btn pt-fiche-link");
-    a.href = "/?fiche=" + encodeURIComponent(id);
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.appendChild(icon("description"));
-    a.appendChild(document.createTextNode(" " + label));
-    a.addEventListener("click", function (e) { e.stopPropagation(); });
-    return a;
+    var b = el("button", "btn pt-fiche-link");
+    b.type = "button";
+    b.appendChild(icon("description"));
+    b.appendChild(document.createTextNode(" " + label));
+    b.addEventListener("click", function (e) { e.stopPropagation(); openFiche(id); });
+    return b;
+  }
+
+  function openFiche(id) {
+    var body = $("pt-fiche-body");
+    clear(body);
+    body.appendChild(el("div", "pt-hint", "Chargement..."));
+    $("pt-fiche-title").textContent = "Fiche";
+    $("pt-fiche-home").href = "/?fiche=" + encodeURIComponent(id);
+    $("pt-fiche-modal").hidden = false;
+    apiGet("/api/pcorg/detail/" + encodeURIComponent(id)).then(function (d) {
+      clear(body);
+      var cc = d.content_category || {};
+      $("pt-fiche-title").textContent = (d.text || "Fiche").slice(0, 90);
+      var meta = el("div", "pt-fiche-meta");
+      var st = el("span", "pt-badge " + (d.status_code === 10 ? "st-done" : "st-running"), d.status_code === 10 ? "Terminee" : "En cours");
+      meta.appendChild(st);
+      meta.appendChild(el("span", "pt-muted", (d.category || "").replace("PCO.", "") + (d.ts ? " - ouverte le " + fmtDateTime(d.ts) : "") +
+        (d.close_ts && d.status_code === 10 ? " - close le " + fmtDateTime(d.close_ts) : "")));
+      body.appendChild(meta);
+      if (cc.patrol_run && window.PatrolFicheMap) window.PatrolFicheMap.render(body, cc.patrol_run);
+      var hist = d.comment_history || [];
+      body.appendChild(el("div", "pt-step-title", "Chronologie"));
+      var list = el("div", "pt-chrono");
+      if (!hist.length) list.appendChild(el("div", "pt-empty", "Aucune entree."));
+      hist.forEach(function (e) {
+        var row = el("div", "pt-chrono-row");
+        row.appendChild(el("span", "pt-chrono-ts", e.ts ? fmtDateTime(e.ts) : ""));
+        var main = el("div", "pt-chrono-main");
+        main.appendChild(el("span", "pt-chrono-op", String(e.operator || "").replace(/^field:/, "")));
+        main.appendChild(el("div", "pt-chrono-text", e.body || e.text || ""));
+        (e.photos || (e.thumb ? [{ thumb: e.thumb, photo: e.photo }] : [])).forEach(function (p) {
+          if (!p || !p.thumb) return;
+          var a = el("a"); a.href = p.photo || p.thumb; a.target = "_blank"; a.rel = "noopener";
+          var img = el("img", "pt-chrono-img"); img.src = p.thumb; img.alt = "Photo";
+          a.appendChild(img);
+          main.appendChild(a);
+        });
+        row.appendChild(main);
+        list.appendChild(row);
+      });
+      body.appendChild(list);
+    }).catch(function (e) { clear(body); body.appendChild(el("div", "pt-empty", "Fiche indisponible : " + errLabel(e))); });
   }
 
   function renderLive() {
@@ -1017,7 +1087,8 @@
         .bindTooltip(esc(s.name) + (s.at ? " - " + fmtTime(s.at) : ""), { direction: "top", offset: [0, -12] }).addTo(S.layers.live);
     });
     if (r.position && r.position.lat != null) {
-      L.marker([r.position.lat, r.position.lng], { icon: L.divIcon({ className: "pt-dev-icon", html: '<span class="material-symbols-outlined" style="color:' + safeColor(color) + '">navigation</span>', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 2000 })
+      // Rond + nom de la tablette (une fleche laissait croire a une direction)
+      L.marker([r.position.lat, r.position.lng], { icon: L.divIcon({ className: "pt-dev-icon", html: '<div class="pt-dev-dot"><i style="background:' + safeColor(color) + ';box-shadow:0 0 0 2px ' + safeColor(color) + '"></i>' + esc(r.device_name || "?") + '</div>', iconSize: [160, 20], iconAnchor: [8, 10] }), zIndexOffset: 2000 })
         .bindTooltip(esc(r.device_name || "?") + " - position " + fmtTime(r.position.ts), { permanent: false }).addTo(S.layers.live);
     }
   }
@@ -1505,6 +1576,7 @@
     $("pt-imp-lasso-cancel").addEventListener("click", function () { endLasso(false); });
     $("pt-imp-go").addEventListener("click", function () { doImport(false); });
     $("pt-imp-sc").addEventListener("click", function () { doImport(true); });
+    $("pt-fiche-close").addEventListener("click", function () { $("pt-fiche-modal").hidden = true; });
     $("pt-dev-search").addEventListener("input", renderDevices);
     $("pt-zone-search").addEventListener("input", paintZones);
     $("pt-zone-clear").addEventListener("click", function () { ZD.sel = []; paintZones(); });
@@ -1512,7 +1584,7 @@
     $("pt-zone-save").addEventListener("click", saveZones);
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
-      ["pt-zone-modal", "pt-send-modal", "pt-pick-modal"].forEach(function (id) { $(id).hidden = true; });
+      ["pt-zone-modal", "pt-send-modal", "pt-pick-modal", "pt-fiche-modal"].forEach(function (id) { $(id).hidden = true; });
     });
     $("pt-hist-days").addEventListener("change", loadHistory);
     $("pt-hist-sc").addEventListener("change", loadHistory);
@@ -1524,6 +1596,9 @@
     bind();
     var tab = "suivi";
     try { tab = localStorage.getItem("pt_tab") || "suivi"; } catch (e) { /* noop */ }
-    load().then(function () { setTab(tab); });
+    load().then(function () { setTab(tab); loadLive(); });
+    // Patrouilles relues toutes les 10 s quel que soit l'onglet : compteurs
+    // et messages (acceptee, non prise, terminee) partout sur la page
+    setInterval(loadLive, 10000);
   });
 })();

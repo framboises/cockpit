@@ -162,8 +162,10 @@ class TestExecution:
         a, run = self._accepted(db)
         assert run["state"] == "running" and run["fiche_id"]
         f = db["pcorg"].find_one({"_id": run["fiche_id"]})
-        assert f["category"] == "PCO.Securite" and f["content_category"]["patrol_run"] == run["_id"]
-        assert f["content_category"]["patrouille"] == "A" and f["status_code"] == 0
+        # Toujours Main courante, sans position (pas de pin), sans unite engagee
+        assert f["category"] == "PCO.MainCourante" and f["content_category"]["patrol_run"] == run["_id"]
+        assert f["content_category"]["patrol_device"] == "A" and "patrouille" not in f["content_category"]
+        assert f["gps"] is None and f["status_code"] == 0
         assert not DA.wants_auto(DA.get_config(db), f)        # jamais proposee au dispatch
         dev = db["field_devices"].find_one({"_id": a["_id"]})
         assert dev["active_patrol_run"] == run["_id"] and dev["patrol_proposal"] is None
@@ -226,7 +228,7 @@ class TestExecution:
         al = db["cockpit_active_alerts"].find_one({"definition_slug": "patrol_not_taken"})
         assert al and al["actionData"]["run_id"] == run["_id"]
         f = db["pcorg"].find_one({"_id": al["actionData"]["pcorg_id"]})
-        assert f["category"] == "PCO.Information" and f["status_code"] == 10
+        assert f["category"] == "PCO.MainCourante" and f["status_code"] == 10
         P.on_not_taken(db, run["_id"], NOW)          # une seule fois
         assert db["cockpit_active_alerts"].count_documents({}) == 1
 

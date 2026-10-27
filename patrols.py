@@ -884,8 +884,8 @@ def on_not_taken(db, run_id, now):
     doc = {
         "_id": fid, "event": event, "year": year, "ts": now,
         "timestamp_iso": now.astimezone(PARIS).isoformat(), "close_ts": now,
-        "close_iso": now.astimezone(PARIS).isoformat(), "category": "PCO.Information",
-        "source": "PCO.Information", "text": text, "text_full": text, "comment": "", "comment_history": [],
+        "close_iso": now.astimezone(PARIS).isoformat(), "category": "PCO.MainCourante",
+        "source": "PCO.MainCourante", "text": text, "text_full": text, "comment": "", "comment_history": [],
         "operator": BOT, "operator_id_create": "patrol:" + run_id, "operator_close": BOT,
         "operator_id_close": "patrol:" + run_id, "status_code": 10, "severity": 0, "niveau_urgence": None,
         "is_incident": False, "area": None, "gps": None, "group": None,
@@ -960,9 +960,12 @@ def refuse(db, run_id, device_id, now=None, answer="refused", reason=None):
     return True
 
 
-def _fiche_category(db, device):
-    F = _field()
-    return F._device_category(db, device) or "PCO.Information"
+# Fiche de patrouille : TOUJOURS Main courante (choix du 27/10/2026), quelle
+# que soit la categorie de la tablette ; pas de position (pas de pin sur la
+# carte) ; pas de `content_category.patrouille` (sinon la fiche prend le
+# statut de l'agent, "intervention" quand il est engage ailleurs) : la
+# tablette est dans `patrol_device`.
+FICHE_CATEGORY = "PCO.MainCourante"
 
 
 def _open_fiche(db, run, device, now):
@@ -979,12 +982,11 @@ def _open_fiche(db, run, device, now):
     sc = run.get("scenario") or {}
     name = device.get("name") or "?"
     n = len(sc.get("points") or [])
-    text = "Patrouille programmee : %s (%d point%s)" % (sc.get("name") or "?", n, "s" if n > 1 else "")
+    text = "Patrouille programmee : %s (%d point%s) - %s" % (sc.get("name") or "?", n, "s" if n > 1 else "", name)
     if device.get("test_mode"):        # tablette d'essai (Field dispatch)
         text = "[TEST] " + text
     fid = str(uuid.uuid5(uuid.NAMESPACE_URL, "patrol-run|" + run["_id"]))
-    first = (sc.get("points") or [{}])[0]
-    cat = _fiche_category(db, device)
+    cat = FICHE_CATEGORY
     doc = {
         "_id": fid, "event": event, "year": year, "ts": now,
         "timestamp_iso": now.astimezone(PARIS).isoformat(), "close_ts": None, "close_iso": None,
@@ -992,9 +994,9 @@ def _open_fiche(db, run, device, now):
         "comment_history": [], "operator": BOT, "operator_id_create": "patrol:" + run["_id"],
         "operator_close": None, "operator_id_close": None, "status_code": 0, "severity": 0,
         "niveau_urgence": None, "is_incident": False, "area": None,
-        "gps": {"type": "Point", "coordinates": [first["lng"], first["lat"]]} if first.get("lat") is not None else None,
+        "gps": None,
         "group": None,
-        "content_category": {"patrouille": name, "patrol_run": run["_id"],
+        "content_category": {"patrol_run": run["_id"], "patrol_device": name,
                              "patrol_scenario": sc.get("id"), "test": bool(device.get("test_mode")) or None},
         "extracted": {"phones": None, "plates": None},
         "tags": ["patrouille", "test"] if device.get("test_mode") else ["patrouille"],

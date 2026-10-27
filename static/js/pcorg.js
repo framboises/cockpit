@@ -1822,6 +1822,19 @@
     return wrap;
   }
 
+  // Charge static/js/patrol_fiche_map.js une seule fois, puis appelle cb
+  var _pfmWaiting = null;
+  function withPatrolFicheMap(cb) {
+    if (window.PatrolFicheMap) { cb(); return; }
+    if (_pfmWaiting) { _pfmWaiting.push(cb); return; }
+    _pfmWaiting = [cb];
+    var s = document.createElement("script");
+    s.src = "/static/js/patrol_fiche_map.js?v=" + Date.now().toString(36).slice(0, 6);
+    s.onload = function () { var w = _pfmWaiting; _pfmWaiting = null; w.forEach(function (f) { try { f(); } catch (e) { /* bloc ignore */ } }); };
+    s.onerror = function () { _pfmWaiting = null; };
+    document.head.appendChild(s);
+  }
+
   function renderFiche(d, isClosed) {
     var st = catStyle(d.category);
     var cc = d.content_category || {};
@@ -1861,6 +1874,14 @@
       desc.style.borderLeftColor = st.color;
       desc.textContent = descText;
       body.appendChild(desc);
+    }
+
+    // Patrouille programmee (patrols.py) : carte de tous les points, etat,
+    // trajet estime (patrol_fiche_map.js, charge a la demande)
+    if (cc.patrol_run) {
+      var pfmHost = mkEl("div", "");
+      body.appendChild(pfmHost);
+      withPatrolFicheMap(function () { window.PatrolFicheMap.render(pfmHost, cc.patrol_run); });
     }
 
     // Urgency level selector (only if not closed). Meme regle que la creation
@@ -1949,6 +1970,8 @@
       infoRow.appendChild(mapDiv);
       body.appendChild(infoRow);
       setTimeout(function () { initMiniMap(d.lat, d.lon, st); }, 100);
+    } else if (cc.patrol_run) {
+      body.appendChild(infoRow);      // fiche de patrouille : la carte est celle de la patrouille
     } else {
       mapDiv.classList.add("empty");
       mapDiv.textContent = "Pas de position";
@@ -2766,7 +2789,7 @@
       who = "Initiative personnelle";
       if (cc.source_origine) who += " (" + cc.source_origine + ")";
     } else if (srcType === "externe") {
-      who = cc.appelant || "—";
+      who = (cc.appelant || "—") + (cc.appelant_tel ? " (" + cc.appelant_tel + ")" : "");
     } else if (srcType === "operateur") {
       who = cc.emetteur_interne || cc.appelant || "—";
     } else if (srcType === "hierarchie") {
@@ -4729,7 +4752,19 @@
     var inpQ = mkEl("input", "form-input");
     inpQ.type = "text"; inpQ.id = qId; inpQ.placeholder = qPlaceholder;
     inpQ.autocomplete = "off";
-    grpQ.appendChild(inpQ);
+    if (srcId === "externe") {
+      // Appelant externe : nom et numero de rappel sur la meme ligne
+      var line = mkEl("div", "pcorg-caller-row");
+      line.appendChild(inpQ);
+      var tel = mkEl("input", "form-input pcorg-caller-tel");
+      tel.type = "tel"; tel.id = "pcorg-c-appelant-tel"; tel.placeholder = "Numero (optionnel)";
+      tel.autocomplete = "off"; tel.setAttribute("inputmode", "tel"); tel.maxLength = 30;
+      tel.setAttribute("aria-label", "Numero de l'appelant");
+      line.appendChild(tel);
+      grpQ.appendChild(line);
+    } else {
+      grpQ.appendChild(inpQ);
+    }
     container.appendChild(grpQ);
 
     if (qListKey) {
@@ -5030,6 +5065,8 @@
     } else if (createSource === "externe") {
       var appelant = getVal("pcorg-c-appelant");
       if (appelant) cc.appelant = appelant;
+      var appelantTel = getVal("pcorg-c-appelant-tel");
+      if (appelantTel) cc.appelant_tel = appelantTel;
     } else if (createSource === "operateur") {
       var emetteur = getVal("pcorg-c-emetteur");
       if (emetteur) {

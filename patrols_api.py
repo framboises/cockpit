@@ -56,7 +56,7 @@ def _asset_version():
     from flask import current_app
     v = 0
     for parts in (("js", "patrouilles.js"), ("css", "patrouilles.css"),
-                  ("js", "schedule_grid.js"), ("css", "schedule_grid.css")):
+                  ("js", "schedule_grid.js"), ("css", "schedule_grid.css"), ("js", "patrol_fiche_map.js")):
         try:
             v = max(v, int(os.path.getmtime(os.path.join(current_app.static_folder, *parts))))
         except OSError:
@@ -366,6 +366,21 @@ def patrols_runs():
         elif r.get("state") in ("refused", "expired"):
             s["not_taken"] += 1
     return jsonify({"ok": True, "runs": out, "stats": sorted(stats.values(), key=lambda x: -x["runs"])})
+
+
+@patrols_bp.route("/api/pcorg-patrol/<run_id>")
+@_role_required("user")
+def pcorg_patrol_view(run_id):
+    """Patrouille d'une fiche de main courante (lecture, tout operateur) :
+    points, etat, trajet estime, position de la tablette. Sert a la carte de
+    la fiche (pcorg.js) et a la fenetre de fiche de la page Patrouilles."""
+    db = _db()
+    run = db["patrol_runs"].find_one({"_id": run_id})
+    if not run:
+        return _err("not_found", 404)
+    dev = db["field_devices"].find_one({"_id": P._oid(run.get("device_id"))}, {"name": 1, "last_position": 1, "status": 1}) \
+        if run.get("device_id") else None
+    return jsonify({"ok": True, "run": P.pub_run(run, dev)})
 
 
 @patrols_bp.route("/api/patrols/runs/<run_id>/cancel", methods=["POST"])

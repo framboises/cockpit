@@ -13145,6 +13145,11 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 
 /* Canal segmented */
+/* Appelant externe : nom + numero de rappel sur la meme ligne */
+.pcorg-caller-row { display: flex; gap: 8px; }
+.pcorg-caller-row .form-input { flex: 1; min-width: 0; }
+.pcorg-caller-row .pcorg-caller-tel { flex: 0 0 38%; }
+
 .pcorg-canal-row {
   display: flex; flex-wrap: wrap; gap: 4px;
 }

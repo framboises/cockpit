@@ -240,6 +240,19 @@
     </div>
 </div>
 
+<!-- Fiche de main courante (lecture) -->
+<div class="pt-modal" id="pt-fiche-modal" hidden>
+    <div class="pt-modal-box pt-fiche-box">
+        <div class="pt-modal-head">
+            <h3><span class="material-symbols-outlined">description</span> <span id="pt-fiche-title">Fiche</span></h3>
+            <span class="pt-spacer"></span>
+            <a class="btn" id="pt-fiche-home" target="_blank" rel="noopener"><span class="material-symbols-outlined">open_in_new</span> Ouvrir dans l'accueil</a>
+            <button type="button" class="btn" id="pt-fiche-close">Fermer</button>
+        </div>
+        <div class="pt-fiche-body" id="pt-fiche-body"></div>
+    </div>
+</div>
+
 <!-- Ajout de points a un scenario -->
 <div class="pt-modal" id="pt-pick-modal" hidden>
     <div class="pt-modal-box">
@@ -353,6 +366,7 @@
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/schedule_grid.js') }}?v={{ asset_v }}"></script>
+<script src="{{ url_for('static', filename='js/patrol_fiche_map.js') }}?v={{ asset_v }}"></script>
 <script src="{{ url_for('static', filename='js/patrouilles.js') }}?v={{ asset_v }}"></script>
 <script>
   window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
