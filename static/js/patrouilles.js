@@ -159,10 +159,6 @@
   }
 
   function fillSelects() {
-    var add = $("pt-sc-add");
-    clear(add);
-    add.appendChild(new Option("+ Ajouter un point...", ""));
-    S.data.points.filter(function (p) { return p.active; }).forEach(function (p) { add.appendChild(new Option(p.name, p.id)); });
     var dom = $("pt-sc-dominante");
     clear(dom);
     (S.data.dominantes || []).forEach(function (d) { dom.appendChild(new Option(d.label, d.id)); });
@@ -365,6 +361,7 @@
     $("pt-sc-name").value = S.sc.name;
     $("pt-sc-dominante").value = S.sc.dominante;
     $("pt-sc-color").value = S.sc.color;
+    renderSwatches();
     $("pt-sc-loop").checked = S.sc.loop;
     $("pt-sc-note").value = S.sc.note || "";
     document.querySelectorAll('input[name="pt-sc-travel"]').forEach(function (r) { r.checked = r.value === S.sc.travel; });
@@ -403,38 +400,148 @@
   }
   function confirmDuplicate() { toast("warning", "Ce point est deja dans le scenario"); return false; }
 
-  var dragFrom = null;
+  // Glisser-deposer : un trait bleu montre ou la ligne va tomber (avant ou
+  // apres la ligne survolee, selon la moitie), y compris apres la derniere.
+  // Fleches monter / descendre en plus (precis, utilisable sans souris).
+  var dragFrom = null, dropAt = null;
+  function movePoint(from, to) {
+    if (from === to || to < 0 || to > S.sc.points.length) return;
+    var moved = S.sc.points.splice(from, 1)[0];
+    if (from < to) to -= 1;
+    S.sc.points.splice(to, 0, moved);
+    renderScenarioPoints(); render(); preview();
+  }
+  function clearDropMarks() {
+    Array.prototype.forEach.call(document.querySelectorAll("#pt-sc-points .pt-step"), function (x) {
+      x.classList.remove("drop-before", "drop-after");
+    });
+  }
   function renderScenarioPoints() {
     var ol = $("pt-sc-points");
     clear(ol);
     var legs = (S.sc.estimate && S.sc.estimate.legs) || [];
+    var n = S.sc.points.length;
     S.sc.points.forEach(function (id, i) {
       var p = pointById(id) || { name: "(point supprime)" };
       var li = el("li", "pt-step");
       li.draggable = true;
+      li.appendChild(icon("drag_indicator"));
+      li.firstChild.classList.add("pt-step-grip");
       li.appendChild(el("span", "pt-step-num", String(i + 1)));
       var name = el("span", "pt-step-name", p.name);
       if (p.active === false) name.appendChild(el("em", "pt-muted", " (desactive)"));
       li.appendChild(name);
       if (i > 0 && legs[i - 1]) li.appendChild(el("span", "pt-step-leg", fmtKm(legs[i - 1].distance_m) + " - " + fmtMin(legs[i - 1].duration_s)));
+      [["arrow_upward", "Monter", i === 0, function () { movePoint(i, i - 1); }],
+       ["arrow_downward", "Descendre", i === n - 1, function () { movePoint(i, i + 2); }]].forEach(function (b) {
+        var bt = el("button", "pt-step-mv"); bt.type = "button"; bt.title = b[1]; bt.disabled = b[2];
+        bt.appendChild(icon(b[0]));
+        bt.addEventListener("click", b[3]);
+        li.appendChild(bt);
+      });
       var rm = el("button", "pt-step-rm"); rm.type = "button"; rm.title = "Retirer"; rm.appendChild(icon("close"));
       rm.addEventListener("click", function () { S.sc.points.splice(i, 1); renderScenarioPoints(); render(); preview(); });
       li.appendChild(rm);
-      li.addEventListener("dragstart", function () { dragFrom = i; li.classList.add("dragging"); });
-      li.addEventListener("dragend", function () { li.classList.remove("dragging"); });
-      li.addEventListener("dragover", function (e) { e.preventDefault(); });
+      li.addEventListener("dragstart", function (e) {
+        dragFrom = i; li.classList.add("dragging");
+        try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(i)); } catch (x) { /* navigateur ancien */ }
+      });
+      li.addEventListener("dragend", function () { li.classList.remove("dragging"); clearDropMarks(); dragFrom = null; });
+      li.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        var r = li.getBoundingClientRect();
+        var after = e.clientY > r.top + r.height / 2;
+        clearDropMarks();
+        li.classList.add(after ? "drop-after" : "drop-before");
+        dropAt = after ? i + 1 : i;
+      });
       li.addEventListener("drop", function (e) {
         e.preventDefault();
-        if (dragFrom === null || dragFrom === i) return;
-        var moved = S.sc.points.splice(dragFrom, 1)[0];
-        S.sc.points.splice(i, 0, moved);
+        clearDropMarks();
+        if (dragFrom === null || dropAt === null) return;
+        var from = dragFrom;
         dragFrom = null;
-        renderScenarioPoints(); render(); preview();
+        movePoint(from, dropAt);
       });
       ol.appendChild(li);
     });
-    if (!S.sc.points.length) ol.appendChild(el("li", "pt-empty", "Aucun point : cliquez-les sur la carte."));
+    if (!n) ol.appendChild(el("li", "pt-empty", "Aucun point : cliquez-les sur la carte ou utilisez Ajouter des points."));
     renderZoneHint();
+  }
+
+  // ---------- Selecteur de points (recherche, plusieurs a la fois) ----------
+  var PK = { sel: {}, order: [], visible: [] };
+  function openPicker() {
+    PK = { sel: {}, order: [], visible: [] };
+    $("pt-pick-search").value = "";
+    paintPicker();
+    $("pt-pick-modal").hidden = false;
+    $("pt-pick-search").focus();
+  }
+  function paintPicker() {
+    var q = ($("pt-pick-search").value || "").toLowerCase();
+    var inSc = {};
+    S.sc.points.forEach(function (id) { inSc[id] = true; });
+    var pts = S.data.points.filter(function (p) {
+      if (!p.active || inSc[p.id]) return false;
+      return !q || (p.name + " " + (p.zones || []).join(" ")).toLowerCase().indexOf(q) >= 0;
+    });
+    PK.visible = pts.map(function (p) { return p.id; });
+    var box = $("pt-pick-list");
+    clear(box);
+    if (!pts.length) box.appendChild(el("div", "pt-empty", q ? "Aucun point ne correspond." : "Tous les points actifs sont deja dans le scenario."));
+    pts.forEach(function (p) {
+      var lab = el("label", "pt-pick-item" + (PK.sel[p.id] ? " on" : ""));
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!PK.sel[p.id];
+      cb.addEventListener("change", function () {
+        if (cb.checked) { PK.sel[p.id] = true; PK.order.push(p.id); } else delete PK.sel[p.id];
+        lab.classList.toggle("on", cb.checked);
+        countPicker();
+      });
+      lab.appendChild(cb);
+      var t = el("span", "pt-pick-name", p.name);
+      lab.appendChild(t);
+      var sub = [];
+      if (p.zones && p.zones.length) sub.push(p.zones.slice(0, 2).join(", "));
+      if (p.photo_required) sub.push("photo");
+      if (p.source && p.source !== "manual") sub.push(p.source.replace("layer:", ""));
+      if (sub.length) lab.appendChild(el("span", "pt-muted", sub.join(" - ")));
+      box.appendChild(lab);
+    });
+    countPicker();
+  }
+  function countPicker() {
+    var n = Object.keys(PK.sel).length;
+    $("pt-pick-count").textContent = n ? n + " point" + (n > 1 ? "s" : "") + " coche" + (n > 1 ? "s" : "") : "";
+    $("pt-pick-go").disabled = !n;
+  }
+  function applyPicker() {
+    // Ordre : celui de la liste (alphabetique), plus lisible qu'un ordre de clic
+    var ids = S.data.points.filter(function (p) { return PK.sel[p.id]; }).map(function (p) { return p.id; });
+    if (S.sc.points.length + ids.length > 40) { toast("warning", "40 points au plus par scenario"); return; }
+    ids.forEach(function (id) { if (S.sc.points.indexOf(id) < 0) S.sc.points.push(id); });
+    $("pt-pick-modal").hidden = true;
+    toast("success", ids.length + " point(s) ajoute(s)");
+    renderScenarioPoints(); render(); fitScenario(); preview();
+  }
+
+  // ---------- Couleurs habituelles (categories de la main courante) ----------
+  var SWATCHES = [["#ef4444", "Securite"], ["#dc2626", "Secours"], ["#f59e0b", "Technique"], ["#0d9488", "Flux"],
+                  ["#2563eb", "Information"], ["#8b5cf6", "Main courante"], ["#16a34a", "Prevention"], ["#6b7280", "Fourriere"]];
+  var DOMINANTE_COLORS = { surete: "#ef4444", secours: "#dc2626", incendie: "#f97316", prevention: "#16a34a", generale: "#2563eb" };
+  function renderSwatches() {
+    var box = $("pt-sc-swatches");
+    clear(box);
+    var cur = ($("pt-sc-color").value || "").toLowerCase();
+    SWATCHES.forEach(function (s) {
+      var b = el("button", "pt-swatch-btn" + (cur === s[0] ? " on" : ""));
+      b.type = "button";
+      b.title = s[1];
+      b.style.background = s[0];
+      b.setAttribute("aria-label", "Couleur " + s[1]);
+      b.addEventListener("click", function () { $("pt-sc-color").value = s[0]; readScenarioForm(); renderSwatches(); render(); });
+      box.appendChild(b);
+    });
   }
 
   function renderZoneHint() {
@@ -1128,7 +1235,12 @@
     $("pt-pt-radius").addEventListener("change", render);
     $("pt-sc-new").addEventListener("click", function () { openScenario(null); });
     $("pt-sc-archived").addEventListener("change", render);
-    $("pt-sc-add").addEventListener("change", function (e) { if (e.target.value) addPointToScenario(e.target.value); e.target.value = ""; });
+    $("pt-sc-add").addEventListener("click", openPicker);
+    $("pt-pick-search").addEventListener("input", paintPicker);
+    $("pt-pick-all").addEventListener("click", function () { PK.visible.forEach(function (id) { PK.sel[id] = true; }); paintPicker(); });
+    $("pt-pick-none").addEventListener("click", function () { PK.sel = {}; paintPicker(); });
+    $("pt-pick-close").addEventListener("click", function () { $("pt-pick-modal").hidden = true; });
+    $("pt-pick-go").addEventListener("click", applyPicker);
     $("pt-sc-cancel").addEventListener("click", closeScenario);
     $("pt-sc-save").addEventListener("click", saveScenario);
     $("pt-sc-optimize").addEventListener("click", optimize);
@@ -1143,7 +1255,16 @@
      "pt-plan-enabled", "pt-plan-note"].forEach(function (id) { $(id).addEventListener("change", planDirty); });
     document.querySelectorAll('input[name="pt-plan-kind"], input[name="pt-plan-rule"]').forEach(function (r) { r.addEventListener("change", planDirty); });
     $("pt-sc-loop").addEventListener("change", preview);
-    $("pt-sc-color").addEventListener("change", function () { readScenarioForm(); render(); });
+    $("pt-sc-color").addEventListener("change", function () { readScenarioForm(); renderSwatches(); render(); });
+    // Choisir une dominante propose sa couleur si la couleur n'a pas ete
+    // choisie a la main (encore une des couleurs proposees)
+    $("pt-sc-dominante").addEventListener("change", function () {
+      var cur = ($("pt-sc-color").value || "").toLowerCase();
+      var isPreset = SWATCHES.some(function (s) { return s[0] === cur; }) || cur === "#f97316";
+      var c = DOMINANTE_COLORS[$("pt-sc-dominante").value];
+      if (c && isPreset) { $("pt-sc-color").value = c; renderSwatches(); }
+      readScenarioForm(); render();
+    });
     document.querySelectorAll('input[name="pt-sc-travel"]').forEach(function (r) { r.addEventListener("change", preview); });
     $("pt-send-close").addEventListener("click", function () { $("pt-send-modal").hidden = true; if (S.tab === "suivi") loadLive(); });
     $("pt-send-go").addEventListener("click", doSend);
@@ -1154,7 +1275,7 @@
     $("pt-zone-save").addEventListener("click", saveZones);
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
-      ["pt-zone-modal", "pt-send-modal"].forEach(function (id) { $(id).hidden = true; });
+      ["pt-zone-modal", "pt-send-modal", "pt-pick-modal"].forEach(function (id) { $(id).hidden = true; });
     });
     $("pt-hist-days").addEventListener("change", loadHistory);
     $("pt-hist-sc").addEventListener("change", loadHistory);

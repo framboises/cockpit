@@ -4266,7 +4266,8 @@
       btn("", "directions", "Itineraire", function () { _patrol.routeFor = null; routeToPatrolPoint(nx.step, true); });
       btn("", "skip_next", "Passer", function () { patrolSkip(nx.step); });
       if (state.testMode) {
-        // Essai : se placer sur le point, comme un passage GPS reel
+        // Essai : se placer a 300 m (puis trajet simule) ou sur le point
+        btn("", "near_me", "Approcher 300 m", function () { simNear(nx.step, 300); });
         btn("", "pin_drop", "Aller au point", function () { setSimPosition([nx.step.lat, nx.step.lng]); });
       }
     }
@@ -4533,7 +4534,17 @@
     if (!quiet) state.lastPushedAt = 0;     // trajet simule : envoi au rythme normal
     emit();
     state.simTimer = setInterval(function () { if (state.simPos) { state.lastPushedAt = 0; emit(); } }, 30000);
-    if (!quiet) toast("Position simulee posee", "ok");
+    if (!quiet) {
+      toast("Position simulee posee", "ok");
+      // Essai loin du site : la carte suit la position simulee
+      try { state.map.setView(latlng, Math.max(state.map.getZoom(), 16)); } catch (e) { /* carte pas prete */ }
+    }
+  }
+
+  // Position simulee a `meters` au sud du point (essai d'un vrai passage :
+  // trajet simule ou deplacement a la main jusqu'au rayon)
+  function simNear(step, meters) {
+    setSimPosition([step.lat - meters / 111000, step.lng]);
   }
 
   // ---------------------------------------------------------------------
@@ -4828,11 +4839,17 @@
 
     body.appendChild(_n("div", "test-sec", "Position"));
     var g2 = _n("div", "test-grid");
-    _actBtn(g2, "Au point suivant", "pin_drop", function () {
+    _actBtn(g2, "A 300 m du point suivant", "near_me", function () {
+      var nx = patrolNextStep();
+      if (!nx) { toast("Pas de point suivant", "warn"); return; }
+      simNear(nx.step, 300);
+    });
+    _actBtn(g2, "Sur le point suivant", "pin_drop", function () {
       var nx = patrolNextStep();
       if (!nx) { toast("Pas de point suivant", "warn"); return; }
       setSimPosition([nx.step.lat, nx.step.lng]);
     });
+    _actBtn(g2, "Au Mans (Village)", "location_city", function () { setSimPosition([47.9558, 0.2079]); });
     _actBtn(g2, "Revenir au GPS reel", "my_location", function () { stopSimWalk(); setSimPosition(null); });
     body.appendChild(g2);
     var row2 = _n("div", "test-row");

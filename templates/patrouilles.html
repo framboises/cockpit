@@ -86,6 +86,7 @@
                                 </div>
                             </div>
                             <div class="pt-scroll pt-editor-body">
+                                <div class="pt-swatches" id="pt-sc-swatches" aria-label="Couleurs habituelles"></div>
                                 <div class="pt-seg" role="radiogroup" aria-label="Deplacement">
                                     <label><input type="radio" name="pt-sc-travel" value="vehicle" checked><span class="material-symbols-outlined">directions_car</span> Vehicule</label>
                                     <label><input type="radio" name="pt-sc-travel" value="pedestrian"><span class="material-symbols-outlined">directions_walk</span> A pied</label>
@@ -97,7 +98,7 @@
                                 <div id="pt-sc-estimate" class="pt-estimate">-</div>
                                 <div class="pt-hint">Cliquez les points sur la carte dans l'ordre de passage. Glissez une ligne pour la deplacer.</div>
                                 <ol id="pt-sc-points" class="pt-steps"></ol>
-                                <select id="pt-sc-add" class="pt-input"><option value="">+ Ajouter un point...</option></select>
+                                <button type="button" class="btn pt-add-points" id="pt-sc-add"><span class="material-symbols-outlined">playlist_add</span> Ajouter des points (recherche, plusieurs a la fois)</button>
                                 <div id="pt-sc-zone" class="pt-hint"></div>
                                 <textarea id="pt-sc-note" class="pt-input" rows="2" maxlength="500" placeholder="Note (consigne generale, facultatif)"></textarea>
                                 <div class="pt-row" id="pt-sc-more">
@@ -206,6 +207,31 @@
                     <label class="pt-map-zones"><input type="checkbox" id="pt-show-zones"> Zones de competence</label>
                 </section>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ajout de points a un scenario -->
+<div class="pt-modal" id="pt-pick-modal" hidden>
+    <div class="pt-modal-box">
+        <div class="pt-modal-head">
+            <h3><span class="material-symbols-outlined">playlist_add</span> Ajouter des points</h3>
+        </div>
+        <div class="pt-row">
+            <input type="search" id="pt-pick-search" class="pt-input" placeholder="Filtrer par nom ou zone">
+        </div>
+        <div class="pt-row pt-pick-tools">
+            <button type="button" class="pt-link" id="pt-pick-all">Tout cocher (filtre)</button>
+            <button type="button" class="pt-link" id="pt-pick-none">Tout decocher</button>
+            <span class="pt-spacer"></span>
+            <span class="pt-hint" id="pt-pick-count"></span>
+        </div>
+        <div class="pt-pick-list" id="pt-pick-list"></div>
+        <div class="pt-hint">Les points deja dans le scenario ne sont pas proposes. Ils sont ajoutes a la fin, dans l'ordre de la liste ; Optimiser les remet dans le meilleur ordre.</div>
+        <div class="pt-row">
+            <span class="pt-spacer"></span>
+            <button type="button" class="btn" id="pt-pick-close">Annuler</button>
+            <button type="button" class="btn btn-primary" id="pt-pick-go"><span class="material-symbols-outlined">add</span> Ajouter</button>
         </div>
     </div>
 </div>

@@ -204,3 +204,27 @@
   .pt-cards { grid-template-columns: 1fr; }
   .pt-summary { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* Liste des points du scenario : repere de depot, fleches */
+.pt-step-grip { color: #94a3b8; font-size: 18px; cursor: grab; }
+.pt-step.drop-before { box-shadow: inset 0 3px 0 #2563eb; }
+.pt-step.drop-after { box-shadow: inset 0 -3px 0 #2563eb; }
+.pt-step-mv { border: 0; background: none; color: #94a3b8; cursor: pointer; padding: 0; display: inline-flex; }
+.pt-step-mv:hover:not(:disabled) { color: #2563eb; }
+.pt-step-mv:disabled { opacity: .25; cursor: default; }
+.pt-step-mv .material-symbols-outlined, .pt-step-rm .material-symbols-outlined { font-size: 18px; }
+.pt-add-points { align-self: stretch; justify-content: center; border-style: dashed !important; color: #2563eb; }
+
+/* Couleurs habituelles */
+.pt-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.pt-swatch-btn { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #cbd5e1; cursor: pointer; padding: 0; }
+.pt-swatch-btn.on { box-shadow: 0 0 0 2px #1e293b; }
+
+/* Selecteur de points */
+.pt-pick-tools { gap: 12px; }
+.pt-link { border: 0; background: none; color: #2563eb; font: inherit; font-size: 13.5px; cursor: pointer; padding: 0; }
+.pt-pick-list { overflow-y: auto; min-height: 120px; max-height: 50vh; display: flex; flex-direction: column; gap: 3px; border: 1px solid #e2e8f0; border-radius: 9px; padding: 6px; }
+.pt-pick-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.pt-pick-item:hover { background: #f1f5f9; }
+.pt-pick-item.on { background: #eff6ff; }
+.pt-pick-name { flex: 1; min-width: 0; font-weight: 600; }
