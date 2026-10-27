@@ -10080,7 +10080,10 @@
     if (!("wakeLock" in navigator)) return { on: false, why: "non pris en charge par ce navigateur (iPhone : iOS 16.4 minimum, 18.4 pour l'app sur l'ecran d'accueil)" };
     if (_wakeLock) return { on: true, why: wakeLockNeverIdle() ? "sans limite" : "relache apres 1 h sans toucher l'ecran" };
     if (!wakeLockAllowedByStatus()) return { on: false, why: "statut " + state.patrolStatus };
-    return { on: false, why: state.wakeLockError ? "refuse : " + state.wakeLockError : "relache (inactivite) : toucher l'ecran le reprend" };
+    return { on: false, why: state.wakeLockError
+      ? "refuse par le telephone (" + state.wakeLockError + ")" + (state.wakeLockError === "NotAllowedError"
+        ? " : desactivez le mode economie d'energie, ou Reglages > Luminosite > Verrouillage auto > Jamais" : "")
+      : "relache (inactivite) : toucher l'ecran le reprend" };
   }
 
   function acquireWakeLock() {
@@ -10096,8 +10099,13 @@
         scheduleWakeLockRelease();
       }).catch(function (e) {
         _wakeLock = null;
-        state.wakeLockError = (e && (e.name || e.message)) || "?";
-        tlog("ecran", "maintien allume refuse : " + state.wakeLockError);
+        var why = (e && (e.name || e.message)) || "?";
+        // Une ligne de journal par cause (le refus se repete a chaque toucher)
+        if (state.wakeLockError !== why) {
+          tlog("ecran", "maintien allume refuse : " + why +
+            (why === "NotAllowedError" ? " (iPhone : mode economie d'energie active ?)" : ""));
+        }
+        state.wakeLockError = why;
       });
     } catch (e) { /* ignore */ }
   }
