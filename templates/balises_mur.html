@@ -20,7 +20,9 @@
          onde quand elle roule, trainee des 10 dernieres minutes, nom sous la
          pastille ; hors ligne = gris, a sa derniere position ;
        - panneau : un bloc par groupe, en ligne / en mouvement, une ligne par
-         balise en ligne (vitesse ou "arret"), les hors ligne en resume.
+         balise en ligne (vitesse ou "arret") puis par balise muette depuis
+         moins de 12 h (grisee), les plus anciennes comptees en pied de bloc ;
+         trop de lignes = pages qui tournent toutes les 8 s.
      La carte se recadre seule sur les balises en ligne (sans a-coups : seulement
      quand une balise sort du cadre ou que les groupes changent).
      Sans ?groupes= : dernier choix de ce navigateur, sinon selecteur. Le portail
@@ -133,11 +135,19 @@
   .lignes.aere{gap:0.8vh 0.8vw}
   .lignes.aere .ligne{font-size:calc(var(--t-moyen) * 1.3); padding:1vh 0.9vw; border-radius:0.7vw}
   .lignes.aere .ligne .puce{width:1vw; height:1vw}
-  .ligne.plus{color:var(--muted); font-weight:700; background:none; font-size:var(--t-libelle); text-transform:uppercase; letter-spacing:0.06em}
+  .lignes{position:relative}
+  .ligne[hidden]{display:none}
+  .ligne.off{background:none; border:1px dashed var(--line-2); color:var(--muted)}
+  .ligne.off .puce{background:var(--off)}
+  .pages{flex:0 0 auto; display:flex; align-items:center; gap:0.4vw; padding:0 1vw 0.8vh}
+  .pages[hidden]{display:none}
+  .pages span{width:0.55vw; height:0.55vw; min-width:8px; min-height:8px; border-radius:50%; background:var(--line-2)}
+  .pages span.on{background:var(--c)}
+  .pages em{margin-left:auto; font-style:normal; font-size:var(--t-libelle); color:var(--muted); font-weight:700}
   .ligne .bat{color:var(--warn); font-size:0.85em; white-space:nowrap}
   .ligne .bat.crit{color:var(--crit)}
   .horsligne{flex:0 0 auto; padding:0.6vh 1vw 1vh; font-size:var(--t-libelle); color:var(--muted-2); font-weight:600;
-    border-top:1px solid var(--line); line-height:1.35; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical}
+    border-top:1px solid var(--line); line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .horsligne b{color:var(--muted); font-weight:800; text-transform:uppercase; letter-spacing:0.06em; margin-right:0.4vw}
   .rien{font-size:var(--t-moyen); color:var(--muted-2); padding:0 1vw 1vh}
   .avis{background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); color:#fcd34d; border-radius:0.8vw;
@@ -202,6 +212,8 @@
   var RAFRAICHIR_MS = 5000;
   var GLISSE_MS = 1600;        // deplacement anime d'une position a la suivante
   var MAX_GROUPES = 3;
+  var PAGE_MS = 8000;              // rotation des pages d'un bloc trop plein
+  var MUETTE_RECENTE_S = 12 * 3600; // au-dela : balise rangee, comptee en pied de bloc
   var CENTRE = [47.938561, 0.224318];
   var CLE_LOCALE = "balisesMur.groupes";
   var CLE_FOND = "balisesMur.fond";
@@ -210,7 +222,7 @@
   var params = new URLSearchParams(location.search);
 
   var S = { data: null, decalage: 0, recu: 0, erreur: null, groupes: [], marqueurs: {}, traces: {},
-            sigCadre: "", choixOuvert: false, fond: "plan" };
+            sigCadre: "", choixOuvert: false, fond: "plan", page: -1 };
   var carte, coucheTraces, coucheBalises, couchesFond = [];
 
   function $(id) { return document.getElementById(id); }
@@ -443,6 +455,14 @@
     return l;
   }
 
+  function ligneMuette(b) {
+    var l = el("div", "ligne off");
+    l.appendChild(el("span", "puce"));
+    l.appendChild(el("span", "lab une-ligne", b.label));
+    l.appendChild(el("span", "v arret", "muette " + age(b.age_s)));
+    return l;
+  }
+
   function rendrePanneau(d) {
     var p = $("panneau");
     p.textContent = "";
@@ -455,9 +475,15 @@
       bloc.style.setProperty("--c", g.couleur);
       var enLigne = g.balises.filter(function (b) { return b.en_ligne; });
       var hors = g.balises.filter(function (b) { return !b.en_ligne; });
+      // Muette depuis peu = a surveiller (ligne grisee) ; depuis longtemps =
+      // rangee, comptee seulement en pied de bloc
+      var recentes = hors.filter(function (b) { return b.age_s != null && b.age_s < MUETTE_RECENTE_S; });
+      var rangees = hors.length - recentes.length;
+      var nbLignes = enLigne.length + recentes.length;
       // Hauteur du bloc selon le nombre de lignes a montrer
-      var deux = enLigne.length > 4;
-      bloc.style.flex = (Math.ceil(Math.max(enLigne.length, 1) / (deux ? 2 : 1)) + 2.5 + (hors.length ? 1.5 : 0)) + " 1 0";
+      var deux = nbLignes > 4;
+      // (plafonnee : un gros groupe pagine au lieu d'ecraser les autres)
+      bloc.style.flex = (Math.min(Math.ceil(Math.max(nbLignes, 1) / (deux ? 2 : 1)), 10) + 2.5 + (rangees ? 1.2 : 0)) + " 1 0";
       var ent = el("div", "entete");
       var ic = el("div", "ico"); ic.appendChild(ico(String(g.icone)));
       ent.appendChild(ic);
@@ -469,49 +495,71 @@
       c.appendChild(el("div", "m", g.en_mouvement ? g.en_mouvement + " en mouvement" : "en ligne"));
       ent.appendChild(c);
       bloc.appendChild(ent);
-      if (enLigne.length) {
+      if (nbLignes) {
         enLigne.sort(function (a, b) {
           if (a.mouvement !== b.mouvement) return a.mouvement ? -1 : 1;
           if (a.mouvement) return b.vitesse - a.vitesse;
           return a.label.localeCompare(b.label, "fr", { numeric: true });
         });
+        recentes.sort(function (a, b) { return a.age_s - b.age_s; });
         // Peu de balises : lignes plus grandes, lisibles de loin
-        var aere = enLigne.length * (deux ? 0.5 : 1) * d.groupes.length <= 8;
+        var aere = nbLignes * (deux ? 0.5 : 1) * d.groupes.length <= 8;
         var ls = el("div", "lignes" + (deux ? "" : " une") + (aere ? " aere" : ""));
         enLigne.forEach(function (b) { ls.appendChild(ligneBalise(b, g)); });
+        recentes.forEach(function (b) { ls.appendChild(ligneMuette(b)); });
         bloc.appendChild(ls);
       } else {
         bloc.appendChild(el("div", "rien", g.total ? "Aucune balise en ligne" : "Aucune balise dans ce groupe"));
       }
-      if (hors.length) {
-        hors.sort(function (a, b) { return a.label.localeCompare(b.label, "fr", { numeric: true }); });
+      if (rangees) {
         var h = el("div", "horsligne");
-        h.appendChild(el("b", "", hors.length + " hors ligne"));
-        h.appendChild(document.createTextNode(hors.map(function (b) {
-          return b.label + (b.age_s != null ? " (" + age(b.age_s) + ")" : "");
-        }).join(" · ")));
+        h.appendChild(el("b", "", rangees + " hors ligne"));
+        h.appendChild(document.createTextNode("depuis plus de " + (MUETTE_RECENTE_S / 3600) + " h ou jamais vue" + (rangees > 1 ? "s" : "")));
         bloc.appendChild(h);
       }
       p.appendChild(bloc);
     });
-    ajusterLignes();
+    S.page = -1;
+    paginer();
   }
 
-  // Lignes qui ne tiennent pas dans leur bloc : retirees par la fin (les
-  // balises a l'arret, les moins utiles), remplacees par "+ N autres"
-  function ajusterLignes() {
+  // Lignes qui ne tiennent pas dans leur bloc : decoupees en pages qui
+  // tournent toutes les PAGE_MS (tous les blocs ensemble), points en bas du
+  // bloc. Rien n'est jamais cache durablement.
+  function paginer() {
+    var page = Math.floor(Date.now() / PAGE_MS);
+    if (page === S.page) return;
+    S.page = page;
     document.querySelectorAll("#panneau .lignes").forEach(function (ls) {
-      var cachees = 0, plus = null;
-      while (ls.scrollHeight > ls.clientHeight + 1) {
-        if (!plus) { plus = el("div", "ligne plus"); ls.appendChild(plus); }
-        var der = plus.previousElementSibling;
-        if (!der) break;
-        ls.removeChild(der);
-        cachees++;
-        plus.textContent = "+ " + cachees + " autre" + (cachees > 1 ? "s" : "");
+      var bloc = ls.parentNode, ind = bloc.querySelector(".pages");
+      var rows = Array.prototype.slice.call(ls.children);
+      rows.forEach(function (r) { r.hidden = false; });
+      if (ind) ind.hidden = true;
+      if (ls.scrollHeight <= ls.clientHeight + 1) return;
+      // Grandes lignes qui debordent : taille normale avant de paginer
+      if (ls.classList.contains("aere")) {
+        ls.classList.remove("aere");
+        if (ls.scrollHeight <= ls.clientHeight + 1) return;
       }
+      if (!ind) { ind = el("div", "pages"); bloc.insertBefore(ind, ls.nextSibling); }
+      ind.hidden = false;
+      var cap = rows.length;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].offsetTop + rows[i].offsetHeight > ls.clientHeight + 1) { cap = i; break; }
+      }
+      var col = ls.classList.contains("une") ? 1 : 2;
+      cap = Math.max(cap - cap % col, 1);
+      // Pages equilibrees (12 + 11 plutot que 20 + 3)
+      var nb = Math.ceil(rows.length / cap);
+      cap = Math.ceil(Math.ceil(rows.length / nb) / col) * col;
+      var k = page % nb;
+      rows.forEach(function (r, j) { r.hidden = Math.floor(j / cap) !== k; });
+      ind.textContent = "";
+      for (var q = 0; q < nb; q++) ind.appendChild(el("span", q === k ? "on" : ""));
+      ind.appendChild(el("em", "", (k * cap + 1) + "-" + Math.min((k + 1) * cap, rows.length) + " sur " + rows.length));
     });
   }
+  setInterval(paginer, 500);
 
   function rendreResume(d) {
     var r = $("resume");

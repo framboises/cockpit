@@ -146,7 +146,11 @@ Mis en place le 26/10/2026. Page manager, aussi ouverte aux afficheurs TV du por
   minutes (60 points max par balise, balises en ligne seulement, jamais recalee : affichage brut).
 - Front : rafraichi toutes les 5 s, marqueurs glisses (animation 1,6 s, saut > 2 km sans
   animation), recadrage seulement si une balise en ligne sort du cadre ou si l'ensemble change,
-  lignes du panneau qui debordent remplacees par "+ N autres" (les balises a l'arret d'abord).
+  panneau = un bloc par groupe : en ligne / total et en mouvement, une ligne par balise en ligne
+  (en mouvement d'abord, par vitesse), puis une ligne grisee par balise muette depuis moins de 12 h
+  (a surveiller), les plus anciennes / jamais vues comptees en pied de bloc. Trop de lignes :
+  pages equilibrees qui tournent toutes les 8 s (tous les blocs ensemble, points + "1-12 sur 23"),
+  jamais de balise cachee. Hauteur d'un bloc selon ses lignes, plafonnee (un gros groupe pagine).
 
 ### Choix publies pour le portail : collection partagee `tv_choix`
 
