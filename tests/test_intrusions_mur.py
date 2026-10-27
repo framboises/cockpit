@@ -67,7 +67,7 @@ def test_en_cours_a_traiter_et_comptes(db):
     # Derniere intrusion du mur calme : la plus recente, ecartee comprise
     # (l'oiseau de Tribune Nord), affichee avec sa vraie nature
     assert d["derniere"]["camera"] == "Tribune Nord"
-    assert d["derniere"]["nature"]["label"] == "oiseau" and d["derniere"]["nature"]["fausse"]
+    assert d["derniere"]["nature"]["label"] == "oiseau" and d["derniere"]["nature"]["fausse"] and d["derniere"]["ecartee"]
     assert d["totaux"] == {"intrusions": 3, "human": 2, "vehicle": 1, "a_traiter": 2,
                            "filtrees": 1, "hors_planning": 1}
     assert d["par_heure"][20] == 2 and d["par_heure"][19] == 1  # heures de Paris (20:58, 20:20, 19:30)
@@ -213,3 +213,14 @@ def test_derniere_intrusion_avec_sa_vraie_nature(db):
                                                "box": {"x": 0.3, "y": 0.2, "w": 0.05, "h": 0.1}}]}}])
     n = D.etat_mur(db, MAINTENANT)["a_traiter"][0]["nature"]
     assert (n["label"], n["fausse"]) == ("personne", False)
+
+
+def test_cloturee_jamais_en_cours(db):
+    """Cloturee par l'operateur alors que la camera envoie encore des messages
+    (episode prolonge) : ni en cours, ni a traiter, camera eteinte."""
+    cam = _camera(db, "Camera 901")
+    _intrusion(db, cam, "Camera 901", 10, 5, status="closed")
+    d = D.etat_mur(db, MAINTENANT)
+    assert d["en_cours"] == [] and d["a_traiter"] == []
+    c = {c["nom"]: c for c in d["cameras"]}["Camera 901"]
+    assert not c["actif"] and c["a_traiter"] == 0

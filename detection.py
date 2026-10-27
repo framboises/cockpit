@@ -360,7 +360,7 @@ def _pub_episode(ep, zones, now, full=False):
         "camera_path": ep.get("camera_path", ""),
         "started_at": _iso(start), "last_at": _iso(last),
         "duration_s": int((last - start).total_seconds()) if last and start else 0,
-        "active": bool(last and (now - last).total_seconds() < EPISODE_GAP_S),
+        "active": ep.get("status") != "closed" and bool(last and (now - last).total_seconds() < EPISODE_GAP_S),
         "types": ep.get("target_types") or [],
         "regions": [r for r in ep.get("regions") or [] if r is not None],
         "targets": len(ep.get("targets") or []),
@@ -808,7 +808,8 @@ def overview():
         if (armed and pt != "ecartee") or status != "new":
             totals[status] = totals.get(status, 0) + 1
         last = _utc(ep.get("last_at"))
-        active = armed and pt == "alerte" and bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
+        active = (armed and pt == "alerte" and status != "closed"
+                  and bool(last and (now - last).total_seconds() < EPISODE_GAP_S))
         totals["active"] += active
         i = min(bars - 1, max(0, int((_utc(ep["started_at"]) - start) // step)))
         flow[kind][i] += 1
@@ -1281,10 +1282,14 @@ def etat_mur(db, now=None):
             # (oiseau...) : jamais en cours, jamais a traiter
             if derniere is None:
                 derniere = _mur_episode(ep, zones, now)
+                derniere["ecartee"] = True  # jamais "non traitee" sur le mur (absente de la page Detection)
             continue
         item = None
         # Douteuse (filtree, mais SigLIP voit une personne) : a traiter seulement
-        actif = pt == "alerte" and bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
+        # Cloturee par l'operateur : plus jamais "en cours", meme si la camera
+        # continue d'envoyer des messages (l'episode se prolonge)
+        actif = (pt == "alerte" and ep.get("status") != "closed"
+                 and bool(last and (now - last).total_seconds() < EPISODE_GAP_S))
         nouveau = ep.get("status", "new") == "new"
         cam = par_camera.setdefault(str(ep.get("camera_id") or ""), {"actif": False, "a_traiter": 0, "jour": 0})
         if du_jour:

@@ -448,7 +448,7 @@
       var zz = el("span", "zone une-ligne"); var i = el("i"); i.style.background = z.couleur;
       zz.appendChild(i); zz.appendChild(document.createTextNode(z.nom)); sous.appendChild(zz);
     });
-    if (!enCours && e.statut === "new" && !(e.nature && e.nature.fausse)) {
+    if (!enCours && e.statut === "new" && !e.ecartee && !(e.nature && e.nature.fausse)) {
       sous.appendChild(el("span", "", "non traitée"));
     }
     inf.appendChild(sous);
