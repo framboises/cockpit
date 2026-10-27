@@ -151,7 +151,10 @@
       if (IMP.lasso) { IMP.lasso.push([e.latlng.lng, e.latlng.lat]); drawImport(); }
       return;
     }
-    openPointEditor({ lat: e.latlng.lat, lng: e.latlng.lng });
+    // Lieu cite a placer (bouton Placer de l'onglet Proposer) : le nom est pre-rempli
+    var pending = S.pendingPlace;
+    S.pendingPlace = null;
+    openPointEditor({ lat: e.latlng.lat, lng: e.latlng.lng, name: pending || "" });
   }
 
   // ---------- Chargement ----------
@@ -307,6 +310,7 @@
     $("pt-pt-radius").value = S.pt.radius_m;
     $("pt-pt-dwell").value = S.pt.dwell_s;
     $("pt-pt-instruction").value = S.pt.instruction;
+    $("pt-pt-aliases").value = (p.aliases || []).join(", ");
     $("pt-pt-photo").checked = S.pt.photo_required;
     $("pt-pt-pos").textContent = "Position : " + S.pt.lat.toFixed(5) + ", " + S.pt.lng.toFixed(5) + " (deplacez le repere rouge pour ajuster)";
     $("pt-pt-zones").textContent = (S.pt.id ? (S.pt.zones.length ? "Zones : " + S.pt.zones.join(", ") : "Dans aucune zone de competence") : "") +
@@ -330,6 +334,7 @@
     var body = {
       name: $("pt-pt-name").value, lat: S.pt.lat, lng: S.pt.lng, radius_m: Number($("pt-pt-radius").value),
       dwell_s: Number($("pt-pt-dwell").value), instruction: $("pt-pt-instruction").value, photo_required: $("pt-pt-photo").checked,
+      aliases: $("pt-pt-aliases").value,
     };
     var req = S.pt.id ? apiPut("/api/patrols/points/" + S.pt.id, body) : apiPost("/api/patrols/points", body);
     req.then(function (r) {
@@ -364,25 +369,36 @@
     dom.value = "surete";
     var now = new Date();
     $("pr-hour").value = String(now.getHours()).padStart(2, "0") + ":" + String(Math.floor(now.getMinutes() / 15) * 15).padStart(2, "0");
-    var ev = $("pr-event");
-    clear(ev);
-    ev.appendChild(new Option("Chargement...", ""));
-    apiGet("/api/patrols/propose/events").then(function (r) {
-      clear(ev);
-      r.events.forEach(function (e) {
-        ev.appendChild(new Option(e.event + " (" + e.n + " fiches placees, " + e.years.join(", ") + ")", e.event));
-      });
-      PR.ai = !!r.ai;
-      $("pr-ai").hidden = !PR.ai;
-    }).catch(function (e) { toast("error", errLabel(e)); });
+    loadProposalEvents();
+    document.querySelectorAll('input[name="pr-src"]').forEach(function (r) { r.addEventListener("change", loadProposalEvents); });
     $("pr-go").addEventListener("click", function () { runProposal(false); });
     $("pr-ai").addEventListener("click", function () { runProposal(true); });
     $("pr-create").addEventListener("click", createFromProposal);
     renderProposal();
   }
 
+  // Evenements de la source choisie (PCS : SAISON par defaut, PCO : le plus fourni)
+  function loadProposalEvents() {
+    var src = document.querySelector('input[name="pr-src"]:checked').value;
+    var ev = $("pr-event");
+    clear(ev);
+    ev.appendChild(new Option("Chargement...", ""));
+    apiGet("/api/patrols/propose/events?source=" + src).then(function (r) {
+      clear(ev);
+      r.events.forEach(function (e) {
+        var label = e.event === "__all__" ? "Tout l'historique" : e.event;
+        ev.appendChild(new Option(label + " (" + e.n + " fiches, " + e.years.join(", ") + ")", e.event));
+      });
+      if (src === "pcs" && r.events.some(function (e) { return e.event === "SAISON"; })) ev.value = "SAISON";
+      else if (r.events.length > 1) ev.value = r.events[1].event;
+      PR.ai = !!r.ai;
+      $("pr-ai").hidden = !PR.ai;
+    }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
   function proposalBody(ai) {
     return {
+      source: document.querySelector('input[name="pr-src"]:checked').value,
       dominante: $("pr-dom").value, duration_min: Number($("pr-dur").value),
       travel: document.querySelector('input[name="pr-travel"]:checked').value, event: $("pr-event").value,
       loop: $("pr-loop").checked, hour: $("pr-same-hour").checked ? $("pr-hour").value : null, ai: !!ai,
@@ -426,6 +442,29 @@
     box.appendChild(sum);
     box.appendChild(el("div", "pt-hint", r.stats.fiches + " fiche(s) placee(s), " + r.stats.foyers + " foyer(s) sur la carte (cercles gris, taille = importance)."));
     (r.notes || []).forEach(function (n) { box.appendChild(el("div", "pt-hint", n)); });
+    // Lieux cites dans les fiches mais pas encore places : un point a creer
+    // (avec ses autres noms) et toutes ces fiches entrent dans les propositions
+    var miss = (r.stats && r.stats.non_placees) || [];
+    if (miss.length) {
+      var mb = el("details", "pr-missing");
+      mb.open = (r.stats.placees || 0) < (r.stats.fiches || 0) * 0.6;
+      mb.appendChild(el("summary", null, "Lieux cites non places (" + miss.length + ")"));
+      miss.forEach(function (m) {
+        var row = el("div", "pr-miss-row");
+        row.appendChild(el("span", "pr-miss-name", m.lieu));
+        row.appendChild(el("span", "pt-muted", m.n + " fiche" + (m.n > 1 ? "s" : "")));
+        var b = el("button", "btn", "Placer"); b.type = "button";
+        b.title = "Creer un point " + m.lieu + " : cliquez ensuite sur la carte a son emplacement";
+        b.addEventListener("click", function () {
+          S.pendingPlace = m.lieu;
+          setTab("points");
+          toast("info", "Cliquez sur la carte a l'emplacement de " + m.lieu + " (ajoutez ses autres noms si besoin)");
+        });
+        row.appendChild(b);
+        mb.appendChild(row);
+      });
+      box.appendChild(mb);
+    }
     if (r.ai_comment) {
       var c = el("div", "pt-callout");
       c.appendChild(icon("psychology"));

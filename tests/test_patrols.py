@@ -472,9 +472,10 @@ class TestPropositions:
             fiche(i, 47.955, 2026)
         fiche(6, 47.960, 2026, urg="IMP")
         fiche(7, 47.950, 2026, cat="PCO.Technique")
-        foyers, n = PP.build_foyers(db, "24H", "surete", "pedestrian")
-        assert n == 7 and len(foyers) == 3 and foyers[0]["n"] == 4 and foyers[0]["editions"] == [2025, 2026]
-        r = PP.propose(db, "surete", 30, "pedestrian", "24H")
+        foyers, st = PP.build_foyers(db, "24H", "surete", "pedestrian", source="pco")
+        assert st["fiches"] == 7 and st["placees"] == 7
+        assert len(foyers) == 3 and foyers[0]["n"] == 4 and foyers[0]["editions"] == [2025, 2026]
+        r = PP.propose(db, "surete", 30, "pedestrian", "24H", source="pco")
         assert r["stops"] and r["stops"][0]["n"] == 4
         assert r["estimate"]["total_s"] <= 30 * 60 * 1.1
         # Creation : points (foyers) + scenario avec la dominante
@@ -485,3 +486,24 @@ class TestPropositions:
     def test_masquage(self):
         import patrols_propose as PP
         assert PP.mask("M. Dupont au 06 12 34 56 78, AB-123-CD, x@y.fr") == "[personne] au [tel], [plaque], [email]"
+
+
+class TestPropositionsPCS:
+    def test_lieux_cites_et_autres_noms(self, db, monkeypatch):
+        import patrols_propose as PP
+        monkeypatch.setattr(P, "_matrix", lambda coords, travel: (None, "skip"))
+        monkeypatch.setattr(PP, "_gazetteer", lambda db: [])
+        def fiche(i, text, area="PCS/Stade 1/PEC"):
+            db["pcorg"].insert_one({"_id": "s%d" % i, "event": "SAISON", "year": 2026, "category": "PCS.Surete",
+                                    "text": text, "area": {"desc": area}, "ts": NOW, "content_category": {}})
+        for i in range(5):
+            fiche(i, "Intrusion constatee")                      # zone de saisie PEC
+        fiche(5, "Prise de service PS Nord")                     # jamais comptee
+        fiche(6, "Ronde de verification pole europeen")          # autre nom du point
+        _, st = PP.build_foyers(db, "SAISON", "surete", "pedestrian", source="pcs")
+        assert st["fiches"] == 6 and st["placees"] == 0
+        assert st["non_placees"][0] == {"lieu": "PEC", "n": 6}     # la ronde a aussi la zone PEC
+        # Le lieu est place comme point, avec un autre nom : tout se place
+        P.save_point(db, {"name": "PEC", "lat": LAT, "lng": LNG, "aliases": "pole europeen"}, "t")
+        foyers, st = PP.build_foyers(db, "SAISON", "surete", "pedestrian", source="pcs")
+        assert st["placees"] == 6 and foyers[0]["lieu"] == "PEC" and foyers[0]["kinds"] == {"incident": 5, "ronde": 1}

@@ -71,7 +71,11 @@
                     <!-- ===== Proposer (avec carte) ===== -->
                     <div class="pt-tab" data-tab="proposer" hidden>
                         <div class="pt-view-head">
-                            <div class="pt-hint">Une ronde construite d'apres les incidents passes de l'evenement (toutes editions), qui tient dans la duree choisie.</div>
+                            <div class="pt-hint">Une ronde construite d'apres les fiches passees (toutes editions), qui tient dans la duree choisie. Les champs qualifies la nuit par Alfred (lieu, gravite, nature, rondes...) l'affinent au fil des jours.</div>
+                            <div class="pt-seg" role="radiogroup" aria-label="Fiches">
+                                <label><input type="radio" name="pr-src" value="pcs" checked><span class="material-symbols-outlined">shield</span> PC Securite (PCS)</label>
+                                <label><input type="radio" name="pr-src" value="pco"><span class="material-symbols-outlined">support_agent</span> PC Org (PCO)</label>
+                            </div>
                             <div class="pt-grid2">
                                 <label class="pt-field">Dominante<select id="pr-dom" class="pt-input"></select></label>
                                 <label class="pt-field">Duree disponible<select id="pr-dur" class="pt-input">
@@ -199,6 +203,8 @@
                                     <label class="pt-field">Rayon de validation (m)<input type="number" id="pt-pt-radius" class="pt-input" min="5" max="300"></label>
                                     <label class="pt-field">Arret minimal (s)<input type="number" id="pt-pt-dwell" class="pt-input" min="0" max="3600" value="0"></label>
                                 </div>
+                                <label class="pt-field">Autres noms (separes par des virgules)<input type="text" id="pt-pt-aliases" class="pt-input" maxlength="400" placeholder="Ex. PEC, pole europeen, batiment PEC"></label>
+                                <div class="pt-hint">Les fiches qui citent l'un de ces noms sont placees sur ce point pour les propositions.</div>
                                 <label class="pt-field">Consigne affichee a l'agent<textarea id="pt-pt-instruction" class="pt-input" rows="3" maxlength="500" placeholder="Ex. verifier la porte et le cadenas"></textarea></label>
                                 <label class="pt-check"><input type="checkbox" id="pt-pt-photo"> Photo exigee pour valider le point</label>
                                 <div class="pt-hint" id="pt-pt-zones"></div>

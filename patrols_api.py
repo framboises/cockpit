@@ -383,7 +383,8 @@ def _is_real_admin():
 @admin_required
 def patrols_propose_events():
     import patrols_propose as PP
-    return jsonify({"ok": True, "events": PP.events_with_history(_db()), "ai": _is_real_admin()})
+    source = request.args.get("source") if request.args.get("source") in PP.SOURCE_PREFIX else "pcs"
+    return jsonify({"ok": True, "events": PP.events_with_history(_db(), source), "ai": _is_real_admin()})
 
 
 @patrols_bp.route("/api/patrols/propose", methods=["POST"])
@@ -405,18 +406,19 @@ def patrols_propose():
             hour = int(hh) + int(mm) / 60.0
         except (ValueError, TypeError):
             hour = None
+    source = d.get("source") if d.get("source") in PP.SOURCE_PREFIX else "pcs"
     scores = reasons = None
     comment = None
     if d.get("ai"):
         if not _is_real_admin():
             return _err("admin_requis", 403)
         try:
-            scores, reasons, comment = PP.ai_rescore(db, event, d.get("dominante"), d.get("travel"), hour)
+            scores, reasons, comment = PP.ai_rescore(db, event, d.get("dominante"), d.get("travel"), hour, source=source)
         except Exception as e:
             logger.warning("Patrouilles : affinage IA en echec (%s)", e)
             return _err("ia_indisponible", 502, detail=str(e)[:200])
     out = PP.propose(db, d.get("dominante") or "generale", d.get("duration_min"), d.get("travel"), event,
-                     loop=bool(d.get("loop")), hour=hour, ai_scores=scores, ai_reasons=reasons)
+                     loop=bool(d.get("loop")), hour=hour, ai_scores=scores, ai_reasons=reasons, source=source)
     out["ai_comment"] = comment
     out["ok"] = True
     return jsonify(out)

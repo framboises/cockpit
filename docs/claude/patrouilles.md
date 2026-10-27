@@ -420,9 +420,26 @@ compte l.arnault, chaque minute, IgnoreNew), `templates/patrouilles.html`, `stat
 
 ### Livraison 4 : propositions d'apres l'historique (27/10/2026)
 
-`patrols_propose.py`, onglet **Proposer** de la page. Entree : dominante, duree disponible (15 min a
-2 h), a pied / vehicule, evenement (TOUTES ses editions), option « meme tranche horaire », retour au
-depart. Choix du 27/10 : historique + couches ; historique de l'evenement choisi.
+`patrols_propose.py`, onglet **Proposer** de la page. Entree : **fiches PCS (PC Securite, defaut) ou
+PCO**, dominante, duree disponible (15 min a 2 h), a pied / vehicule, evenement (SAISON par defaut pour
+PCS, une epreuve ou **tout l'historique**, toutes editions), option « meme tranche horaire », retour au
+depart. Choix du 27/10 : historique + couches ; PCS en priorite (patrouilles du PC Securite en saison).
+
+**Fiches PCS** (PCS.Surete 15 800, PCS.Information 4 600, dont 10 400 en SAISON) : ni GPS ni
+carroyage, surtout des rondes de verification et des interventions de surete. Position, dans l'ordre :
+`pcorg_digests.geo` (Alfred, confiance non basse), GPS, carroyage, puis le lieu cite (lieu d'Alfred,
+titre, zone de saisie) reconnu parmi les **points de patrouille et leurs « autres noms »**
+(`patrol_points.aliases`) puis le referentiel `pcorg_enrich.Gazetteer`. Au 27/10 : 21 % des fiches
+PCS SAISON placees ; les grands sites (PEC, Siege, Musee auto, Technoparc, Musee ephemere, CIK, LE24)
+ne sont pas dans le referentiel : la reponse liste les **lieux cites non places** (nombre de fiches)
+avec un bouton « Placer » (onglet Points, nom pre-rempli). Prise de service, jalon, fiche ignoree ou
+doublon = 0 ; information 0,3 ; ronde 0,5 (anomalie 3) ; points d'une ronde qualifiee
+(`ronde.points`) places et comptes 0,5 chacun ; agression d'agent x1,5 ; victimes (secours).
+Nom de foyer = lieu le plus cite ; motif = motif d'intervention (la classification PCS « Intervention
+Surete » est ignoree), sinon nombre d'incidents / rondes. Le traitement de nuit d'Alfred traite aussi
+les PCS (apres les fiches avec GPS) : la couverture et la qualite montent au fil des nuits.
+Valhalla : 20 points au plus par trajet (`VALHALLA_MAX_LOCATIONS`), `route_through` decoupe en
+troncons ; arret injoignable dans le mode (no_route) retire.
 
 - Fiches de la dominante (`DOMINANTE_RULES` : surete = PCO.Securite, secours = PCO.Secours, incendie et
   prevention = motifs cherches dans le texte ET la sous-classification, generale = 4 categories).

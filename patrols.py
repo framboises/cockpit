@@ -181,11 +181,21 @@ def _clean_point(data, settings):
         dwell = max(0, min(3600, int(data.get("dwell_s") or 0)))
     except (TypeError, ValueError):
         dwell = 0
+    # Autres noms du lieu (ex. "PEC, pole europeen") : les propositions
+    # placent les fiches qui citent ces noms (fiches PCS sans position)
+    raw = data.get("aliases")
+    if isinstance(raw, str):
+        raw = re.split(r"[,;\n]", raw)
+    aliases = []
+    for a in raw or []:
+        a = str(a or "").strip()[:60]
+        if a and a.lower() not in [x.lower() for x in aliases]:
+            aliases.append(a)
     return {
         "name": name, "lat": lat, "lng": lng, "radius_m": radius,
         "instruction": str(data.get("instruction") or "").strip()[:500],
         "photo_required": bool(data.get("photo_required")),
-        "dwell_s": dwell,
+        "dwell_s": dwell, "aliases": aliases[:20],
     }, None
 
 
@@ -411,6 +421,7 @@ def pub_point(p, zone_labels=None):
         "active": p.get("active", True) is not False, "source": p.get("source") or "manual",
         "ia_reason": p.get("ia_reason"), "updated_at": _iso(p.get("updated_at")),
         "info": p.get("info") or "", "layer_ref": p.get("layer_ref"), "layer_missing": bool(p.get("layer_missing")),
+        "aliases": p.get("aliases") or [],
     }
 
 
@@ -442,6 +453,9 @@ def _valhalla(path, payload, timeout=20):
         return None, "valhalla_unreachable"
 
 
+VALHALLA_MAX_LOCATIONS = 20
+
+
 def route_through(coords, travel, mode="normal"):
     """Itineraire passant par `coords` [(lat, lng)...] dans l'ordre. Chaque
     point est un arret ("break") : une jambe par troncon. Retourne
@@ -449,6 +463,28 @@ def route_through(coords, travel, mode="normal"):
     import routing
     if len(coords) < 2:
         return {"distance_m": 0, "duration_s": 0, "polyline": routing._encode_polyline6(coords), "legs": []}, None
+    # Valhalla refuse plus de 20 points par trajet ("Exceeded max locations") :
+    # troncons de 20 points au plus, chaque troncon repartant du dernier point
+    if len(coords) > VALHALLA_MAX_LOCATIONS:
+        total = {"distance_m": 0, "duration_s": 0, "legs": [], "uses_raceway": False}
+        pts = []
+        i = 0
+        while i < len(coords) - 1:
+            chunk = coords[i:i + VALHALLA_MAX_LOCATIONS]
+            part, err = route_through(chunk, travel, mode)
+            if err:
+                return None, err
+            total["distance_m"] += part["distance_m"]
+            total["duration_s"] += part["duration_s"]
+            total["legs"].extend(part["legs"])
+            total["uses_raceway"] = total["uses_raceway"] or part.get("uses_raceway")
+            seg = routing._decode_polyline6(part["polyline"])
+            if pts and seg and pts[-1] == seg[0]:
+                seg = seg[1:]
+            pts.extend(seg)
+            i += VALHALLA_MAX_LOCATIONS - 1
+        total["polyline"] = routing._encode_polyline6(pts)
+        return total, None
     payload = {"locations": [{"lat": a, "lon": b, "type": "break"} for a, b in coords],
                "directions_options": {"units": "kilometers"}, "id": "cockpit-patrol"}
     payload.update(_costing(travel, mode))
