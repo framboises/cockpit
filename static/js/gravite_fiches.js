@@ -13,6 +13,11 @@
     5: "5 - Danger vital, crise",
   };
   var state = { batch: null, items: [], focus: 0, timer: null, running: false };
+  // Faits que l'admin peut signaler faux (meme liste que gravite_fiches.CHAMPS, sauf resume)
+  var CHAMPS = [["lieu", "Lieu"], ["position", "Position"], ["heures", "Heures"], ["equipement", "Equipement"],
+                ["moyens", "Moyens"], ["services", "Services ext."], ["causes", "Causes"], ["issue", "Issue"]];
+  var POS_LABELS = { gps: "GPS d'origine", carroyage: "Carroyage", lieu: "Lieu cite", titre: "Titre", aucune: "Aucune" };
+  var ISSUE_LABELS = { resolu: "Resolu", transmis: "Transmis", sans_suite: "Sans suite", en_attente: "En attente", non_precise: "Non precise" };
 
   // ---------- HTTP ----------
   function csrfToken() {
@@ -160,8 +165,53 @@
     }
 
     renderReviews(s.reviews || {});
+    renderQuality(s.quality || {});
     renderBatches(s.batches || []);
     schedule();
+  }
+
+  function qbox(title, rows) {
+    var b = el("div", "gf-qbox");
+    b.appendChild(el("h5", null, title));
+    if (!rows.length) b.appendChild(el("div", "gf-muted", "Pas encore de donnees"));
+    rows.forEach(function (r) {
+      var row = el("div", "gf-qrow");
+      row.appendChild(el("span", null, r[0]));
+      row.appendChild(el("strong", null, r[1]));
+      b.appendChild(row);
+    });
+    return b;
+  }
+
+  function renderQuality(q) {
+    var box = document.getElementById("gf-quality");
+    clear(box);
+    if (!q.total) {
+      box.appendChild(el("div", "gf-muted", "Aucune fiche structuree avec les consignes actuelles : lancez un lot."));
+      return;
+    }
+    var grid = el("div", "gf-quality-grid");
+    var pos = q.positions || {};
+    var located = q.total - (pos.aucune || 0);
+    grid.appendChild(qbox("Position (" + fmtPct(located, q.total) + " des fiches localisees)",
+      Object.keys(POS_LABELS).filter(function (k) { return pos[k]; }).map(function (k) {
+        return [POS_LABELS[k], fmtInt(pos[k]) + " (" + fmtPct(pos[k], q.total) + ")"];
+      })));
+    var d = q.delais || {};
+    grid.appendChild(qbox("Delais depuis le signalement (mediane)", [
+      ["Engagement des moyens", d.engagement && d.engagement.n ? d.engagement.mediane + " min (" + d.engagement.n + " fiches)" : "-"],
+      ["Arrivee sur place", d.sur_place && d.sur_place.n ? d.sur_place.mediane + " min (" + d.sur_place.n + " fiches)" : "-"],
+      ["Fin d'intervention", d.fin && d.fin.n ? d.fin.mediane + " min (" + d.fin.n + " fiches)" : "-"],
+      ["Completude moyenne", q.completude_moy !== null && q.completude_moy !== undefined ? q.completude_moy + " / 4" : "-"],
+    ]));
+    grid.appendChild(qbox("Equipements en cause (recurrences)", (q.equipements || []).map(function (r) { return [r.v, r.n]; })));
+    grid.appendChild(qbox("Services exterieurs", (q.services || []).map(function (r) { return [r.v, r.n]; })));
+    grid.appendChild(qbox("Causes", (q.causes || []).map(function (r) { return [r.v, r.n]; })));
+    grid.appendChild(qbox("Issue", (q.issues || []).map(function (r) { return [ISSUE_LABELS[r.v] || r.v, r.n]; })));
+    var perso = (q.donnees_perso || []).map(function (r) { return [r.v, r.n]; });
+    perso.unshift(["Doublons probables", fmtInt(q.doublons)]);
+    grid.appendChild(qbox("Doublons et donnees personnelles", perso));
+    box.appendChild(grid);
   }
 
   function renderReviews(r) {
@@ -180,6 +230,33 @@
     document.getElementById("gf-mobile-stats").textContent = count
       ? fmtInt(count) + " fiches controlees, " + fmtPct(v.ok || 0, count) + " justes (marge +/- " + marge + " points)"
       : "Aucune fiche controlee pour l'instant";
+
+    var vb = document.getElementById("gf-versions");
+    clear(vb);
+    var bv = r.by_version || {};
+    Object.keys(bv).sort().forEach(function (ver) {
+      var x = bv[ver];
+      var tr = el("tr");
+      tr.appendChild(el("td", null, ver));
+      tr.appendChild(el("td", "gf-num", x.n));
+      tr.appendChild(el("td", "gf-num", fmtPct(x.ok, x.n)));
+      tr.appendChild(el("td", "gf-num", x.n ? (x.ecart / x.n).toFixed(2) : "-"));
+      vb.appendChild(tr);
+    });
+    var cf = document.getElementById("gf-champs-faux");
+    clear(cf);
+    var cfx = r.champs_faux || {};
+    var anyFaux = false;
+    CHAMPS.concat([["resume", "Resume"]]).forEach(function (c) {
+      if (!cfx[c[0]]) return;
+      anyFaux = true;
+      cf.appendChild(el("span", "gf-tag gf-warn", c[1] + " : " + cfx[c[0]]));
+    });
+    if (r.doublons && (r.doublons.oui || r.doublons.non)) {
+      anyFaux = true;
+      cf.appendChild(el("span", "gf-tag", "Doublons confirmes " + r.doublons.oui + " / rejetes " + r.doublons.non));
+    }
+    if (!anyFaux) cf.appendChild(el("span", "gf-muted", "Aucun champ signale"));
 
     var t = document.getElementById("gf-matrix");
     clear(t);
@@ -306,12 +383,14 @@
     right.appendChild(head);
     right.appendChild(el("div", "gf-muted", it.justification || ""));
     var dl = el("dl");
-    [["Type", it.type], ["Victimes", it.victimes], ["Moyens engages", it.moyens_engages],
-     ["Issue", it.issue], ["Resume", it.resume]].forEach(function (p) {
+    [["Type", it.type], ["Victimes", it.victimes], ["Issue", it.issue], ["Resume", it.resume]].forEach(function (p) {
       dl.appendChild(el("dt", null, p[0]));
       dl.appendChild(el("dd", null, p[1] === undefined || p[1] === null ? "-" : p[1]));
     });
     right.appendChild(dl);
+    right.appendChild(renderFacts(it));
+    right.appendChild(renderFieldChips(it));
+    if (it.doublon_probable) right.appendChild(renderDuplicate(it));
 
     var act = el("div", "gf-actions");
     act.appendChild(el("span", "gf-muted", "Bonne gravite :"));
@@ -344,6 +423,84 @@
     return card;
   }
 
+  function tags(list, cls) {
+    var span = el("span");
+    (list || []).forEach(function (x) { span.appendChild(el("span", "gf-tag" + (cls ? " " + cls : ""), x)); });
+    if (!(list || []).length) span.appendChild(el("span", "gf-muted", "-"));
+    return span;
+  }
+
+  function renderFacts(it) {
+    var dl = el("dl", "gf-facts");
+    function row(label, node) {
+      dl.appendChild(el("dt", null, label));
+      var dd = el("dd");
+      if (node instanceof Node) dd.appendChild(node); else dd.textContent = node === undefined || node === null || node === "" ? "-" : node;
+      dl.appendChild(dd);
+    }
+    var geo = it.geo || null;
+    var lieu = el("span", null, it.lieu || "-");
+    if (geo) {
+      var src = POS_LABELS[geo.source] || geo.source;
+      var txt = " -> " + src + (geo.name ? " : " + geo.name : "") + (geo.layer_label ? " (" + geo.layer_label + ")" : "");
+      lieu.appendChild(el("span", "gf-tag " + (geo.source === "gps" ? "gf-good" : (geo.confidence === "haute" ? "gf-good" : "gf-warn")), txt));
+    } else {
+      lieu.appendChild(el("span", "gf-tag gf-warn", "non localisee"));
+    }
+    row("Lieu", lieu);
+    if (it.zone) row("Zone", it.zone.name);
+    var et = it.etapes || {}, de = it.delais || {};
+    var heures = ["signalement", "engagement", "sur_place", "fin"].filter(function (k) { return et[k]; }).map(function (k) {
+      var lab = { signalement: "signal.", engagement: "engag.", sur_place: "sur place", fin: "fin" }[k];
+      return lab + " " + et[k] + (k !== "signalement" && de[k] !== null && de[k] !== undefined ? " (+" + de[k] + " min)" : "");
+    });
+    row("Heures", heures.length ? heures.join("  |  ") : "-");
+    row("Equipement", it.equipement && it.equipement !== "aucun" ? it.equipement : "-");
+    row("Moyens", tags(it.moyens_engages));
+    row("Services ext.", tags(it.services_exterieurs));
+    row("Causes", tags(it.causes));
+    row("Issue codee", ISSUE_LABELS[it.issue_code] || it.issue_code || "-");
+    if ((it.donnees_personnelles || []).length) row("Donnees perso", tags(it.donnees_personnelles, "gf-warn"));
+    if (it.completude) {
+      row("Completude", it.completude.score + " / " + it.completude.max +
+        ((it.completude.manquants || []).length ? " (manque : " + it.completude.manquants.join(", ") + ")" : ""));
+    }
+    return dl;
+  }
+
+  function renderFieldChips(it) {
+    var box = el("div", "gf-fields");
+    box.appendChild(el("span", "gf-muted", "Faux :"));
+    CHAMPS.forEach(function (c) {
+      var b = el("button", "gf-chip", c[1]);
+      b.type = "button";
+      b.dataset.champ = c[0];
+      b.addEventListener("click", function (ev) { ev.stopPropagation(); b.classList.toggle("gf-on"); });
+      box.appendChild(b);
+    });
+    return box;
+  }
+
+  function renderDuplicate(it) {
+    var box = el("div", "gf-dup");
+    var dp = it.doublon_probable;
+    box.appendChild(el("span", null, "Doublon probable de la fiche " + String(dp.de).slice(0, 8) +
+      " (score " + Math.round((dp.score || 0) * 100) + " %) : "));
+    [["oui", "Oui"], ["non", "Non"]].forEach(function (o) {
+      var b = el("button", "gf-chip" + (o[0] === "oui" ? " gf-yes" : ""), o[1]);
+      b.type = "button";
+      b.dataset.doublon = o[0];
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var on = !b.classList.contains("gf-on");
+        box.querySelectorAll("[data-doublon]").forEach(function (x) { x.classList.remove("gf-on"); });
+        if (on) b.classList.add("gf-on");
+      });
+      box.appendChild(b);
+    });
+    return box;
+  }
+
   function paintReview(card, it) {
     var rv = it.review;
     var btns = card.querySelectorAll(".gf-gbtn");
@@ -357,6 +514,13 @@
     var verdict = card.querySelector(".gf-verdict");
     if (cb) cb.checked = !!(rv && rv.resume_inexact);
     if (note && rv) note.value = rv.note || "";
+    var faux = (rv && rv.champs_faux) || [];
+    card.querySelectorAll("[data-champ]").forEach(function (b) {
+      b.classList.toggle("gf-on", faux.indexOf(b.dataset.champ) >= 0);
+    });
+    card.querySelectorAll("[data-doublon]").forEach(function (b) {
+      b.classList.toggle("gf-on", !!(rv && rv.doublon === b.dataset.doublon));
+    });
     if (verdict) {
       if (!rv) { verdict.textContent = ""; verdict.className = "gf-verdict"; }
       else {
@@ -373,8 +537,15 @@
     if (!it || it.error) return;
     var card = document.querySelector('.gf-item[data-idx="' + idx + '"]');
     var verdict = g === it.gravite ? "ok" : (g < it.gravite ? "trop_haut" : "trop_bas");
+    var champs = [];
+    var doublon = null;
+    if (card) {
+      card.querySelectorAll("[data-champ].gf-on").forEach(function (b) { champs.push(b.dataset.champ); });
+      var d = card.querySelector("[data-doublon].gf-on");
+      doublon = d ? d.dataset.doublon : null;
+    }
     var payload = {
-      verdict: verdict, gravite_validee: g,
+      verdict: verdict, gravite_validee: g, champs_faux: champs, doublon: doublon,
       resume_inexact: !!(card && card.querySelector(".gf-inexact").checked),
       note: card ? card.querySelector(".gf-note").value : "",
     };

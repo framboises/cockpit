@@ -19,6 +19,8 @@ gravite_fiches_bp = Blueprint("gravite_fiches", __name__)
 logger = logging.getLogger("gravite_fiches")
 
 VERDICTS = ("ok", "trop_haut", "trop_bas")   # jugement porte sur la gravite du modele
+# Champs que l'admin peut signaler faux (controle par sondage des faits extraits)
+CHAMPS = ("lieu", "position", "heures", "equipement", "moyens", "services", "causes", "issue", "resume")
 FICHE_FIELDS = {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1,
                 "event": 1, "year": 1, "date_local": 1, "time_local": 1}
 
@@ -50,7 +52,10 @@ def _iso(v):
 def _pub_digest(d, fiche=None):
     out = {k: d.get(k) for k in ("gravite", "justification", "type", "victimes", "moyens_engages",
                                   "issue", "resume", "error", "attempts", "batch", "prompt_version",
-                                  "event", "year", "category", "has_gps")}
+                                  "event", "year", "category", "has_gps", "lieu", "etapes", "delais",
+                                  "equipement", "services_exterieurs", "causes", "issue_code",
+                                  "donnees_personnelles", "geo", "zone", "completude",
+                                  "doublon_probable")}
     out["id"] = d["_id"]
     out["at"] = _iso(d.get("at"))
     out["ms"] = (d.get("meta") or {}).get("ms")
@@ -111,18 +116,38 @@ def gravite_fiches_summary():
         b["batch"] = b.pop("_id")
         b["first"], b["last"] = _iso(b["first"]), _iso(b["last"])
 
-    # Controles : justesse et matrice gravite evaluee x validee
+    # Controles : justesse et matrice gravite JUGEE (au moment du controle) x validee
     reviews = list(col.find({"review": {"$ne": None}},
                             {"gravite": 1, "review": 1, "prompt_version": 1}))
     matrix = {}
     verdicts = {v: 0 for v in VERDICTS}
     inexact = 0
+    champs_faux = {c: 0 for c in CHAMPS}
+    doublons_rev = {"oui": 0, "non": 0}
+    by_version = {}                 # justesse de chaque version sur les fiches validees
     for d in reviews:
         rv = d.get("review") or {}
         verdicts[rv.get("verdict")] = verdicts.get(rv.get("verdict"), 0) + 1
         inexact += 1 if rv.get("resume_inexact") else 0
-        key = "%s>%s" % (d.get("gravite"), rv.get("gravite_validee") or d.get("gravite"))
+        for c in rv.get("champs_faux") or []:
+            if c in champs_faux:
+                champs_faux[c] += 1
+        if rv.get("doublon") in doublons_rev:
+            doublons_rev[rv["doublon"]] += 1
+        judged = rv.get("gravite_modele") or d.get("gravite")
+        valid = rv.get("gravite_validee") or judged
+        key = "%s>%s" % (judged, valid)
         matrix[key] = matrix.get(key, 0) + 1
+        # Version jugee par l'admin, puis version actuelle (retraitee depuis)
+        pairs = {(rv.get("prompt_version") or "v1", judged)}
+        if d.get("prompt_version") and d.get("gravite"):
+            pairs.add((d["prompt_version"], d["gravite"]))
+        for ver, g in pairs:
+            bv = by_version.setdefault(ver, {"n": 0, "ok": 0, "ecart": 0})
+            bv["n"] += 1
+            bv["ok"] += 1 if g == valid else 0
+            bv["ecart"] += abs((g or 0) - (valid or 0))
+    quality = _quality(col, cur)
 
     lock = db["cockpit_settings"].find_one({"_id": PD.LOCK_ID}) or {}
     now = datetime.now(timezone.utc)
@@ -168,8 +193,45 @@ def gravite_fiches_summary():
         "night_enabled": bool(settings.get("night_enabled")), "batch_sizes": list(PD.BATCH_SIZES),
         "max_request_batches": PD.MAX_REQUEST_BATCHES,
         "reviews": {"count": len(reviews), "verdicts": verdicts, "resume_inexact": inexact,
-                    "matrix": matrix},
+                    "matrix": matrix, "champs_faux": champs_faux, "doublons": doublons_rev,
+                    "by_version": by_version},
+        "quality": quality,
     })
+
+
+def _top(col, match, field, n=12, unwind=False):
+    pipe = [{"$match": match}]
+    if unwind:
+        pipe.append({"$unwind": "$" + field})
+    pipe += [{"$group": {"_id": "$" + field, "n": {"$sum": 1}}}, {"$sort": {"n": -1}}, {"$limit": n}]
+    return [{"v": r["_id"], "n": r["n"]} for r in col.aggregate(pipe) if r["_id"] not in (None, "")]
+
+
+def _quality(col, cur):
+    """Indicateurs de qualite des donnees sur les fiches de la version courante."""
+    base = dict(cur, gravite={"$ne": None})
+    total = col.count_documents(base)
+    pos = {r["_id"] or "aucune": r["n"] for r in col.aggregate([
+        {"$match": base}, {"$group": {"_id": "$geo.source", "n": {"$sum": 1}}}])}
+    delais = {}
+    for k in ("engagement", "sur_place", "fin"):
+        vals = sorted(d["delais"][k] for d in col.find(dict(base, **{"delais." + k: {"$ne": None}}),
+                                                       {"delais." + k: 1}))
+        delais[k] = {"n": len(vals), "mediane": vals[len(vals) // 2] if vals else None}
+    equip = _top(col, dict(base, equipement={"$nin": ["aucun", "non precise", None, ""]}), "equipement")
+    comp = list(col.aggregate([{"$match": dict(base, **{"completude.score": {"$ne": None}})},
+                               {"$group": {"_id": None, "moy": {"$avg": "$completude.score"}}}]))
+    return {
+        "total": total, "positions": pos,
+        "delais": delais,
+        "equipements": equip,
+        "services": _top(col, base, "services_exterieurs", unwind=True),
+        "causes": _top(col, base, "causes", unwind=True),
+        "issues": _top(col, base, "issue_code", n=6),
+        "donnees_perso": _top(col, base, "donnees_personnelles", unwind=True),
+        "doublons": col.count_documents(dict(base, doublon_probable={"$ne": None})),
+        "completude_moy": round(comp[0]["moy"], 2) if comp else None,
+    }
 
 
 @gravite_fiches_bp.route("/api/gravite-fiches/batch/<batch>")
@@ -208,7 +270,7 @@ def gravite_fiches_review(fiche_id):
     data = request.get_json(silent=True) or {}
     verdict = data.get("verdict")
     col = _db()[PD.COLL]
-    digest = col.find_one({"_id": fiche_id}, {"gravite": 1})
+    digest = col.find_one({"_id": fiche_id}, {"gravite": 1, "prompt_version": 1, "doublon_probable": 1})
     if not digest:
         return jsonify({"error": "not_found"}), 404
     if verdict is None:                                  # annuler le controle
@@ -228,12 +290,22 @@ def gravite_fiches_review(fiche_id):
         if not 1 <= valid <= 5 or (verdict == "trop_haut" and valid >= (grav or 6)) \
                 or (verdict == "trop_bas" and valid <= (grav or 0)):
             return jsonify({"error": "gravite_validee_incoherente"}), 400
+    champs = [c for c in (data.get("champs_faux") or []) if c in CHAMPS]
+    if data.get("resume_inexact") and "resume" not in champs:
+        champs.append("resume")
+    doublon = data.get("doublon") if data.get("doublon") in ("oui", "non") else None
     review = {"verdict": verdict, "gravite_validee": valid,
-              "resume_inexact": bool(data.get("resume_inexact")),
+              # gravite et version JUGEES : la fiche peut etre retraitee par une
+              # version suivante, le controle reste interpretable
+              "gravite_modele": grav, "prompt_version": digest.get("prompt_version"),
+              "resume_inexact": "resume" in champs, "champs_faux": champs, "doublon": doublon,
               "note": str(data.get("note") or "").strip()[:500],
               "by": (getattr(request, "admin_user", None) or {}).get("email", "?"),
               "at": datetime.now(timezone.utc)}
-    col.update_one({"_id": fiche_id}, {"$set": {"review": review}})
+    sets = {"review": review}
+    if doublon == "non":
+        sets["doublon_probable"] = None     # jamais repose (pcorg_enrich.link_duplicates)
+    col.update_one({"_id": fiche_id}, {"$set": sets})
     review["at"] = _iso(review["at"])
     return jsonify({"ok": True, "review": review})
 

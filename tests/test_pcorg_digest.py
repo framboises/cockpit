@@ -61,8 +61,9 @@ class TestAReprendre:
         assert PD.needs_work(FICHE, self._digest(error="delai", attempts=1))
         assert not PD.needs_work(FICHE, self._digest(error="delai", attempts=PD.MAX_ATTEMPTS))
 
-    def test_fiche_controlee_jamais_reevaluee(self):
-        assert not PD.needs_work(FICHE, self._digest(prompt_version="v0", review={"verdict": "ok"}))
+    def test_fiche_controlee_retraitee_seulement_pour_nouvelles_consignes(self):
+        assert PD.needs_work(FICHE, self._digest(prompt_version="v0", review={"verdict": "ok"}))
+        assert not PD.needs_work(FICHE, self._digest(src_hash="autre", review={"verdict": "ok"}))
 
 
 def test_fenetre_de_nuit():

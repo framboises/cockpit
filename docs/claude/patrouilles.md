@@ -188,6 +188,24 @@ fiche, stockee en base et relue directement par le moteur.
 - **Suivi** : couverture par evenement (fiches avec position / structurees) visible dans l'onglet
   Propositions ; une proposition sur un evenement incompletement structure l'indique.
 
+**Etat au 27/10/2026 (code : `pcorg_digest.py`, `pcorg_enrich.py`, `gravite_fiches.py`)**
+
+- Consignes **v2** : gravite recalee sur les 35 premiers controles (v1 26/35 justes, v2 33/35 sur ces memes
+  fiches, chiffre optimiste puisqu'elles ont servi a ecrire les consignes) ; faits extraits en plus : lieu
+  cite, heures des etapes, equipement, moyens (noms de personnes filtres : `_looks_like_person`), services
+  exterieurs, causes (liste fermee `CAUSES`), issue codee, donnees personnelles reperees.
+- Code pur (`pcorg_enrich`, sans modele) : position = GPS d'origine > carroyage de la fiche
+  (`content_category.carroye`, espaces retires : ~2 300 fiches sans GPS en gagnent une) > lieu cite rapproche
+  du referentiel Looker (1 210 lieux nommes + 49 tribunes + 11 virages ; cadastre, riverains, cameras exclus) ;
+  zone de competence ; delais depuis le signalement ; completude /4 ; doublons probables (meme evenement,
+  < 45 min, score lieu + type + resume >= 0,72), un « non » d'admin n'est jamais repose.
+  `pcorg_digest.py --enrich-only` recalcule ces champs sans le modele.
+- Une fiche controlee est retraitee a chaque nouvelle version des consignes (nouveaux champs) ; le controle
+  garde la gravite et la version JUGEES (`review.gravite_modele`, `review.prompt_version`) et la page mesure
+  chaque version sur les fiches validees.
+- Lancement uniquement par la page (lots de 50 / 100) ou la fenetre de nuit, via la tache planifiee
+  « Cockpit - Fiches structurees » (`pcorg_digest.bat`, chaque minute, `--poll --night 01:00-06:00`).
+
 ### 6.0 bis Controle par sondage (page admin dediee)
 
 Page **/admin/gravite-fiches** (page d'administration `gravite_fiches` de `ADMIN_PAGE_REGISTRY` : admins,

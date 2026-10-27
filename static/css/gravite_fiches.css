@@ -70,6 +70,29 @@
 .gf-verdict.ok { color: #16a34a; } .gf-verdict.ko { color: #dc2626; }
 .gf-error { color: #dc2626; font-size: 12px; }
 
+/* Faits extraits, signalement par champ, qualite */
+.gf-facts { display: grid; grid-template-columns: 110px 1fr; gap: 3px 10px; font-size: 12.5px; margin-top: 8px;
+    padding-top: 8px; border-top: 1px dashed var(--border); }
+.gf-facts dt { color: var(--muted); font-size: 11px; text-transform: uppercase; margin: 0; padding-top: 2px; }
+.gf-facts dd { margin: 0; }
+.gf-tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: #f1f5f9;
+    margin: 0 4px 3px 0; }
+.gf-tag.gf-warn { background: #fef3c7; color: #92400e; }
+.gf-tag.gf-good { background: #dcfce7; color: #166534; }
+.gf-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.gf-chip { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--border);
+    background: #fff; cursor: pointer; }
+.gf-chip.gf-on { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+.gf-chip.gf-yes.gf-on { background: #dcfce7; border-color: #86efac; color: #166534; }
+.gf-dup { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #fff7ed; font-size: 12px; }
+.gf-chips-line { display: flex; flex-wrap: wrap; gap: 6px; }
+.gf-versions { font-size: 12px; max-width: 460px; }
+.gf-quality-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.gf-qbox { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.gf-qbox h5 { margin: 0 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; }
+.gf-qrow { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; padding: 2px 0;
+    border-bottom: 1px solid #f1f5f9; }
+
 /* ===== Telephone : une fiche a la fois, barre de reponse fixe ===== */
 .gf-mobile-start, .gf-mobile-bar { display: none; }
 .gf-mobile-bar[hidden] { display: none !important; }

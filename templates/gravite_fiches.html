@@ -90,12 +90,28 @@
                     <div class="gf-muted" style="margin-left:auto;">Cliquez la bonne gravite : celle du modele = juste</div>
                 </header>
                 <div class="widget-body gf-control">
-                    <div id="gf-review-kpis" class="gf-kpis"></div>
+                    <div>
+                        <div id="gf-review-kpis" class="gf-kpis"></div>
+                        <h4 class="gf-sub">Justesse de chaque version des consignes sur les fiches validees</h4>
+                        <table class="table gf-versions"><thead><tr>
+                            <th>Version</th><th class="gf-num">Fiches</th><th class="gf-num">Justes</th><th class="gf-num">Ecart moyen</th>
+                        </tr></thead><tbody id="gf-versions"></tbody></table>
+                        <h4 class="gf-sub">Champs signales faux</h4>
+                        <div id="gf-champs-faux" class="gf-chips-line"></div>
+                    </div>
                     <div>
                         <h4 class="gf-sub">Gravite du modele (lignes) &times; gravite validee (colonnes)</h4>
                         <table class="gf-matrix" id="gf-matrix"></table>
                     </div>
                 </div>
+            </section>
+
+            <section class="widget-card gf-desktop-only-on-phone" style="margin-top:16px;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle;">insights</span> Qualite des donnees</h3>
+                    <div class="gf-muted" style="margin-left:auto;">Fiches structurees avec les consignes actuelles</div>
+                </header>
+                <div class="widget-body" id="gf-quality"><div class="gf-muted">Chargement...</div></div>
             </section>
 
             <section class="widget-card" style="margin-top:16px;">

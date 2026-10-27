@@ -41,6 +41,8 @@ import requests
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
+import pcorg_enrich as PE
+
 PARIS = ZoneInfo("Europe/Paris")
 COLL = "pcorg_digests"
 LOCK_ID = "pcorg_digest_lock"           # cockpit_settings : etat du traitement en cours
@@ -56,27 +58,63 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://srv-safe-docker.aco.local:11434").r
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "alfred")
 OLLAMA_TIMEOUT = int(os.getenv("PCORG_DIGEST_TIMEOUT", "180"))
 
-# Changer le texte du prompt = incrementer PROMPT_VERSION : les fiches non
-# controlees sont alors reevaluees.
-PROMPT_VERSION = "v1"
+# Changer le texte du prompt = incrementer PROMPT_VERSION : toutes les fiches
+# sont alors retraitees (les controles des admins sont conserves, et la
+# nouvelle version est mesuree sur eux).
+# v2 (27/10/2026) : gravite recalee sur les 35 premiers controles (routine et
+# preventif = 1, tout feu >= 3, gaz / explosion = 5, test = 1) ; ajout du lieu
+# cite, des heures des etapes, de l'equipement, des services exterieurs, des
+# causes, de l'issue codee et des donnees personnelles reperees.
+PROMPT_VERSION = "v2"
+CAUSES = ("alcool", "meteo", "affluence", "travaux", "panne_materiel", "signaletique",
+          "conduite_dangereuse", "malveillance", "accident", "sante", "stationnement", "autre")
+ISSUES = ("resolu", "transmis", "sans_suite", "en_attente", "non_precise")
+DONNEES_PERSO = ("nom", "telephone", "plaque", "age", "sante", "adresse")
 PROMPT = """Tu analyses une fiche de main courante du PC Organisation du circuit des 24 Heures du Mans
-(securite, secours, technique, flux, information) pendant un evenement.
+(securite, secours, technique, flux, fourriere, information) pendant un evenement.
 
-Evalue la GRAVITE REELLE d'apres le deroule, pas d'apres le niveau d'urgence saisi (souvent absent ou faux) :
-1 = information, logistique ou consigne, sans incident (ouverture, pose de materiel, appel informatif)
-2 = gene ou anomalie sans risque pour les personnes (panne, congestion, objet trouve, demande de service)
-3 = incident demandant une intervention, risque modere (malaise pris en charge sans gravite, conflit verbal,
-    intrusion sans suite, chute d'arbre sans victime, personne egaree)
-4 = atteinte aux personnes ou aux biens, ou risque serieux (bagarre, blesse, vol, degradation, conduite
-    dangereuse, feu maitrise, menaces)
-5 = danger vital ou crise (arret cardiaque, blesse grave, incendie important, mouvement de foule, evacuation)
+1. GRAVITE REELLE d'apres le deroule, pas d'apres le niveau d'urgence saisi (presque toujours absent ou faux) :
+1 = routine, information, logistique ou dispositif preventif, sans incident : ouverture, pose de materiel,
+    renfort ou deploiement preventif, consigne, enlevement de fourriere ou stationnement genant traite sans
+    incident, essai ou fiche de test (texte incoherent)
+2 = gene ou anomalie sans risque pour les personnes : panne, congestion, objet trouve ou perdu, demande de
+    service, personnel bloque ou en attente (portail encore ferme), materiel tombe ou deplace (barrieres),
+    vol simple sans violence ni menace (velo, objet)
+3 = incident demandant une intervention, risque modere : TOUT DEPART DE FEU meme vite eteint, malaise pris en
+    charge sans gravite, chute sans blessure grave, conflit verbal, intrusion sans suite, chute d'arbre sans
+    victime, personne ou enfant egare, engin ou materiel dangereux (grue deployee, charge instable)
+4 = atteinte aux personnes ou aux biens, ou risque serieux : bagarre, blesse (saignement abondant, ambulance),
+    vol avec violence ou menaces, degradation volontaire, conduite dangereuse, feu demandant des moyens importants
+5 = danger vital ou crise : arret cardiaque, blesse grave, incendie non maitrise, FUITE DE GAZ ou RISQUE
+    D'EXPLOSION, mouvement de foule, evacuation
+Exemples corriges par le PC : « Enlevement fourriere Bd des Italiens, termine, paiement carte » = 1 ;
+« Porte Nord, renfort filtrage, ouverture de couloirs supplementaires » = 1 ; « Personnel arrive en poste mais
+portail encore ferme » = 2 ; « Vol de velo au paddock » = 2 ; « Barrieres tombees chemin aux Boeufs » = 2 ;
+« Feu de poubelle eteint a l'extincteur par la patrouille » = 3 ; « Grue deployee sur un parking » = 3 ;
+« Femme, saignement abondant, prise en charge CMS puis ambulance » = 4 ; « Fuite sur bouteille de gaz,
+panache, non maitrisable » = 5.
+
+2. FAITS (n'invente rien ; ce qui n'est pas ecrit vaut "non precise", null ou une liste vide) :
+- lieu : le lieu cite, tel qu'ecrit (ex. "T34", "Porte Nord", "P4D", "giratoire Antares", "Welcome")
+- etapes : heures HH:MM lues dans le deroule pour signalement, engagement des moyens, arrivee sur place, fin
+- equipement : l'equipement ou materiel en cause (ex. "pompe a essence", "ecran geant", "barriere"), sinon "aucun"
+- moyens_engages : liste des EQUIPES ou moyens internes cites (ex. "S3M", "PS Nord", "patrouille 4", "Tangos",
+  "CMS") ; JAMAIS un nom de personne ni l'auteur d'une ligne du deroule
+- services_exterieurs : liste des services exterieurs sollicites (ex. "SDIS", "SAMU", "gendarmerie", "police",
+  "ENEDIS", "depanneuse"), sinon []
+- causes : liste parmi alcool, meteo, affluence, travaux, panne_materiel, signaletique, conduite_dangereuse,
+  malveillance, accident, sante, stationnement, autre (vide si rien n'est dit)
+- issue_code : resolu, transmis, sans_suite, en_attente ou non_precise
+- donnees_personnelles : types presents dans le texte parmi nom, telephone, plaque, age, sante, adresse
 
 Reponds UNIQUEMENT par un objet JSON :
 {"gravite": 1 a 5, "justification": "pourquoi ce niveau, 20 mots maximum",
  "type": "nature de l'incident en quelques mots", "victimes": nombre (0 si aucune ou non precise),
- "moyens_engages": "...", "issue": "...",
+ "lieu": "...", "etapes": {"signalement": "HH:MM" ou null, "engagement": "HH:MM" ou null,
+ "sur_place": "HH:MM" ou null, "fin": "HH:MM" ou null}, "equipement": "...",
+ "moyens_engages": [...], "services_exterieurs": [...], "causes": [...],
+ "issue": "...", "issue_code": "...", "donnees_personnelles": [...],
  "resume": "deux phrases maximum, sans nom de personne, telephone ni plaque"}
-N'invente rien : ce qui n'est pas ecrit vaut "non precise".
 
 Fiche :
 """
@@ -98,9 +136,11 @@ def _now():
 # ---------------------------------------------------------------------------
 # Source envoyee au modele (jamais l'appelant ni son telephone)
 # ---------------------------------------------------------------------------
+# content_category sert au carroyage (pcorg_enrich) ; source_text n'en envoie
+# JAMAIS l'appelant ni le telephone au modele.
 SOURCE_PROJECTION = {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1,
                      "event": 1, "year": 1, "ts": 1, "date_local": 1, "time_local": 1,
-                     "area": 1, "gps": 1}
+                     "area": 1, "gps": 1, "content_category.carroye": 1}
 
 
 def source_text(doc):
@@ -127,7 +167,63 @@ def src_hash(doc):
 # ---------------------------------------------------------------------------
 # Appel du modele et controle de la reponse
 # ---------------------------------------------------------------------------
-_TEXT_FIELDS = ("justification", "type", "moyens_engages", "issue", "resume")
+_TEXT_FIELDS = ("justification", "type", "lieu", "equipement", "issue", "resume")
+_LIST_FIELDS = ("moyens_engages", "services_exterieurs")
+
+
+def _clean_text(v, default="non precise", limit=600):
+    s = re.sub(r"\s+", " ", str(v if v not in (None, "") else default)).strip()
+    return s[:limit] or default
+
+
+# Sigles d'equipes ou de services, jamais des noms de famille
+_ACRONYMS = {"SDIS", "SAMU", "SMUR", "CMS", "PCO", "PCS", "S3M", "ENEDIS", "GRDF", "BPS", "SSIAP", "ACO",
+             "CRS", "DDT", "DIR", "SNCF", "SETRAM", "TAXI", "VIP", "SECU", "TECH"}
+
+
+def _looks_like_person(s):
+    """« Prenom NOM », « NOM Prenom » (2 ou 3 mots), comptes « field:x » ou
+    « a.dupont » : une personne, pas une equipe (« PS Nord », « SDIS Sarthe »
+    et « Patrouille 4 » restent)."""
+    s = s.strip()
+    if s.lower().startswith("field:") or re.match(r"^[a-z]\.[a-z-]+", s):
+        return True
+    words = s.split()
+    if len(words) not in (2, 3):
+        return False
+    caps = [w for w in words if re.fullmatch(r"[A-Z][A-Z'-]{2,}", w)]
+    title = [w for w in words if re.fullmatch(r"[A-Z][a-zà-ÿ'-]+", w)]
+    if not caps or not title or len(caps) + len(title) != len(words):
+        return False
+    return not any(w in _ACRONYMS for w in caps)
+
+
+def _clean_list(v, allowed=None, limit=12, drop_persons=False):
+    if isinstance(v, str):
+        v = [x for x in re.split(r"[,;/]", v) if x.strip()]
+    if not isinstance(v, list):
+        return []
+    out = []
+    for x in v:
+        s = re.sub(r"\s+", " ", str(x or "")).strip()
+        if not s or s.lower() in ("non precise", "aucun", "aucune", "none", "null"):
+            continue
+        if drop_persons and _looks_like_person(s):
+            continue
+        if allowed is not None:
+            s = s.lower().replace(" ", "_")
+            if s not in allowed:
+                continue
+        if s not in out:
+            out.append(s[:80])
+    return out[:limit]
+
+
+def _clean_hhmm(v):
+    m = re.fullmatch(r"\s*(\d{1,2})\s*[:hH]\s*(\d{2})\s*", str(v or ""))
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return None
+    return "%02d:%s" % (int(m.group(1)), m.group(2))
 
 
 def parse_reply(raw):
@@ -147,7 +243,15 @@ def parse_reply(raw):
         victimes = 0
     out = {"gravite": grav, "victimes": victimes}
     for k in _TEXT_FIELDS:
-        out[k] = re.sub(r"\s+", " ", str(data.get(k) or "non precise")).strip()[:600]
+        out[k] = _clean_text(data.get(k))
+    for k in _LIST_FIELDS:
+        out[k] = _clean_list(data.get(k), drop_persons=True)
+    out["causes"] = _clean_list(data.get("causes"), CAUSES)
+    out["donnees_personnelles"] = _clean_list(data.get("donnees_personnelles"), DONNEES_PERSO)
+    code = str(data.get("issue_code") or "").strip().lower().replace(" ", "_")
+    out["issue_code"] = code if code in ISSUES else "non_precise"
+    et = data.get("etapes") if isinstance(data.get("etapes"), dict) else {}
+    out["etapes"] = {k: _clean_hhmm(et.get(k)) for k in ("signalement", "engagement", "sur_place", "fin")}
     return out
 
 
@@ -178,10 +282,14 @@ def _done_map(db):
 
 
 def needs_work(doc, digest):
+    """Fiche a (re)traiter : jamais structuree, texte modifie, ou consignes plus
+    recentes. Une fiche controlee est retraitee seulement pour une nouvelle
+    version des consignes (nouveaux champs) : son controle est conserve et sert
+    a mesurer la nouvelle version ; jamais pour un simple renvoi d'echec."""
     if digest is None:
         return True
     if digest.get("review"):
-        return False                       # controlee par un admin : figee
+        return digest.get("prompt_version") != PROMPT_VERSION
     same = digest.get("src_hash") == src_hash(doc) and digest.get("prompt_version") == PROMPT_VERSION
     if not same:
         return True
@@ -290,6 +398,8 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
     batch_no, in_batch = 1, 0
     reason = "termine"
     sess = session or requests.Session()
+    gaz = PE.Gazetteer(db)
+    touched = set()
     try:
         for doc in iter_todo(db, only_gps, event):
             if limit is not None and done + errors >= limit:
@@ -311,8 +421,10 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
                     "prompt_version": PROMPT_VERSION, "batch": batch, "at": _now()}
             try:
                 res, meta = analyze(doc, sess)
+                res.update(PE.enrich(gaz, doc, res))
                 db[COLL].update_one({"_id": doc["_id"]}, {
                     "$set": dict(base, **res, meta=meta, error=None, attempts=0)}, upsert=True)
+                touched.add((doc.get("event"), doc.get("year")))
                 done += 1
             except requests.ConnectionError as e:
                 reason = "Ollama injoignable"
@@ -330,11 +442,33 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
         else:
             if in_batch:
                 log.info("Lot %s-%03d termine", run_id, batch_no)
+        dups = 0
+        for ev, yr in touched:          # doublons : par evenement touche (code pur, rapide)
+            dups += PE.link_duplicates(db, COLL, ev, yr)
+        if touched:
+            log.info("Doublons probables sur les evenements traites : %d", dups)
     finally:
         release_lock(db, {"done": done, "errors": errors, "stop_reason": reason})
     dur = (_now() - started).total_seconds()
     log.info("Fin %s : %d structurees, %d echecs, %.0f s (%s)", run_id, done, errors, dur, reason)
     return {"run_id": run_id, "done": done, "errors": errors, "reason": reason, "seconds": dur}
+
+
+def enrich_only(db):
+    """Recalcule les champs « code pur » (position, zone, delais, completude,
+    doublons) de toutes les fiches deja structurees, sans le modele."""
+    gaz = PE.Gazetteer(db)
+    n, touched = 0, set()
+    for d in db[COLL].find({"error": None, "gravite": {"$ne": None}}):
+        fiche = db["pcorg"].find_one({"_id": d["_id"]}, SOURCE_PROJECTION)
+        if not fiche:
+            continue
+        db[COLL].update_one({"_id": d["_id"]}, {"$set": PE.enrich(gaz, fiche, d)})
+        touched.add((d.get("event"), d.get("year")))
+        n += 1
+    dups = sum(PE.link_duplicates(db, COLL, ev, yr) for ev, yr in touched)
+    log.info("Enrichissement seul : %d fiches, %d doublons probables", n, dups)
+    return {"enriched": n, "duplicates": dups}
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +542,13 @@ def main(argv=None):
     p.add_argument("--event")
     p.add_argument("--poll", action="store_true", help="mode tache planifiee (demandes de la page, nuit)")
     p.add_argument("--night", help="fenetre de nuit HH:MM-HH:MM (avec --poll)")
+    p.add_argument("--enrich-only", action="store_true",
+                   help="recalcule position / zone / delais / doublons sans le modele")
     a = p.parse_args(argv)
+    if a.enrich_only:
+        _setup_logging()
+        enrich_only(_db())
+        return 0
     if a.poll:
         db = _db()
         # Passe a vide (cas courant, chaque minute) : pas de journal ouvert pour rien
