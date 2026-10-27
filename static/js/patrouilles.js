@@ -177,10 +177,18 @@
   }
 
   // ---------- Onglets ----------
+  var MAP_TABS = { suivi: true, scenarios: true, points: true };
+
   function setTab(tab) {
+    if (!document.querySelector('.pt-tab[data-tab="' + tab + '"]')) tab = "suivi";
     S.tab = tab;
-    document.querySelectorAll("#pt-tabs button").forEach(function (b) { b.classList.toggle("active", b.dataset.tab === tab); });
+    document.querySelectorAll("#pt-tabs button").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.tab === tab);
+      b.setAttribute("aria-selected", b.dataset.tab === tab ? "true" : "false");
+    });
     document.querySelectorAll(".pt-tab").forEach(function (t) { t.hidden = t.dataset.tab !== tab; });
+    // Carte seulement pour Suivi, Scenarios, Points ; le reste en pleine largeur
+    $("pt-work").classList.toggle("nomap", !MAP_TABS[tab]);
     try { localStorage.setItem("pt_tab", tab); } catch (e) { /* noop */ }
     if (S.liveTimer) { clearInterval(S.liveTimer); S.liveTimer = null; }
     if (tab === "suivi") { loadPlans(); loadLive(); S.liveTimer = setInterval(loadLive, 10000); }
@@ -190,8 +198,22 @@
     setTimeout(function () { S.map.invalidateSize(); }, 50);
   }
 
+  // Compteurs des onglets : en cours, planifications actives, scenarios et
+  // points actifs, tablettes
+  function updateCounts() {
+    function set(id, n) { var e = $(id); if (e) e.textContent = n ? String(n) : ""; }
+    set("pt-n-suivi", (S.live || []).filter(function (r) { return ["proposed", "running", "paused"].indexOf(r.state) >= 0; }).length);
+    set("pt-n-plans", (S.plans || []).filter(function (p) { return p.enabled; }).length);
+    if (S.data) {
+      set("pt-n-scenarios", S.data.scenarios.filter(function (s) { return !s.archived; }).length);
+      set("pt-n-points", S.data.points.filter(function (p) { return p.active; }).length);
+      set("pt-n-tablettes", S.data.devices.length);
+    }
+  }
+
   function render() {
     if (!S.data) return;
+    updateCounts();
     S.layers.points.clearLayers();
     S.layers.scenario.clearLayers();
     S.layers.live.clearLayers();
@@ -260,6 +282,7 @@
              dwell_s: p.dwell_s || 0, instruction: p.instruction || "", photo_required: !!p.photo_required,
              active: p.active !== false, zones: p.zones || [] };
     $("pt-pt-editor").hidden = false;
+    $("pt-pt-listpane").hidden = true;
     $("pt-pt-name").value = S.pt.name;
     $("pt-pt-radius").value = S.pt.radius_m;
     $("pt-pt-dwell").value = S.pt.dwell_s;
@@ -273,7 +296,12 @@
     $("pt-pt-name").focus();
   }
 
-  function closePointEditor() { S.pt = null; $("pt-pt-editor").hidden = true; render(); }
+  function closePointEditor() {
+    S.pt = null;
+    $("pt-pt-editor").hidden = true;
+    $("pt-pt-listpane").hidden = false;
+    render();
+  }
 
   function savePoint() {
     var body = {
@@ -305,7 +333,6 @@
   function renderScenarios() {
     var list = $("pt-sc-list"), showArch = $("pt-sc-archived").checked;
     clear(list);
-    list.hidden = !!S.sc;
     var scs = S.data.scenarios.filter(function (s) { return showArch || !s.archived; });
     if (!scs.length) list.appendChild(el("div", "pt-empty", "Aucun scenario."));
     scs.forEach(function (s) {
@@ -334,6 +361,7 @@
              : { id: null, name: "", travel: "vehicle", loop: false, color: "#2563eb", note: "", dominante: "generale",
                  points: [], estimate: null };
     $("pt-sc-editor").hidden = false;
+    $("pt-sc-listpane").hidden = true;
     $("pt-sc-name").value = S.sc.name;
     $("pt-sc-dominante").value = S.sc.dominante;
     $("pt-sc-color").value = S.sc.color;
@@ -348,7 +376,12 @@
     preview();
   }
 
-  function closeScenario() { S.sc = null; $("pt-sc-editor").hidden = true; render(); }
+  function closeScenario() {
+    S.sc = null;
+    $("pt-sc-editor").hidden = true;
+    $("pt-sc-listpane").hidden = false;
+    render();
+  }
 
   function readScenarioForm() {
     S.sc.name = $("pt-sc-name").value;
@@ -584,6 +617,7 @@
   function loadLive() {
     apiGet("/api/patrols/runs?scope=live").then(function (r) {
       S.live = r.runs;
+      updateCounts();
       if (S.tab === "suivi") render();
     }).catch(function () { /* silencieux : prochain passage */ });
   }
@@ -708,8 +742,22 @@
       }
       var list = $("pt-hist-list");
       clear(list);
-      if (!r.runs.length) list.appendChild(el("div", "pt-empty", "Aucune patrouille sur la periode."));
-      r.runs.forEach(function (x) { list.appendChild(runCard(x, false)); });
+      if (!r.runs.length) {
+        var tr0 = el("tr"), td0 = el("td", "pt-empty", "Aucune patrouille sur la periode.");
+        td0.colSpan = 7; tr0.appendChild(td0); list.appendChild(tr0);
+      }
+      r.runs.forEach(function (x) {
+        var tr = el("tr");
+        tr.appendChild(el("td", "num", fmtDateTime(x.created_at)));
+        tr.appendChild(el("td", null, x.scenario.name || "?"));
+        tr.appendChild(el("td", null, x.device_name || (x.attempts.length ? x.attempts.map(function (a) { return a.device_name; }).join(", ") : "-")));
+        var tds = el("td"); tds.appendChild(el("span", "pt-badge st-" + x.state, STATE_LABELS[x.state] || x.state)); tr.appendChild(tds);
+        tr.appendChild(el("td", "num", x.started_at ? x.counts.done + " / " + x.steps.length + (x.counts.skipped ? " (" + x.counts.skipped + " passe)" : "") : "-"));
+        var dur = x.started_at && x.ended_at ? Math.round((new Date(x.ended_at) - new Date(x.started_at)) / 1000) : null;
+        tr.appendChild(el("td", "num", dur != null ? fmtMin(dur) : "-"));
+        tr.appendChild(el("td", "pt-muted", x.end_reason || (x.created_by ? "par " + x.created_by : "")));
+        list.appendChild(tr);
+      });
     }).catch(function (e) { toast("error", errLabel(e)); });
   }
 
@@ -744,6 +792,7 @@
   function loadPlans() {
     return apiGet("/api/patrols/plans").then(function (r) {
       S.plans = r.plans;
+      updateCounts();
       if (S.tab === "plans") renderPlans();
       if (S.tab === "suivi") renderLiveSummary();
     }).catch(function () { /* silencieux */ });
@@ -937,49 +986,123 @@
   }
 
   // ---------- Tablettes ----------
+  function fmtAgo(iso) {
+    if (!iso) return "jamais";
+    var s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return "a l'instant";
+    if (s < 3600) return "il y a " + Math.round(s / 60) + " min";
+    if (s < 86400) return "il y a " + Math.round(s / 3600) + " h";
+    return "il y a " + Math.round(s / 86400) + " j";
+  }
+
   function renderDevices() {
-    var list = $("pt-dev-list");
-    clear(list);
-    var groups = {};
-    S.data.groups.forEach(function (g) { groups[g.id] = g; });
-    S.data.devices.forEach(function (d) {
-      var row = el("div", "pt-item pt-dev");
-      var main = el("div", "pt-item-main");
-      main.appendChild(el("div", "pt-item-title", d.name + (d.test_mode ? " [TEST]" : "")));
-      main.appendChild(el("div", "pt-item-sub", [d.group_label || "sans groupe", STATUS_LABELS[d.status] || d.status,
-        d.recent ? "vue recemment" : "pas vue recemment", d.declarant ? "declarante (jamais de patrouille)" : ""].filter(Boolean).join(" - ")));
-      var zbox = el("div", "pt-zone-chips");
-      function paint() {
-        clear(zbox);
-        if (!d.competence_zones.length) zbox.appendChild(el("span", "pt-chip", "Partout"));
-        d.competence_zones.forEach(function (z) { zbox.appendChild(el("span", "pt-chip zone", zoneLabel(z))); });
-      }
-      paint();
-      main.appendChild(zbox);
-      var det = el("details", "pt-zone-edit");
-      det.appendChild(el("summary", null, "Modifier les zones"));
-      var boxes = el("div", "pt-zone-grid");
-      S.data.zones.forEach(function (z) {
-        var lab = el("label", "pt-check");
-        var cb = document.createElement("input"); cb.type = "checkbox"; cb.value = z.id; cb.checked = d.competence_zones.indexOf(z.id) >= 0;
-        lab.appendChild(cb); lab.appendChild(document.createTextNode(" " + z.label));
-        boxes.appendChild(lab);
-      });
-      det.appendChild(boxes);
-      var save = el("button", "btn btn-primary", "Enregistrer les zones"); save.type = "button";
-      save.addEventListener("click", function () {
-        var zones = Array.prototype.slice.call(boxes.querySelectorAll("input:checked")).map(function (c) { return c.value; });
-        apiPost("/api/patrols/devices/" + d.id + "/zones", { zones: zones }).then(function (r) {
-          d.competence_zones = r.zones; paint(); det.open = false;
-          toast("success", "Zones de " + d.name + " enregistrees");
-        }).catch(function (e) { toast("error", errLabel(e)); });
-      });
-      det.appendChild(save);
-      main.appendChild(det);
-      row.appendChild(main);
-      list.appendChild(row);
+    var body = $("pt-dev-list");
+    clear(body);
+    var q = ($("pt-dev-search").value || "").toLowerCase();
+    var devs = S.data.devices.filter(function (d) {
+      return !q || (d.name + " " + (d.group_label || "")).toLowerCase().indexOf(q) >= 0;
     });
-    if (!S.data.devices.length) list.appendChild(el("div", "pt-empty", "Aucune tablette appairee."));
+    if (!devs.length) {
+      var tr0 = el("tr"), td0 = el("td", "pt-empty", q ? "Aucune tablette ne correspond." : "Aucune tablette appairee.");
+      td0.colSpan = 7; tr0.appendChild(td0); body.appendChild(tr0);
+      return;
+    }
+    devs.forEach(function (d) {
+      var tr = el("tr");
+      var tdn = el("td");
+      tdn.appendChild(el("b", null, d.name));
+      if (d.test_mode) { tdn.appendChild(document.createTextNode(" ")); tdn.appendChild(el("span", "pt-chip test", "TEST")); }
+      if (d.declarant) { tdn.appendChild(document.createTextNode(" ")); tdn.appendChild(el("span", "pt-chip", "declarante")); }
+      tr.appendChild(tdn);
+      tr.appendChild(el("td", null, d.group_label || "-"));
+      var tds = el("td");
+      var st = el("span", "pt-status s-" + d.status);
+      st.appendChild(el("i"));
+      st.appendChild(document.createTextNode(STATUS_LABELS[d.status] || d.status));
+      tds.appendChild(st);
+      tr.appendChild(tds);
+      var tdv = el("td", "num", fmtAgo(d.last_seen));
+      if (!d.recent) tdv.style.color = "#b45309";
+      tr.appendChild(tdv);
+      tr.appendChild(el("td", null, d.active_patrol_run ? "en cours" : (d.proposal ? "proposition" : "-")));
+      var tdz = el("td");
+      var chips = el("div", "pt-zone-chips");
+      if (!d.competence_zones.length) chips.appendChild(el("span", "pt-chip", "Partout"));
+      d.competence_zones.slice(0, 4).forEach(function (z) { chips.appendChild(el("span", "pt-chip zone", zoneLabel(z))); });
+      if (d.competence_zones.length > 4) chips.appendChild(el("span", "pt-chip", "+" + (d.competence_zones.length - 4)));
+      tdz.appendChild(chips);
+      tr.appendChild(tdz);
+      var tda = el("td");
+      var b = el("button", "btn", ""); b.type = "button";
+      b.appendChild(icon("fence")); b.appendChild(document.createTextNode(" Zones"));
+      b.addEventListener("click", function () { openZones(d); });
+      tda.appendChild(b);
+      tr.appendChild(tda);
+      body.appendChild(tr);
+    });
+  }
+
+  // Fenetre des zones de competence : recherche, regroupement par famille
+  // (Departements, Lots, Secteurs, autres) d'apres le debut du nom.
+  var ZD = null;
+  function zoneFamily(label) {
+    var l = (label || "").toLowerCase();
+    if (l.indexOf("departement") === 0 || l.indexOf("département") === 0) return "Departements";
+    if (l.indexOf("lot") === 0) return "Lots";
+    if (l.indexOf("secteur") === 0) return "Secteurs";
+    return "Autres zones";
+  }
+  function openZones(d) {
+    ZD = { dev: d, sel: d.competence_zones.slice() };
+    $("pt-zone-title").textContent = "Zones de competence de " + d.name;
+    $("pt-zone-search").value = "";
+    paintZones();
+    $("pt-zone-modal").hidden = false;
+    $("pt-zone-search").focus();
+  }
+  function paintZones() {
+    var picked = $("pt-zone-picked");
+    clear(picked);
+    if (!ZD.sel.length) picked.appendChild(el("span", "pt-chip", "Partout (aucune zone)"));
+    ZD.sel.forEach(function (z) { picked.appendChild(el("span", "pt-chip zone", zoneLabel(z))); });
+    var q = ($("pt-zone-search").value || "").toLowerCase();
+    var box = $("pt-zone-groups");
+    clear(box);
+    var fams = {};
+    S.data.zones.forEach(function (z) {
+      if (q && z.label.toLowerCase().indexOf(q) < 0) return;
+      var f = zoneFamily(z.label);
+      (fams[f] = fams[f] || []).push(z);
+    });
+    ["Departements", "Lots", "Secteurs", "Autres zones"].forEach(function (f) {
+      if (!fams[f]) return;
+      var g = el("div", "pt-zone-group");
+      g.appendChild(el("b", null, f + " (" + fams[f].length + ")"));
+      var grid = el("div", "pt-zone-grid");
+      fams[f].forEach(function (z) {
+        var lab = el("label");
+        var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = ZD.sel.indexOf(z.id) >= 0;
+        cb.addEventListener("change", function () {
+          ZD.sel = ZD.sel.filter(function (x) { return x !== z.id; });
+          if (cb.checked) ZD.sel.push(z.id);
+          paintZones();
+        });
+        lab.appendChild(cb); lab.appendChild(document.createTextNode(z.label));
+        grid.appendChild(lab);
+      });
+      g.appendChild(grid);
+      box.appendChild(g);
+    });
+    if (!box.firstChild) box.appendChild(el("div", "pt-empty", "Aucune zone ne correspond."));
+  }
+  function saveZones() {
+    var d = ZD.dev;
+    apiPost("/api/patrols/devices/" + d.id + "/zones", { zones: ZD.sel }).then(function (r) {
+      d.competence_zones = r.zones;
+      $("pt-zone-modal").hidden = true;
+      toast("success", "Zones de " + d.name + " enregistrees");
+      renderDevices();
+    }).catch(function (e) { toast("error", errLabel(e)); });
   }
 
   // ---------- Reglages ----------
@@ -1024,6 +1147,15 @@
     document.querySelectorAll('input[name="pt-sc-travel"]').forEach(function (r) { r.addEventListener("change", preview); });
     $("pt-send-close").addEventListener("click", function () { $("pt-send-modal").hidden = true; if (S.tab === "suivi") loadLive(); });
     $("pt-send-go").addEventListener("click", doSend);
+    $("pt-dev-search").addEventListener("input", renderDevices);
+    $("pt-zone-search").addEventListener("input", paintZones);
+    $("pt-zone-clear").addEventListener("click", function () { ZD.sel = []; paintZones(); });
+    $("pt-zone-close").addEventListener("click", function () { $("pt-zone-modal").hidden = true; });
+    $("pt-zone-save").addEventListener("click", saveZones);
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      ["pt-zone-modal", "pt-send-modal"].forEach(function (id) { $(id).hidden = true; });
+    });
     $("pt-hist-days").addEventListener("change", loadHistory);
     $("pt-hist-sc").addEventListener("change", loadHistory);
     $("pt-set-save").addEventListener("click", saveSettings);
