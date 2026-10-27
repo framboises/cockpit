@@ -622,6 +622,41 @@
     }
   }
 
+  // ---------- Telephone : barre d'onglets a icones ----------
+  function setTab(target) {
+    var tabs = document.querySelectorAll("#gf-tabbar [data-target]");
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("gf-tab-on", tabs[i].dataset.target === target);
+  }
+
+  function initTabbar() {
+    var bar = document.getElementById("gf-tabbar");
+    if (!bar) return;
+    bar.addEventListener("click", function (ev) {
+      var b = ev.target.closest("button");
+      if (!b) return;
+      if (b.dataset.action === "sample") {
+        document.getElementById("gf-sample-grav").value = "";
+        openSample();
+        return;
+      }
+      var sec = document.getElementById(b.dataset.target);
+      if (sec) {
+        setTab(b.dataset.target);
+        sec.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+    // L'onglet actif suit le bloc visible pendant le defilement
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) setTab(e.target.id); });
+      }, { rootMargin: "-40% 0px -55% 0px" });
+      ["gf-sec-suivi", "gf-sec-controle", "gf-sec-qualite", "gf-sec-lots"].forEach(function (id) {
+        var s = document.getElementById(id);
+        if (s) io.observe(s);
+      });
+    }
+  }
+
   function initMobileBar() {
     var btns = document.querySelectorAll("#gf-mb-grav button");
     for (var i = 0; i < btns.length; i++) {
@@ -637,6 +672,7 @@
     document.getElementById("gf-mb-prev").addEventListener("click", function () { setFocus(state.focus - 1, true); });
     document.getElementById("gf-mb-next").addEventListener("click", function () { setFocus(state.focus + 1, true); });
     document.getElementById("gf-mb-done").addEventListener("click", exitReview);
+    initTabbar();
     // Rotation du telephone : on recale la fiche courante (la barre change de cote)
     window.addEventListener("orientationchange", function () {
       setTimeout(function () { if (state.items.length) setFocus(state.focus, true); }, 300);

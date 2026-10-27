@@ -48,7 +48,7 @@
                 <div class="gf-muted" id="gf-mobile-stats"></div>
             </div>
 
-            <section class="widget-card gf-dash">
+            <section class="widget-card gf-dash" id="gf-sec-suivi">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">monitoring</span> Avancement</h3>
                     <div id="gf-run-state" class="gf-muted" style="margin-left:auto;">-</div>
@@ -85,7 +85,7 @@
                 </div>
             </section>
 
-            <section class="widget-card gf-dash" style="margin-top:16px;">
+            <section class="widget-card gf-dash" id="gf-sec-controle" style="margin-top:16px;">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">fact_check</span> Controle</h3>
                     <div class="gf-muted" style="margin-left:auto;">Cliquez la bonne gravite : celle du modele = juste</div>
@@ -107,7 +107,7 @@
                 </div>
             </section>
 
-            <section class="widget-card gf-dash" style="margin-top:16px;">
+            <section class="widget-card gf-dash" id="gf-sec-qualite" style="margin-top:16px;">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">insights</span> Qualite des donnees</h3>
                     <div class="gf-muted" style="margin-left:auto;">Fiches structurees avec les consignes actuelles</div>
@@ -115,7 +115,7 @@
                 <div class="widget-body" id="gf-quality"><div class="gf-muted">Chargement...</div></div>
             </section>
 
-            <section class="widget-card gf-dash" style="margin-top:16px;">
+            <section class="widget-card gf-dash" id="gf-sec-lots" style="margin-top:16px;">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">inventory_2</span> Lots de fiches</h3>
                     <div class="gf-sample-ctl" style="margin-left:auto; display:flex; gap:8px; align-items:center;">
@@ -154,6 +154,25 @@
         </div>
     </div>
 </div>
+
+<!-- Telephone : barre d'onglets a icones (hors controle) -->
+<nav class="gf-tabbar" id="gf-tabbar" aria-label="Navigation de la page">
+    <button type="button" data-target="gf-sec-suivi" class="gf-tab-on">
+        <span class="material-symbols-outlined">monitoring</span><span>Suivi</span>
+    </button>
+    <button type="button" data-action="sample">
+        <span class="material-symbols-outlined">fact_check</span><span>Controler</span>
+    </button>
+    <button type="button" data-target="gf-sec-lots">
+        <span class="material-symbols-outlined">inventory_2</span><span>Lots</span>
+    </button>
+    <button type="button" data-target="gf-sec-qualite">
+        <span class="material-symbols-outlined">insights</span><span>Qualite</span>
+    </button>
+    <button type="button" data-target="gf-sec-controle">
+        <span class="material-symbols-outlined">verified</span><span>Justesse</span>
+    </button>
+</nav>
 
 <!-- Telephone : barre de reponse fixe, une fiche a la fois -->
 <div class="gf-mobile-bar" id="gf-mobile-bar" hidden>

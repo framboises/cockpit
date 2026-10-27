@@ -97,16 +97,19 @@
    Mode telephone = ecran etroit OU ecran tactile de faible hauteur : en
    paysage un iPhone fait 844-932 px de large et basculait sur la version PC.
    La meme requete est reprise dans gravite_fiches.js (PHONE_QUERY). */
-.gf-mobile-start, .gf-mobile-bar { display: none; }
+.gf-mobile-start, .gf-mobile-bar, .gf-tabbar { display: none; }
 .gf-mobile-bar[hidden] { display: none !important; }
 .gf-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .gf-mb-done { display: none; }
 
 @media (max-width: 760px), (pointer: coarse) and (max-height: 540px) {
   #sidebar { display: none !important; }
-  html, body { overflow-x: hidden; }
-  .app-layout { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
-  .app-main { margin-left: 0 !important; }
+  /* style.css fige html / body a la hauteur de l'ecran (overflow: hidden) :
+     sur telephone la page entiere doit defiler au doigt */
+  html, body { height: auto !important; min-height: 100%; overflow-x: hidden !important;
+      overflow-y: auto !important; -webkit-overflow-scrolling: touch; overscroll-behavior-y: none; }
+  .app-layout { display: block; height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+  .app-main, .app-main.single-col-page { margin-left: 0 !important; height: auto; overflow: visible !important; }
   .app-header { padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
       padding-top: max(6px, env(safe-area-inset-top)); min-height: 0; }
   .app-header .header-event-year { display: none !important; }
@@ -126,11 +129,27 @@
   .gf-chip { min-height: 36px; padding: 6px 12px; font-size: 13px; }
   .gf-gbtn { min-width: 40px; height: 40px; }
 
-  /* Tableau de bord empile */
+  /* Tableau de bord empile ; le controle se lance depuis la barre d'onglets */
   .gf-mobile-start { display: block; margin-bottom: 4px; }
-  .gf-mobile-start .btn { width: 100%; height: 50px; font-size: 16px; display: flex; align-items: center;
-      justify-content: center; gap: 8px; }
-  .gf-mobile-start .gf-muted { text-align: center; margin-top: 6px; }
+  .gf-mobile-start .btn { display: none; }
+  .gf-mobile-start .gf-muted { text-align: center; margin-top: 2px; font-size: 13px; }
+
+  /* Barre d'onglets a icones en bas (hors controle) */
+  .gf-tabbar { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0;
+      z-index: 40; background: rgba(255, 255, 255, .96); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+      border-top: 1px solid var(--border);
+      padding: 4px max(6px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)); }
+  .gf-tabbar button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+      min-height: 50px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px;
+      border-radius: 10px; padding: 2px 0; }
+  .gf-tabbar button .material-symbols-outlined { font-size: 26px; }
+  .gf-tabbar button.gf-tab-on { color: var(--brand); font-weight: 600; }
+  .gf-tabbar button[data-action="sample"] .material-symbols-outlined { color: #fff; background: var(--brand);
+      border-radius: 50%; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+      font-size: 22px; margin-top: -2px; }
+  #main-content { padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important; }
+  .gf-dash { scroll-margin-top: 8px; }
+  body.gf-reviewing .gf-tabbar { display: none; }
   .gf-launch { gap: 8px; }
   .gf-launch .btn { flex: 1 1 auto; justify-content: center; }
   .gf-launch .gf-check { margin-left: 0 !important; width: 100%; min-height: 36px; font-size: 13px; }
