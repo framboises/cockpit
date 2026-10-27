@@ -1207,6 +1207,8 @@ def _mur_episode(ep, zones, now):
         "photo_der": _mur_photo(der.get("photo")), "rect_der": der.get("rect"),
         "zones": [{"id": str(z["_id"]), "nom": z.get("name", ""), "couleur": z.get("color", "#d97706")} for z in _zones_of(ep, zones)],
         "statut": ep.get("status", "new"),
+        # Traitement (carte "derniere intrusion" du mur calme : cloturee / vue par qui, quand)
+        "statut_par": ep.get("status_by") or "", "statut_le": _iso(_utc(ep.get("status_at"))),
         "ia": {"statut": ai.get("status"), "label": ai.get("label"), "conf": ai.get("real_conf")} if ai else None,
     }
 

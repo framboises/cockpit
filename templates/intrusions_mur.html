@@ -117,6 +117,8 @@
   .infos .cam-nom{font-size:var(--t-grand); font-weight:900; line-height:1.1}
   .infos .sous{grid-column:1 / -1; font-size:var(--t-moyen); color:var(--muted); font-weight:600; display:flex; flex-wrap:wrap;
     gap:0.4vh 0.8vw; align-items:center; min-width:0; margin-top:0.4vh}
+  .traitee{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:99px; font-weight:800;
+    background:rgba(34,197,94,0.16); color:var(--ok); white-space:nowrap}
   .infos .depuis{grid-row:1; grid-column:2; text-align:right}
   .infos .depuis .val{font-size:var(--t-geant); font-weight:900; line-height:1}
   .type{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:99px; font-weight:800; color:#0b1220; white-space:nowrap}
@@ -450,6 +452,14 @@
     });
     if (!enCours && e.statut === "new" && !e.ecartee && !(e.nature && e.nature.fausse)) {
       sous.appendChild(el("span", "", "non traitée"));
+    }
+    // Deja traitee : on le dit (sinon une cloturee semble encore d'actualite)
+    if (!enCours && (e.statut === "closed" || e.statut === "seen")) {
+      var tt = el("span", "traitee");
+      tt.appendChild(ico(e.statut === "closed" ? "task_alt" : "visibility"));
+      tt.appendChild(document.createTextNode(" " + (e.statut === "closed" ? "clôturée" : "vue")
+        + (e.statut_par ? " par " + e.statut_par : "") + (e.statut_le ? " à " + hm(e.statut_le) : "")));
+      sous.appendChild(tt);
     }
     inf.appendChild(sous);
     une.appendChild(inf);

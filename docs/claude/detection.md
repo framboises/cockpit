@@ -725,6 +725,11 @@ n'accepte que `intrusions/`, jamais `captures/`).
   masque pour laisser la place a la photo.
 - Calme : "AUCUNE INTRUSION" en vert, derniere intrusion (photo de
   couverture), puis les 4 dernieres non traitees (`status new`, 12 h).
+  La derniere intrusion peut etre deja traitee (la plus recente du jour
+  dans le planning, quel que soit son statut ; les hors planning ne la
+  remplacent jamais) : badge vert "cloturee / vue par X a HH:MM"
+  (`statut_par`, `statut_le` de `_mur_episode`, 27/10/2026), sinon une
+  cloturee semblait encore d'actualite.
   Pastille "a jour HH:MM" / "DONNEES ARRETEES" : un ecran calme ne doit pas
   ressembler a un ecran fige.
 - Carte : un point par appareil (`_detection_channels`, usage
