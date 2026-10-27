@@ -186,7 +186,7 @@
   }
 
   // ---------- Onglets ----------
-  var MAP_TABS = { suivi: true, scenarios: true, points: true };
+  var MAP_TABS = { suivi: true, scenarios: true, points: true, proposer: true };
 
   function setTab(tab) {
     if (!document.querySelector('.pt-tab[data-tab="' + tab + '"]')) tab = "suivi";
@@ -203,6 +203,7 @@
     if (tab === "suivi") { loadPlans(); loadLive(); }
     if (tab === "plans") { loadPlans(); S.liveTimer = setInterval(loadPlans, 30000); }
     if (tab === "historique") loadHistory();
+    if (tab === "proposer") initProposer();
     render();
     setTimeout(function () { S.map.invalidateSize(); }, 50);
   }
@@ -231,6 +232,7 @@
     else if (S.tab === "tablettes") renderDevices();
     else if (S.tab === "suivi") renderLive();
     else if (S.tab === "plans") renderPlans();
+    else if (S.tab === "proposer") drawProposal();
     drawZones();
   }
 
@@ -348,6 +350,143 @@
       fillSelects();
       closePointEditor();
     }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
+  // ---------- Proposer une ronde d'apres l'historique (patrols_propose.py) ----------
+  var PR = { init: false, result: null, ai: false };
+
+  function initProposer() {
+    if (PR.init) return;
+    PR.init = true;
+    var dom = $("pr-dom");
+    clear(dom);
+    (S.data.dominantes || []).forEach(function (d) { dom.appendChild(new Option(d.label, d.id)); });
+    dom.value = "surete";
+    var now = new Date();
+    $("pr-hour").value = String(now.getHours()).padStart(2, "0") + ":" + String(Math.floor(now.getMinutes() / 15) * 15).padStart(2, "0");
+    var ev = $("pr-event");
+    clear(ev);
+    ev.appendChild(new Option("Chargement...", ""));
+    apiGet("/api/patrols/propose/events").then(function (r) {
+      clear(ev);
+      r.events.forEach(function (e) {
+        ev.appendChild(new Option(e.event + " (" + e.n + " fiches placees, " + e.years.join(", ") + ")", e.event));
+      });
+      PR.ai = !!r.ai;
+      $("pr-ai").hidden = !PR.ai;
+    }).catch(function (e) { toast("error", errLabel(e)); });
+    $("pr-go").addEventListener("click", function () { runProposal(false); });
+    $("pr-ai").addEventListener("click", function () { runProposal(true); });
+    $("pr-create").addEventListener("click", createFromProposal);
+    renderProposal();
+  }
+
+  function proposalBody(ai) {
+    return {
+      dominante: $("pr-dom").value, duration_min: Number($("pr-dur").value),
+      travel: document.querySelector('input[name="pr-travel"]:checked').value, event: $("pr-event").value,
+      loop: $("pr-loop").checked, hour: $("pr-same-hour").checked ? $("pr-hour").value : null, ai: !!ai,
+    };
+  }
+
+  function runProposal(ai) {
+    var body = proposalBody(ai);
+    if (!body.event) { toast("warning", "Choisissez l'evenement"); return; }
+    var box = $("pr-result");
+    clear(box);
+    box.appendChild(el("div", "pt-hint", ai ? "Relecture des foyers par l'IA (30 s a 1 min)..." : "Calcul de la ronde..."));
+    $("pr-go").disabled = $("pr-ai").disabled = true;
+    apiPost("/api/patrols/propose", body).then(function (r) {
+      PR.result = r;
+      PR.body = body;
+      PR.fitted = false;
+      var dl = (S.data.dominantes || []).find(function (d) { return d.id === body.dominante; });
+      $("pr-name").value = "Ronde " + (dl ? dl.label.toLowerCase() : "") + " " + body.duration_min + " min" + (ai ? " (IA)" : "");
+      renderProposal();
+      render();
+    }).catch(function (e) {
+      clear(box);
+      box.appendChild(el("div", "pt-empty", e.message === "ia_indisponible" ? "IA indisponible (cle, budget ou reseau) : la proposition sans IA reste utilisable." : errLabel(e)));
+    }).then(function () { $("pr-go").disabled = $("pr-ai").disabled = false; });
+  }
+
+  function renderProposal() {
+    var box = $("pr-result");
+    clear(box);
+    var r = PR.result;
+    $("pr-foot").hidden = !(r && r.stops && r.stops.length >= 2);
+    if (!r) {
+      box.appendChild(el("div", "pt-empty", "Choisissez une dominante, une duree et l'evenement, puis Proposer."));
+      return;
+    }
+    var est = r.estimate || {};
+    var sum = el("div", "pt-estimate");
+    sum.textContent = r.stops.length + " arret(s) - " + fmtKm(est.distance_m) + " - " + fmtMin(est.total_s) +
+      " (arrets compris) pour " + fmtMin(r.budget_s) + " disponibles";
+    box.appendChild(sum);
+    box.appendChild(el("div", "pt-hint", r.stats.fiches + " fiche(s) placee(s), " + r.stats.foyers + " foyer(s) sur la carte (cercles gris, taille = importance)."));
+    (r.notes || []).forEach(function (n) { box.appendChild(el("div", "pt-hint", n)); });
+    if (r.ai_comment) {
+      var c = el("div", "pt-callout");
+      c.appendChild(icon("psychology"));
+      c.appendChild(el("span", null, r.ai_comment));
+      box.appendChild(c);
+    }
+    var ol = el("ol", "pt-steps");
+    r.stops.forEach(function (s, i) {
+      var li = el("li", "pt-step pr-stop");
+      li.style.cursor = "pointer";
+      li.appendChild(el("span", "pt-step-num", String(i + 1)));
+      var main = el("div", "pt-step-name");
+      main.appendChild(el("div", null, s.name));
+      var sub = s.kind === "foyer"
+        ? s.n + " incident(s) - " + (s.editions || []).join(", ") + (s.gravite_moy ? " - gravite " + s.gravite_moy : "") +
+          (s.top_sous && s.top_sous.length ? " - " + s.top_sous.join(", ") : "") + (s.sources && s.sources.indexOf("carroyage") >= 0 ? " - position approx. (carroyage)" : "")
+        : "Complement : couche " + (s.layer || "") + (s.info ? " - " + s.info : "");
+      main.appendChild(el("div", "pt-muted", sub));
+      if (s.ai_reason) main.appendChild(el("div", "pr-ai-reason", "IA : " + s.ai_reason));
+      li.appendChild(main);
+      li.addEventListener("click", function () { S.map.setView([s.lat, s.lng], Math.max(S.map.getZoom(), 17)); });
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+  }
+
+  function drawProposal() {
+    var r = PR.result;
+    if (!r) return;
+    (r.foyers || []).forEach(function (f) {
+      L.circleMarker([f.lat, f.lng], { radius: Math.max(4, Math.min(18, 3 + Math.sqrt(f.score) * 2)), color: "#64748b", weight: 1,
+                                        fillColor: "#94a3b8", fillOpacity: 0.35 })
+        .bindTooltip(esc(f.name || "Foyer") + " - " + f.n + " incident(s), score " + f.score, { direction: "top" })
+        .addTo(S.layers.scenario);
+    });
+    var col = { surete: "#ef4444", secours: "#dc2626", incendie: "#f97316", prevention: "#16a34a" }[(PR.body || {}).dominante] || "#2563eb";
+    var est = r.estimate || {};
+    if (est.polyline) L.polyline(decode6(est.polyline), { color: col, weight: 5, opacity: 0.85 }).addTo(S.layers.scenario);
+    var ll = [];
+    r.stops.forEach(function (s, i) {
+      ll.push([s.lat, s.lng]);
+      L.marker([s.lat, s.lng], { icon: numberIcon(i + 1, s.kind === "foyer" ? col : "#64748b"), zIndexOffset: 1000 })
+        .bindTooltip(esc(s.name), { direction: "top", offset: [0, -12] }).addTo(S.layers.scenario);
+    });
+    if (ll.length && !PR.fitted) { S.map.fitBounds(L.latLngBounds(ll).pad(0.2), { maxZoom: 17 }); }
+    PR.fitted = true;
+  }
+
+  function createFromProposal() {
+    var r = PR.result;
+    if (!r) return;
+    var body = Object.assign({}, PR.body, { stops: r.stops, name: $("pr-name").value });
+    $("pr-create").disabled = true;
+    apiPost("/api/patrols/propose/create", body).then(function (res) {
+      toast("success", "Scenario cree : " + res.scenario.name);
+      return load().then(function () {
+        setTab("scenarios");
+        openScenario(res.scenario);
+      });
+    }).catch(function (e) { toast("error", errLabel(e)); })
+      .then(function () { $("pr-create").disabled = false; });
   }
 
   // ---------- Import depuis une couche Looker ----------

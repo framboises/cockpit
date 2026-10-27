@@ -46,6 +46,7 @@
             <nav class="pt-tabs" id="pt-tabs" role="tablist">
                 <button type="button" role="tab" data-tab="suivi" class="active"><span class="material-symbols-outlined">monitoring</span><span>Suivi</span><b class="pt-tab-count" id="pt-n-suivi"></b></button>
                 <button type="button" role="tab" data-tab="plans"><span class="material-symbols-outlined">event_repeat</span><span>Planifications</span><b class="pt-tab-count" id="pt-n-plans"></b></button>
+                <button type="button" role="tab" data-tab="proposer"><span class="material-symbols-outlined">auto_awesome</span><span>Proposer</span></button>
                 <button type="button" role="tab" data-tab="scenarios"><span class="material-symbols-outlined">route</span><span>Scenarios</span><b class="pt-tab-count" id="pt-n-scenarios"></b></button>
                 <button type="button" role="tab" data-tab="points"><span class="material-symbols-outlined">location_on</span><span>Points</span><b class="pt-tab-count" id="pt-n-points"></b></button>
                 <button type="button" role="tab" data-tab="tablettes"><span class="material-symbols-outlined">tablet_android</span><span>Tablettes</span><b class="pt-tab-count" id="pt-n-tablettes"></b></button>
@@ -65,6 +66,39 @@
                             <div id="pt-live" class="pt-list"></div>
                         </div>
                         <div class="pt-foot pt-hint">Rafraichi toutes les 10 s. Cliquez une patrouille pour la centrer sur la carte.</div>
+                    </div>
+
+                    <!-- ===== Proposer (avec carte) ===== -->
+                    <div class="pt-tab" data-tab="proposer" hidden>
+                        <div class="pt-view-head">
+                            <div class="pt-hint">Une ronde construite d'apres les incidents passes de l'evenement (toutes editions), qui tient dans la duree choisie.</div>
+                            <div class="pt-grid2">
+                                <label class="pt-field">Dominante<select id="pr-dom" class="pt-input"></select></label>
+                                <label class="pt-field">Duree disponible<select id="pr-dur" class="pt-input">
+                                    <option value="15">15 min</option><option value="30">30 min</option><option value="45" selected>45 min</option>
+                                    <option value="60">1 h</option><option value="90">1 h 30</option><option value="120">2 h</option>
+                                </select></label>
+                            </div>
+                            <div class="pt-seg" role="radiogroup" aria-label="Deplacement">
+                                <label><input type="radio" name="pr-travel" value="pedestrian" checked><span class="material-symbols-outlined">directions_walk</span> A pied</label>
+                                <label><input type="radio" name="pr-travel" value="vehicle"><span class="material-symbols-outlined">directions_car</span> Vehicule</label>
+                            </div>
+                            <label class="pt-field">Historique de l'evenement<select id="pr-event" class="pt-input"></select></label>
+                            <div class="pt-row">
+                                <label class="pt-check"><input type="checkbox" id="pr-same-hour"> Meme tranche horaire que</label>
+                                <input type="time" id="pr-hour" class="pt-input pt-inline" step="900">
+                                <label class="pt-check"><input type="checkbox" id="pr-loop"> Retour au depart</label>
+                            </div>
+                            <div class="pt-row">
+                                <button type="button" class="btn btn-primary" id="pr-go"><span class="material-symbols-outlined">auto_awesome</span> Proposer</button>
+                                <button type="button" class="btn" id="pr-ai" hidden title="Les fiches de chaque foyer (sans donnees personnelles) sont relues par Claude, qui revoit l'importance des foyers. Admins seulement, cout suivi."><span class="material-symbols-outlined">psychology</span> Affiner avec l'IA</button>
+                            </div>
+                        </div>
+                        <div class="pt-scroll"><div id="pr-result"></div></div>
+                        <div class="pt-foot pt-row" id="pr-foot" hidden>
+                            <input type="text" id="pr-name" class="pt-input" placeholder="Nom du scenario" maxlength="80">
+                            <button type="button" class="btn btn-primary" id="pr-create"><span class="material-symbols-outlined">add_road</span> Creer le scenario</button>
+                        </div>
                     </div>
 
                     <!-- ===== Scenarios (avec carte) ===== -->

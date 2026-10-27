@@ -418,6 +418,36 @@ compte l.arnault, chaque minute, IgnoreNew), `templates/patrouilles.html`, `stat
   non prise » et fiche Information = livraison 2 (`patrols.on_not_taken`).
 - Dominante enregistree sur le scenario (section 6.1), sans effet avant la livraison 4.
 
+### Livraison 4 : propositions d'apres l'historique (27/10/2026)
+
+`patrols_propose.py`, onglet **Proposer** de la page. Entree : dominante, duree disponible (15 min a
+2 h), a pied / vehicule, evenement (TOUTES ses editions), option « meme tranche horaire », retour au
+depart. Choix du 27/10 : historique + couches ; historique de l'evenement choisi.
+
+- Fiches de la dominante (`DOMINANTE_RULES` : surete = PCO.Securite, secours = PCO.Secours, incendie et
+  prevention = motifs cherches dans le texte ET la sous-classification, generale = 4 categories).
+  Position : GPS (2026 seulement), sinon **carroyage** (`content_category.carroye` -> `grid_ref`), ce
+  qui ouvre les editions 2024-2025 (environ un quart de leurs fiches).
+- Poids : gravite evaluee (`pcorg_digests`, gravite validee d'abord) 1/2/4/8/16, sinon urgence
+  IMP 1 / UR 2 / UA 4 / EU 8 ; edition precedente x0.8, plus ancienne x0.6 ; meme tranche horaire
+  (+/- 1 h 30) x1, sinon x0.35.
+- Foyers : regroupement a 60 m (a pied) / 120 m (vehicule), score = somme des poids x (1 + 0.3 par
+  edition en plus), nom = objet Looker nomme le plus proche (< 150 m, jamais « sans nom »).
+- Parcours : insertion gloutonne (score / temps ajoute, vitesses forfaitaires 4,5 km/h a pied, 20 km/h
+  en vehicule, detour x1.35-1.4, arret 2 min / 1 min 30) jusqu'a la duree ; complement de 6 objets au
+  plus de la couche de la dominante (portails, postes de secours, hospitalites, tribunes) ; ordre
+  optimise (matrice) et trajet reel Valhalla, arret le moins utile retire tant que la duree depasse
+  de plus de 10 %. Historique mince (< 40 fiches) : signale, foyers d'une fiche admis.
+- « Creer le scenario » : foyer = point existant a moins de 25 m reutilise, sinon point
+  `source: engine` (`ia_reason` = incidents, editions, gravite, avis IA) ; objets de couche importes
+  (ils suivent Looker) ; scenario avec la dominante et sa couleur, ouvert dans l'editeur.
+- **Affiner avec l'IA** (admin Cockpit ou super admin, PAS une page accordee) : les 30 premiers foyers
+  et 6 fiches chacun (texte masque : telephone, email, plaque, « M. Nom ») relus par Claude
+  (`pcorg_summary.call_claude`, `CLAUDE_MODEL` = Sonnet 5.5, budget mensuel respecte, cout journalise
+  `ai_usage_log` feature `patrouilles_propositions`, environ 0,04 $ par appel) ; score 0-100 et raison par
+  foyer, commentaire de ronde ; le parcours est recalcule avec ces scores. Panne / budget : message,
+  la proposition sans IA reste utilisable.
+
 ### Points tires des couches Looker (27/10/2026)
 
 - Reglages : couches proposees (`cockpit_settings.patrols.layers`, defaut sanitaires, tribunes, `3p` =

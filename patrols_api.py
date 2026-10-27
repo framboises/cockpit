@@ -368,6 +368,71 @@ def patrols_runs():
     return jsonify({"ok": True, "runs": out, "stats": sorted(stats.values(), key=lambda x: -x["runs"])})
 
 
+# ---------------------------------------------------------------------------
+# Propositions d'apres l'historique (patrols_propose.py)
+# ---------------------------------------------------------------------------
+
+def _is_real_admin():
+    """Admin Cockpit ou super admin : une page accordee a un groupe ne suffit
+    pas pour l'IA (couts, donnees envoyees a Anthropic)."""
+    u = getattr(request, "admin_user", None) or {}
+    return bool(u.get("is_super_admin") or u.get("app_role") == "admin")
+
+
+@patrols_bp.route("/api/patrols/propose/events")
+@admin_required
+def patrols_propose_events():
+    import patrols_propose as PP
+    return jsonify({"ok": True, "events": PP.events_with_history(_db()), "ai": _is_real_admin()})
+
+
+@patrols_bp.route("/api/patrols/propose", methods=["POST"])
+@admin_required
+def patrols_propose():
+    """Proposition d'une ronde : dominante, duree, deplacement, evenement,
+    tranche horaire facultative ; `ai: true` = scores revus par Claude
+    (admins seulement)."""
+    import patrols_propose as PP
+    db = _db()
+    d = request.get_json(silent=True) or {}
+    event = str(d.get("event") or "").strip()
+    if not event:
+        return _err("evenement_obligatoire")
+    hour = None
+    if d.get("hour") not in (None, ""):
+        try:
+            hh, mm = str(d["hour"]).split(":")[:2]
+            hour = int(hh) + int(mm) / 60.0
+        except (ValueError, TypeError):
+            hour = None
+    scores = reasons = None
+    comment = None
+    if d.get("ai"):
+        if not _is_real_admin():
+            return _err("admin_requis", 403)
+        try:
+            scores, reasons, comment = PP.ai_rescore(db, event, d.get("dominante"), d.get("travel"), hour)
+        except Exception as e:
+            logger.warning("Patrouilles : affinage IA en echec (%s)", e)
+            return _err("ia_indisponible", 502, detail=str(e)[:200])
+    out = PP.propose(db, d.get("dominante") or "generale", d.get("duration_min"), d.get("travel"), event,
+                     loop=bool(d.get("loop")), hour=hour, ai_scores=scores, ai_reasons=reasons)
+    out["ai_comment"] = comment
+    out["ok"] = True
+    return jsonify(out)
+
+
+@patrols_bp.route("/api/patrols/propose/create", methods=["POST"])
+@admin_required
+def patrols_propose_create():
+    import patrols_propose as PP
+    db = _db()
+    sc, err = PP.create_from_proposal(db, request.get_json(silent=True) or {}, _who())
+    if err:
+        return _err(err)
+    return jsonify({"ok": True, "scenario": P.pub_scenario(db, sc)})
+
+
 @patrols_bp.route("/api/pcorg-patrol/<run_id>")
 @_role_required("user")
 def pcorg_patrol_view(run_id):

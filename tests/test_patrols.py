@@ -454,3 +454,34 @@ class TestCouchesLooker:
         db["tribunes"].update_one({}, {"$pull": {"features": {"properties._id_feature": "f1"}}})
         P.sync_layer_points(db)
         assert db["patrol_points"].find_one({"_id": ObjectId(ids[0])})["layer_missing"] is True
+
+
+class TestPropositions:
+    def test_ronde_dans_la_duree(self, db, monkeypatch):
+        import patrols_propose as PP
+        monkeypatch.setattr(P, "_matrix", lambda coords, travel: (None, "skip"))
+        monkeypatch.setattr(PP, "_gazetteer", lambda db: [])
+        # 3 foyers de surete (dont un sur 2 editions), 1 fiche technique ignoree
+        def fiche(i, lat, year, cat="PCO.Securite", urg="UA"):
+            db["pcorg"].insert_one({"_id": "p%d" % i, "event": "24H", "year": year, "category": cat, "niveau_urgence": urg,
+                                    "text": "intrusion", "gps": {"type": "Point", "coordinates": [0.21, lat]},
+                                    "ts": NOW, "content_category": {"sous_classification": "Intrusion"}})
+        for i in range(4):
+            fiche(i, 47.950, 2025 if i % 2 else 2026)
+        for i in range(4, 6):
+            fiche(i, 47.955, 2026)
+        fiche(6, 47.960, 2026, urg="IMP")
+        fiche(7, 47.950, 2026, cat="PCO.Technique")
+        foyers, n = PP.build_foyers(db, "24H", "surete", "pedestrian")
+        assert n == 7 and len(foyers) == 3 and foyers[0]["n"] == 4 and foyers[0]["editions"] == [2025, 2026]
+        r = PP.propose(db, "surete", 30, "pedestrian", "24H")
+        assert r["stops"] and r["stops"][0]["n"] == 4
+        assert r["estimate"]["total_s"] <= 30 * 60 * 1.1
+        # Creation : points (foyers) + scenario avec la dominante
+        sc, err = PP.create_from_proposal(db, {"stops": r["stops"], "dominante": "surete", "travel": "pedestrian",
+                                               "event": "24H", "name": "Ronde test"}, "t")
+        assert not err and sc["dominante"] == "surete" and len(sc["points"]) == len(r["stops"])
+
+    def test_masquage(self):
+        import patrols_propose as PP
+        assert PP.mask("M. Dupont au 06 12 34 56 78, AB-123-CD, x@y.fr") == "[personne] au [tel], [plaque], [email]"
