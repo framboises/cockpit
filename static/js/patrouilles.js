@@ -969,16 +969,33 @@
         return a.device_name + " : " + ({ refused: "refus", timeout: "sans reponse", accepted: "acceptee" }[a.answer] || a.answer) + (a.reason ? " (" + a.reason + ")" : "");
       }).join(" ; ")));
     }
-    if (withActions && ["proposed", "running", "paused"].indexOf(r.state) >= 0) {
+    var ficheId = r.fiche_id || r.not_taken_fiche;
+    var open = withActions && ["proposed", "running", "paused"].indexOf(r.state) >= 0;
+    if (ficheId || open) {
       var act = el("div", "pt-row pt-actions");
+      if (ficheId) act.appendChild(ficheLink(ficheId, r.fiche_id ? "Voir la fiche de main courante" : "Voir la fiche Non prise"));
       act.appendChild(el("span", "pt-spacer"));
-      var b = el("button", "btn pt-danger", "Annuler la patrouille"); b.type = "button";
-      b.addEventListener("click", function (e) { e.stopPropagation(); cancelRun(r); });
-      act.appendChild(b);
+      if (open) {
+        var b = el("button", "btn pt-danger", "Annuler la patrouille"); b.type = "button";
+        b.addEventListener("click", function (e) { e.stopPropagation(); cancelRun(r); });
+        act.appendChild(b);
+      }
       card.appendChild(act);
     }
     card.addEventListener("click", function () { focusRun(r); });
     return card;
+  }
+
+  // Ouvre la fiche sur l'accueil Cockpit (lien direct /?fiche=<id>, pcorg.js)
+  function ficheLink(id, label) {
+    var a = el("a", "btn pt-fiche-link");
+    a.href = "/?fiche=" + encodeURIComponent(id);
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.appendChild(icon("description"));
+    a.appendChild(document.createTextNode(" " + label));
+    a.addEventListener("click", function (e) { e.stopPropagation(); });
+    return a;
   }
 
   function renderLive() {
@@ -1061,7 +1078,10 @@
         tr.appendChild(el("td", "num", x.started_at ? x.counts.done + " / " + x.steps.length + (x.counts.skipped ? " (" + x.counts.skipped + " passe)" : "") : "-"));
         var dur = x.started_at && x.ended_at ? Math.round((new Date(x.ended_at) - new Date(x.started_at)) / 1000) : null;
         tr.appendChild(el("td", "num", dur != null ? fmtMin(dur) : "-"));
-        tr.appendChild(el("td", "pt-muted", x.end_reason || (x.created_by ? "par " + x.created_by : "")));
+        var tdd = el("td", "pt-muted", x.end_reason || (x.created_by ? "par " + x.created_by : ""));
+        var fid = x.fiche_id || x.not_taken_fiche;
+        if (fid) { tdd.appendChild(document.createTextNode(" ")); tdd.appendChild(ficheLink(fid, "Fiche")); }
+        tr.appendChild(tdd);
         list.appendChild(tr);
       });
     }).catch(function (e) { toast("error", errLabel(e)); });

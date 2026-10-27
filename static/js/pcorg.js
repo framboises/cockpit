@@ -6488,6 +6488,22 @@
   // une alerte (SOS terrain) n'avait pas encore de pin
   window.PcorgUI = { openFiche: function (id) { openDetailModal(id, false); refresh(); } };
 
+  // Lien direct vers une fiche : /?fiche=<id> l'ouvre a l'arrivee sur
+  // l'accueil (lien "Voir la fiche" de la page Patrouilles, par exemple).
+  // Le parametre est retire de l'adresse pour qu'un rechargement ne la rouvre pas.
+  (function () {
+    if (window.PCORG_CREATE_ONLY) return;
+    var fid = null;
+    try { fid = new URLSearchParams(location.search).get("fiche"); } catch (e) { fid = null; }
+    if (!fid) return;
+    try {
+      var u = new URL(location.href);
+      u.searchParams.delete("fiche");
+      history.replaceState(null, "", u.pathname + (u.search || "") + u.hash);
+    } catch (e) { /* adresse inchangee */ }
+    setTimeout(function () { window.PcorgUI.openFiche(fid); }, 1200);
+  })();
+
   // ── Mode creation seule (File du service) ───────────────────────────────────
   // La page pose window.PCORG_CREATE_ONLY = true avant de charger ce fichier et
   // inclut _pcorg_create_modal.html : MEME assistant 3 etapes que l'accueil

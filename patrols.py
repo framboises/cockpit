@@ -896,6 +896,7 @@ def on_not_taken(db, run_id, now):
     try:
         db["pcorg"].insert_one(doc)
         PH.append_entry(db["pcorg"], fid, PH.make_entry(BOT, body, ts=now, system=True))
+        db["patrol_runs"].update_one({"_id": run_id}, {"$set": {"not_taken_fiche": fid}})
     except Exception as e:
         logger.warning("patrouille %s : fiche non prise (%s)", run_id, e)
     try:
@@ -1545,7 +1546,8 @@ def pub_run(run, device=None):
                     "expires_at": _iso(cur.get("expires_at")), "distance_m": cur.get("distance_m")} if cur else None,
         "attempts": [{"device_name": a.get("device_name"), "answer": a.get("answer"), "reason": a.get("reason"),
                       "at": _iso(a.get("answered_at"))} for a in run.get("attempts") or []],
-        "fiche_id": run.get("fiche_id"), "steps": _pub_steps(run), "counts": c,
+        "fiche_id": run.get("fiche_id"), "not_taken_fiche": run.get("not_taken_fiche"),
+        "steps": _pub_steps(run), "counts": c,
         "created_at": _iso(run.get("created_at")), "created_by": run.get("created_by"),
         "started_at": _iso(run.get("started_at")), "ended_at": _iso(run.get("ended_at")),
         "end_reason": run.get("end_reason"), "abandoned": bool(run.get("abandoned")),

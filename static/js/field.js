@@ -4663,6 +4663,7 @@
 
   function openTestPanel() {
     if (_tp.overlay) return;
+    _tp.scenariosFresh = false;     // scenarios relus a chaque ouverture
     var overlay = _n("div", "field-modal");
     var box = _n("div", "field-modal-box test-panel");
     var head = _n("div", "test-panel-head");
@@ -4676,7 +4677,11 @@
     [["etat", "Etat"], ["patrouille", "Patrouille"], ["actions", "Actions"], ["journal", "Journal"]].forEach(function (t) {
       var b = _n("button", null, t[1]);
       b.dataset.tab = t[0];
-      b.addEventListener("click", function () { _tp.tab = t[0]; renderTestPanel(); });
+      b.addEventListener("click", function () {
+        _tp.tab = t[0];
+        if (t[0] === "actions") _tp.scenariosFresh = false;    // relire les scenarios
+        renderTestPanel();
+      });
       tabs.appendChild(b);
     });
     box.appendChild(tabs);
@@ -4849,12 +4854,23 @@
     body.appendChild(_n("div", "test-sec", "Patrouille"));
     var row = _n("div", "test-row");
     var sel = _n("select", "test-select");
-    if (_tp.scenarios) {
+    // Liste relue a chaque ouverture de l'onglet (un scenario cree apres le
+    // premier chargement n'apparaissait jamais)
+    if (_tp.scenarios && _tp.scenariosFresh) {
+      if (!_tp.scenarios.length) sel.appendChild(new Option("Aucun scenario : creez-en un sur la page Patrouilles", ""));
       _tp.scenarios.forEach(function (s) { sel.appendChild(new Option(s.name + " (" + s.points + " pts)", s.id)); });
+      if (_tp.scenarioPick) sel.value = _tp.scenarioPick;
+      sel.addEventListener("change", function () { _tp.scenarioPick = sel.value; });
     } else {
       sel.appendChild(new Option("Chargement des scenarios...", ""));
       fetchWithTimeout("/field/test/scenarios", { cache: "no-store" }, 10000).then(function (r) { return r.json(); })
-        .then(function (d) { _tp.scenarios = d.scenarios || []; if (_tp.tab === "actions") renderTestPanel(); });
+        .then(function (d) {
+          _tp.scenarios = d.scenarios || [];
+          _tp.scenariosFresh = true;
+          if (!d.ok) tlog("test", "scenarios : " + (d.error || "?"));
+          if (_tp.tab === "actions") renderTestPanel();
+        })
+        .catch(function (e) { tlog("test", "scenarios : erreur " + (e && e.message || e)); });
     }
     row.appendChild(sel);
     _actBtn(row, "Me proposer", "send", function () {
