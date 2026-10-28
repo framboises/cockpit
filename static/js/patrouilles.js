@@ -47,6 +47,7 @@
     trop_de_points: "Trop de points (40 au plus)", no_route: "Aucun chemin entre ces points",
     valhalla_unreachable: "Moteur d'itineraire injoignable", scenario_vide: "Scenario sans point",
     cible_invalide: "Choisissez une tablette ou un groupe", not_found: "Introuvable",
+    meme_point: "Choisissez un autre point",
   };
   function errLabel(e) { var c = (e && e.message) || String(e); return ERRORS[c] || c; }
 
@@ -147,7 +148,7 @@
 
   function onMapClick(e) {
     if (S.tab === "proposer" && PR.placing) { placeAt(e.latlng); return; }
-    if (S.tab !== "points") return;
+    if (S.tab !== "points" || S.merge) return;
     if (IMP.on) {       // import depuis une couche : la carte sert au lasso
       if (IMP.lasso) { IMP.lasso.push([e.latlng.lng, e.latlng.lat]); drawImport(); }
       return;
@@ -256,9 +257,11 @@
         : L.marker([p.lat, p.lng], { icon: dotIcon(p.active ? "#2563eb" : "#94a3b8", p.name) });
       m.bindTooltip(esc(p.name) + (faint ? " - cliquer pour ajouter" : ""), { direction: "top", offset: [0, -6] });
       if (!faint) L.circle([p.lat, p.lng], { radius: p.radius_m, color: "#2563eb", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(S.layers.points);
+      if (editable && S.merge && S.merge.other === p.id) m.setIcon(dotIcon("#f59e0b", p.name));
       m.on("click", function (e) {
         L.DomEvent.stopPropagation(e);
-        if (editable) openPointEditor(p);
+        if (editable && S.merge) pickMerge(p.id);
+        else if (editable) openPointEditor(p);
         else if (S.sc) addPointToScenario(p.id);
       });
       m.addTo(S.layers.points);
@@ -320,11 +323,108 @@
     if (S.pt.layer_ref) $("pt-pt-pos").textContent = "Nom, position et informations suivent Looker" + (p.layer_missing ? " (objet ABSENT de la couche : derniere position gardee)" : "") + ".";
     $("pt-pt-toggle").hidden = !S.pt.id;
     $("pt-pt-toggle").textContent = S.pt.active ? "Desactiver" : "Reactiver";
+    $("pt-pt-merge-open").hidden = !S.pt.id;
+    S.merge = null;
+    $("pt-pt-merge").hidden = true;
     render();
     $("pt-pt-name").focus();
   }
 
+  // ---------- Fusion de deux points ----------
+  // S.merge = {other: id, keep: "self" | "other"} ; le point garde reste
+  // affiche, le nom de l'autre devient un de ses autres noms (serveur).
+  function openMerge() {
+    S.merge = { other: null, keep: "self" };
+    $("pt-mg-search").value = "";
+    $("pt-pt-merge").hidden = false;
+    fillMergeList();
+    renderMergeKeep();
+    render();
+    $("pt-mg-search").focus();
+  }
+
+  function closeMerge() {
+    S.merge = null;
+    $("pt-pt-merge").hidden = true;
+    render();
+  }
+
+  function fillMergeList() {
+    var sel = $("pt-mg-other"), q = ($("pt-mg-search").value || "").toLowerCase();
+    clear(sel);
+    var R = 6371000, rad = Math.PI / 180;
+    function dist(p) {
+      var x = (p.lng - S.pt.lng) * rad * Math.cos((p.lat + S.pt.lat) / 2 * rad), y = (p.lat - S.pt.lat) * rad;
+      return Math.round(Math.sqrt(x * x + y * y) * R);
+    }
+    S.data.points.filter(function (p) {
+      if (p.id === S.pt.id) return false;
+      if (!q) return true;
+      return (p.name + " " + (p.aliases || []).join(" ")).toLowerCase().indexOf(q) >= 0;
+    }).map(function (p) { return { p: p, d: dist(p) }; })
+      .sort(function (a, b) { return a.d - b.d; }).slice(0, 200)
+      .forEach(function (x) {
+        var o = new Option(x.p.name + " - " + fmtKm(x.d) + (x.p.active ? "" : " (desactive)"), x.p.id);
+        o.selected = S.merge && S.merge.other === x.p.id;
+        sel.appendChild(o);
+      });
+  }
+
+  function pickMerge(id) {
+    if (!S.merge || id === S.pt.id) return;
+    S.merge.other = id;
+    var sel = $("pt-mg-other");
+    if (![].some.call(sel.options, function (o) { return o.value === id; })) { $("pt-mg-search").value = ""; fillMergeList(); }
+    sel.value = id;
+    renderMergeKeep();
+    render();
+  }
+
+  function renderMergeKeep() {
+    var box = $("pt-mg-keep"), other = S.merge && S.merge.other ? pointById(S.merge.other) : null;
+    clear(box);
+    box.hidden = !other;
+    $("pt-mg-go").disabled = !other;
+    if (!other) return;
+    box.appendChild(el("div", "pt-mg-keep-title", "Point qui reste affiche :"));
+    [["self", S.pt.name || "(ce point)"], ["other", other.name]].forEach(function (c) {
+      var lab = el("label", "pt-radio");
+      var r = document.createElement("input");
+      r.type = "radio"; r.name = "pt-mg-keep"; r.value = c[0]; r.checked = S.merge.keep === c[0];
+      r.addEventListener("change", function () { S.merge.keep = c[0]; });
+      lab.appendChild(r);
+      lab.appendChild(document.createTextNode(" " + c[1]));
+      box.appendChild(lab);
+    });
+  }
+
+  function runMerge() {
+    var other = S.merge && S.merge.other ? pointById(S.merge.other) : null;
+    if (!other) return;
+    var selfP = pointById(S.pt.id) || { id: S.pt.id, name: S.pt.name };
+    var keep = S.merge.keep === "other" ? other : selfP, drop = S.merge.keep === "other" ? selfP : other;
+    var uses = S.data.scenarios.filter(function (s) { return s.points.indexOf(drop.id) >= 0; }).length;
+    var msg = "Fusionner \"" + drop.name + "\" dans \"" + keep.name + "\" ? \"" + drop.name + "\" devient un autre nom de \"" +
+      keep.name + "\"" + (uses ? " et " + uses + " scenario(s) passent sur \"" + keep.name + "\"" : "") + ".";
+    var go = function () {
+      apiPost("/api/patrols/points/" + keep.id + "/merge", { other: drop.id }).then(function (r) {
+        S.data.points = S.data.points.filter(function (p) { return p.id !== drop.id && p.id !== keep.id; });
+        S.data.points.push(r.point);
+        S.data.points.sort(function (a, b) { return a.name.localeCompare(b.name); });
+        S.data.scenarios = r.scenarios;
+        toast("success", "Points fusionnes" + (r.scenarios_updated ? " - " + r.scenarios_updated + " scenario(s) mis a jour" : ""));
+        fillSelects();
+        closePointEditor();
+      }).catch(function (e) { toast("error", errLabel(e)); });
+    };
+    if (typeof window.showConfirmToast === "function") {
+      window.showConfirmToast(msg, { okLabel: "Fusionner", cancelLabel: "Annuler", type: "warning" }).then(function (ok) { if (ok) go(); });
+    } else go();
+  }
+
   function closePointEditor() {
+    S.merge = null;
+    $("pt-pt-merge").hidden = true;
     S.pt = null;
     $("pt-pt-editor").hidden = true;
     $("pt-pt-listpane").hidden = false;
@@ -1889,6 +1989,11 @@
     $("pt-pt-save").addEventListener("click", savePoint);
     $("pt-pt-cancel").addEventListener("click", closePointEditor);
     $("pt-pt-toggle").addEventListener("click", togglePoint);
+    $("pt-pt-merge-open").addEventListener("click", openMerge);
+    $("pt-mg-cancel").addEventListener("click", closeMerge);
+    $("pt-mg-go").addEventListener("click", runMerge);
+    $("pt-mg-search").addEventListener("input", fillMergeList);
+    $("pt-mg-other").addEventListener("change", function () { pickMerge(this.value); });
     $("pt-pt-radius").addEventListener("change", render);
     $("pt-sc-new").addEventListener("click", function () { openScenario(null); });
     $("pt-sc-archived").addEventListener("change", render);

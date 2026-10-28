@@ -128,7 +128,7 @@ def patrols_bootstrap():
     zones = P._zones(db)
     labels = _zone_labels(zones)
     groups = F._beacon_groups(db)
-    points = [P.pub_point(p, labels) for p in db["patrol_points"].find().sort("name", 1)]
+    points = [P.pub_point(p, labels) for p in db["patrol_points"].find({"merged_into": {"$exists": False}}).sort("name", 1)]
     scenarios = [P.pub_scenario(db, s) for s in db["patrol_scenarios"].find().sort("name", 1)]
     devices = [_pub_device(d, groups, now, st)
                for d in db["field_devices"].find({"revoked": {"$ne": True}}).sort("name", 1)]
@@ -192,8 +192,11 @@ def patrols_layer_items(collection):
     items = P.layer_items(db, collection)
     if items is None:
         return _err("couche_inconnue", 404)
-    done = {(p.get("layer_ref") or {}).get("fid"): {"id": str(p["_id"]), "active": p.get("active", True) is not False}
-            for p in db["patrol_points"].find({"layer_ref.collection": collection}, {"layer_ref": 1, "active": 1})}
+    # Point fusionne : c'est le point garde qui le represente
+    done = {(p.get("layer_ref") or {}).get("fid"): {"id": p.get("merged_into") or str(p["_id"]),
+                                                     "active": bool(p.get("merged_into")) or p.get("active", True) is not False}
+            for p in db["patrol_points"].find({"layer_ref.collection": collection},
+                                              {"layer_ref": 1, "active": 1, "merged_into": 1})}
     for it in items:
         it["point"] = done.get(it["fid"])
     return jsonify({"ok": True, "items": items})
@@ -212,6 +215,21 @@ def patrols_points_import():
     labels = _zone_labels(P._zones(db))
     pts = {str(p["_id"]): p for p in db["patrol_points"].find({"_id": {"$in": [P._oid(i) for i in ids]}})}
     return jsonify({"ok": True, "ids": ids, "points": [P.pub_point(pts[i], labels) for i in ids if i in pts]})
+
+
+@patrols_bp.route("/api/patrols/points/<point_id>/merge", methods=["POST"])
+@admin_required
+def patrols_point_merge(point_id):
+    """Fusionne le point `other` dans `point_id` (qui reste affiche) ; le nom
+    de l'autre devient un de ses autres noms, les scenarios suivent."""
+    db = _db()
+    out, err = P.merge_points(db, point_id, (request.get_json(silent=True) or {}).get("other"), _who())
+    if err:
+        return _err(err, 404 if err == "not_found" else 400)
+    labels = _zone_labels(P._zones(db))
+    scenarios = [P.pub_scenario(db, s) for s in db["patrol_scenarios"].find().sort("name", 1)]
+    return jsonify({"ok": True, "point": P.pub_point(out["point"], labels), "scenarios_updated": out["scenarios"],
+                    "scenarios": scenarios})
 
 
 @patrols_bp.route("/api/patrols/points/<point_id>/active", methods=["POST"])

@@ -63,6 +63,7 @@ RUN_OPEN = ("proposed", "running", "paused")
 RUN_STATES = RUN_OPEN + ("done", "partial", "refused", "expired", "cancelled")
 BOT = "Patrouilles"
 MAX_POINTS = 40
+MAX_ALIASES = 20
 BUSY_STATUSES = ("intervention", "sur_place", "fin_intervention", "pause")
 
 
@@ -195,7 +196,7 @@ def _clean_point(data, settings):
         "name": name, "lat": lat, "lng": lng, "radius_m": radius,
         "instruction": str(data.get("instruction") or "").strip()[:500],
         "photo_required": bool(data.get("photo_required")),
-        "dwell_s": dwell, "aliases": aliases[:20],
+        "dwell_s": dwell, "aliases": aliases[:MAX_ALIASES],
     }, None
 
 
@@ -356,7 +357,11 @@ def import_points(db, collection, fids, by):
         upd = {"name": it["name"], "lat": it["lat"], "lng": it["lng"], "info": it["info"],
                "zone_ids": zones_of_point(db, it["lat"], it["lng"], zones), "active": True,
                "layer_missing": False, "updated_at": now, "updated_by": by}
-        old = db["patrol_points"].find_one({"layer_ref.collection": collection, "layer_ref.fid": fid}, {"_id": 1})
+        old = db["patrol_points"].find_one({"layer_ref.collection": collection, "layer_ref.fid": fid},
+                                           {"_id": 1, "merged_into": 1})
+        if old and old.get("merged_into"):      # fusionne : c'est le point garde qui sert
+            ids.append(old["merged_into"])
+            continue
         if old:
             db["patrol_points"].update_one({"_id": old["_id"]}, {"$set": upd})
             ids.append(str(old["_id"]))
@@ -409,6 +414,54 @@ def sync_layer_points(db, point_ids=None):
 def set_point_active(db, point_id, active):
     oid = _oid(point_id)
     return bool(oid and db["patrol_points"].update_one({"_id": oid}, {"$set": {"active": bool(active)}}).matched_count)
+
+
+def merge_points(db, keep_id, drop_id, by):
+    """Fusionne `drop_id` dans `keep_id` : le point garde reste affiche (nom,
+    position, reglages), le nom et les autres noms du point fusionne
+    deviennent ses autres noms (les propositions placent encore les fiches
+    qui les citent). Tous les scenarios passent sur le point garde (doublon
+    retire, trajet recalcule). Le point fusionne est desactive avec
+    `merged_into` (les patrouilles passees gardent leur instantane).
+    Retourne ({point, scenarios}, erreur)."""
+    k_oid, d_oid = _oid(keep_id), _oid(drop_id)
+    if not k_oid or not d_oid:
+        return None, "not_found"
+    if k_oid == d_oid:
+        return None, "meme_point"
+    keep = db["patrol_points"].find_one({"_id": k_oid})
+    drop = db["patrol_points"].find_one({"_id": d_oid})
+    if not keep or not drop or keep.get("merged_into") or drop.get("merged_into"):
+        return None, "not_found"
+    names = [keep.get("name") or ""]
+    aliases = []
+    for a in (keep.get("aliases") or []) + [drop.get("name") or ""] + (drop.get("aliases") or []):
+        a = str(a or "").strip()[:60]
+        if a and a.lower() not in [x.lower() for x in names + aliases]:
+            aliases.append(a)
+    now = _now()
+    upd = {"aliases": aliases[:MAX_ALIASES], "updated_at": now, "updated_by": by,
+           "photo_required": bool(keep.get("photo_required") or drop.get("photo_required"))}
+    if not keep.get("instruction") and drop.get("instruction"):
+        upd["instruction"] = drop["instruction"]
+    db["patrol_points"].update_one({"_id": k_oid}, {"$set": upd})
+    db["patrol_points"].update_one({"_id": d_oid}, {"$set": {
+        "active": False, "merged_into": str(k_oid), "merged_at": now, "merged_by": by}})
+    k, d, n = str(k_oid), str(d_oid), 0
+    for sc in db["patrol_scenarios"].find({"points": d}):
+        ids = []
+        for i in sc.get("points") or []:
+            i = k if i == d else i
+            if i not in ids:
+                ids.append(i)
+        sc["points"] = ids
+        est = estimate(db, sc) if len(ids) >= 2 else None
+        db["patrol_scenarios"].update_one({"_id": sc["_id"]}, {
+            "$set": {"points": ids, "estimate": est, "updated_at": now, "updated_by": by}, "$inc": {"version": 1}})
+        n += 1
+    logger.info("Patrouilles : point %s (%s) fusionne dans %s (%s) par %s, %d scenario(s)",
+                d, drop.get("name"), k, keep.get("name"), by, n)
+    return {"point": db["patrol_points"].find_one({"_id": k_oid}), "scenarios": n}, None
 
 
 def pub_point(p, zone_labels=None):

@@ -95,6 +95,24 @@ class TestPointsEtScenarios:
                                  scenario_id=str(sc["_id"]))
         assert sc2["version"] == 2 and sc2["estimate"]["distance_m"] == 3000
 
+    def test_fusion(self, db):
+        sc = _scenario(db)                          # P1, P2, P3
+        p1, p2, p3 = sc["points"]
+        db["patrol_points"].update_one({"_id": ObjectId(p3)}, {"$set": {"aliases": ["Porte B"], "instruction": "cadenas"}})
+        other, _ = P.save_scenario(db, {"name": "Autre", "points": [p3, p2]}, "t")
+        out, err = P.merge_points(db, p1, p3, "t")
+        assert not err and out["scenarios"] == 2
+        keep = db["patrol_points"].find_one({"_id": ObjectId(p1)})
+        assert keep["name"] == "P1" and keep["aliases"] == ["P3", "Porte B"] and keep["instruction"] == "cadenas"
+        drop = db["patrol_points"].find_one({"_id": ObjectId(p3)})
+        assert drop["merged_into"] == p1 and drop["active"] is False
+        # Doublon retire, trajet recalcule, version incrementee
+        s1 = db["patrol_scenarios"].find_one({"_id": sc["_id"]})
+        assert s1["points"] == [p1, p2] and s1["estimate"]["distance_m"] == 1000 and s1["version"] == 2
+        assert db["patrol_scenarios"].find_one({"_id": other["_id"]})["points"] == [p1, p2]
+        assert P.merge_points(db, p1, p3, "t")[1] == "not_found"      # deja fusionne
+        assert P.merge_points(db, p1, p1, "t")[1] == "meme_point"
+
     def test_ordre_optimal(self):
         # 0 -> 2 -> 1 -> 3 est le plus court (ligne : 0, 2, 1, 3 places a 0, 2, 1, 3)
         pos = [0, 2, 1, 3]

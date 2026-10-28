@@ -198,6 +198,18 @@
                                 <input type="text" id="pt-pt-name" class="pt-input" placeholder="Nom du point" maxlength="80">
                             </div>
                             <div class="pt-scroll pt-editor-body">
+                                <div class="pt-merge" id="pt-pt-merge" hidden>
+                                    <div class="pt-merge-title"><span class="material-symbols-outlined">merge</span> Fusionner avec un autre point</div>
+                                    <input type="search" id="pt-mg-search" class="pt-input" placeholder="Rechercher (ou cliquez le point sur la carte)">
+                                    <select id="pt-mg-other" class="pt-input" size="6"></select>
+                                    <div id="pt-mg-keep" class="pt-mg-keep" hidden></div>
+                                    <div class="pt-hint">Le point garde reste affiche partout (nom, position, reglages). Le nom de l'autre devient un de ses autres noms : les propositions placeront encore les fiches qui le citent. Tous les scenarios passent sur le point garde.</div>
+                                    <div class="pt-row">
+                                        <button type="button" class="btn" id="pt-mg-cancel">Annuler</button>
+                                        <span class="pt-spacer"></span>
+                                        <button type="button" class="btn btn-primary" id="pt-mg-go" disabled><span class="material-symbols-outlined">merge</span> Fusionner</button>
+                                    </div>
+                                </div>
                                 <div class="pt-hint" id="pt-pt-pos"></div>
                                 <div class="pt-grid2">
                                     <label class="pt-field">Rayon de validation (m)<input type="number" id="pt-pt-radius" class="pt-input" min="5" max="300"></label>
@@ -211,6 +223,7 @@
                             </div>
                             <div class="pt-foot pt-row">
                                 <button type="button" class="btn pt-danger" id="pt-pt-toggle">Desactiver</button>
+                                <button type="button" class="btn" id="pt-pt-merge-open" title="Deux points pour le meme lieu : n'en garder qu'un"><span class="material-symbols-outlined">merge</span> Fusionner</button>
                                 <span class="pt-spacer"></span>
                                 <button type="button" class="btn btn-primary" id="pt-pt-save"><span class="material-symbols-outlined">save</span> Enregistrer</button>
                             </div>

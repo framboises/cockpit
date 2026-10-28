@@ -98,6 +98,12 @@
 .pt-editor-head input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
 .pt-editor-head input[type=color]::-webkit-color-swatch { border: 0; border-radius: 6px; }
 .pt-editor-head input[type=color]::-moz-color-swatch { border: 0; border-radius: 6px; }
+.pt-merge { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #fcd34d; background: #fffbeb; border-radius: 10px; }
+.pt-merge[hidden], .pt-mg-keep[hidden] { display: none; }
+.pt-merge-title { display: flex; align-items: center; gap: 6px; font-weight: 700; color: #92400e; }
+.pt-merge select[size] { padding: 4px; }
+.pt-mg-keep { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.pt-mg-keep-title { font-size: 13px; font-weight: 600; color: #334155; }
 .pt-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .pt-step { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; cursor: grab; }
 .pt-step.dragging { opacity: .4; }
