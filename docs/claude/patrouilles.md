@@ -604,6 +604,21 @@ troncons ; arret injoignable dans le mode (no_route) retire.
   pendant 25 s a HH:MM, pres de <point> » ; bilan de fin « n depassement(s) de vitesse (max, pointe) ».
   Page : ligne vitesse dans Suivi et Historique.
 
+### Resume d'une patrouille passee (28/10/2026)
+
+- Clic sur une patrouille (Suivi, Historique) : fenetre de resume (`openRun` : fiche de la patrouille si
+  elle existe, sinon le bloc seul). Bloc `patrol_fiche_map.js` (aussi dans la fiche de l'accueil) :
+  **parcours effectue** (bleu ; orange pointille pendant une pause / intervention ; trajet prevu en
+  pointille gris), distance parcourue, photos des points (vignettes + popup du point), depassements de
+  vitesse (points rouges), constats terrain (marqueurs orange, liste, lien `/declarations?id=`).
+- `/api/pcorg-patrol/<run>` ajoute `trace` (`patrols.run_trace` : `anoloc_positions` de
+  `field:<device>` entre depart et fin, 2 000 points au plus, segments coupes aux trous de plus de 5 min,
+  `pause`) et `constats` (`run_constats`). `pub_run` : `constats_n`, `pauses`.
+- Avant le 28/10 la trace etait tres creuse : profil GPS « normal », coupe application en arriere-plan.
+  Desormais **profil `high` pendant toute patrouille en cours** (avant : seulement avec vitesse max).
+  Hors reseau, seule la derniere position est rejouee (`flushPositionBuffer`) : trou dans la trace.
+  Positions simulees (mode test) jamais enregistrees : pas de trace en essai simule.
+
 ### Livraison 2 : planifications (27/10/2026)
 
 - `patrol_plans {name, scenario_id, target, enabled, launch {rule: span_start | every, every_min},

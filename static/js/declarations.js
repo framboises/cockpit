@@ -336,7 +336,8 @@ if (typeof window.getCurrentEventYear !== "function") {
     canTreat = !!d.can_treat;
     $("dc-p-title").textContent = d.ref || "Constat";
     $("dc-p-sub").textContent = fmtDate(d.created_at) + " - " + (d.device_name || "") +
-      (d.group_label ? " (" + d.group_label + ")" : "");
+      (d.group_label ? " (" + d.group_label + ")" : "") +
+      (d.patrol ? " - pendant la patrouille " + (d.patrol.name || "") : "");
     var body = $("dc-p-body");
     body.textContent = "";
 
@@ -675,6 +676,9 @@ if (typeof window.getCurrentEventYear !== "function") {
     wire();
     initMap();
     load();
+    // Lien direct vers un constat (resume d'une patrouille : /declarations?id=)
+    var want = new URLSearchParams(window.location.search).get("id");
+    if (want) openDetail(want);
     setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);
     // Conversation ouverte : relue plus souvent que la liste
     setInterval(refreshDetail, 6000);

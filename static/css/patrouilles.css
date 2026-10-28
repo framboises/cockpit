@@ -202,6 +202,9 @@
   letter-spacing: .4px; color: #64748b; font-weight: 700; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
 .pt-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
 .pt-table tr:last-child td { border-bottom: 0; }
+.pt-table tr.pt-row-click { cursor: pointer; }
+.pt-table tr.pt-row-click:hover td { background: #f1f5f9; }
+.pt-run { cursor: pointer; }
 .pt-table tbody tr:hover td { background: #f8fbff; }
 .pt-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pt-table .pt-chip.test { border-color: #fdba74; color: #c2410c; background: #fff7ed; }

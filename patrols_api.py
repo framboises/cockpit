@@ -508,7 +508,12 @@ def pcorg_patrol_view(run_id):
         return _err("not_found", 404)
     dev = db["field_devices"].find_one({"_id": P._oid(run.get("device_id"))}, {"name": 1, "last_position": 1, "status": 1}) \
         if run.get("device_id") else None
-    return jsonify({"ok": True, "run": P.pub_run(run, dev)})
+    out = P.pub_run(run, dev)
+    # Parcours reellement effectue (positions de la tablette) et constats
+    # deposes pendant la patrouille : resume sur carte
+    out["trace"] = P.run_trace(db, run)
+    out["constats"] = P.run_constats(db, run_id)
+    return jsonify({"ok": True, "run": out})
 
 
 @patrols_bp.route("/api/patrols/runs/<run_id>/cancel", methods=["POST"])

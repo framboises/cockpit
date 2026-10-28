@@ -737,8 +737,9 @@
     var status = state.patrolStatus || "patrouille";
     var critical = status === "intervention" || status === "sur_place" || state.sosInFlight;
     if (critical) return "high";
-    // Patrouille avec vitesse maximale : positions frequentes pour mesurer la vitesse
-    if (typeof _patrol !== "undefined" && _patrol.run && _patrol.run.state === "running" && _patrol.run.max_speed_kmh) return "high";
+    // Patrouille en cours : positions frequentes, meme application en arriere-plan
+    // (vitesse maximale, parcours effectue du resume de la patrouille)
+    if (typeof _patrol !== "undefined" && _patrol.run && _patrol.run.state === "running") return "high";
     // App en background sans statut critique : pas besoin de GPS continu
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return "paused";
     if (status === "pause" || status === "fin_intervention") return "low";
@@ -2590,7 +2591,7 @@
     if (t) t.textContent = on ? "Mes constats" : "Missions";
     if (on) pollDeclarations(true);
     if (on) {
-      if (_avail.tab === "avail") _avail.tab = "mine";
+      if (_avail.tab !== "mine") _avail.tab = "mine";
       var sb = $("status-bar");
       if (sb) sb.hidden = true;
       var eb = $("engage-banner");
@@ -2697,11 +2698,13 @@
     });
   }
 
-  function openDeclareModal(pos) {
+  // openDeclareModal(pos?, photos?, text?) : photos [Blob] deja prises (appareil
+  // photo de l'application, bouton "Constat terrain"), texte pre-rempli.
+  function openDeclareModal(pos, photos, text) {
     var modal = $("declare-modal");
     if (!modal) return;
     _decl.photos.forEach(function (p) { try { URL.revokeObjectURL(p.url); } catch (e) {} });
-    _decl.photos = [];
+    _decl.photos = (photos || []).slice(0, DECL_MAX_PHOTOS).map(function (b) { return { blob: b, url: URL.createObjectURL(b) }; });
     _decl.priority = "normale";
     _decl.token = newClientKey();
     var urg = $("declare-urgency");
@@ -2710,7 +2713,13 @@
       b.setAttribute("aria-checked", b.dataset.val === _decl.priority ? "true" : "false");
     });
     var txt = $("declare-text");
-    if (txt) txt.value = "";
+    if (txt) txt.value = text || "";
+    var hint = $("declare-patrol");
+    if (hint) {
+      var onPatrol = !state.declarant && typeof _patrol !== "undefined" && _patrol.run;
+      hint.hidden = !onPatrol;
+      if (onPatrol) hint.textContent = "Rattache a la patrouille " + (_patrol.run.name || "en cours") + " (visible dans son resume)";
+    }
     var msg = $("declare-msg");
     if (msg) { msg.textContent = ""; msg.className = "fiche-create-msg"; }
     declSetPos(Array.isArray(pos) && pos.length >= 2 ? pos : null);
@@ -2723,30 +2732,40 @@
   var DECL_STATE_CLASS = { envoyee: "", vue: "", prise_en_charge: "is-taken", traitee: "is-done", classee: "is-done" };
   var _declPollAt = 0;
 
+  // Toute tablette suit ses constats (28/10/2026) : la declarante dans la
+  // liste "Mes constats" (badge = constats), les autres dans l'onglet
+  // Constats du panneau Missions (relu moins souvent).
   function pollDeclarations(force) {
-    if (!state.declarant) return;
-    if (!force && Date.now() - _declPollAt < 8000) return;
+    if (!force && Date.now() - _declPollAt < (state.declarant ? 8000 : 30000)) return;
     _declPollAt = Date.now();
     fetchWithTimeout("/field/declarations", { headers: { "Accept": "application/json" }, cache: "no-store" }, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d || !d.ok) return;
         state.declarations = d.declarations || [];
-        var badge = $("missions-badge");
         var active = state.declarations.filter(function (x) {
           return x.field_state === "envoyee" || x.field_state === "vue" || x.field_state === "prise_en_charge";
         }).length;
         // Messages du PC non lus : prioritaires sur le badge
         var unread = state.declarations.filter(function (x) { return x.field_unread > 0; });
         var nUnread = unread.reduce(function (s, x) { return s + x.field_unread; }, 0);
-        if (badge) {
-          badge.textContent = String(nUnread || active);
-          badge.hidden = !(nUnread || active);
-          badge.classList.toggle("is-msg", nUnread > 0);
+        state.declUnread = nUnread;
+        if (state.declarant) {
+          var badge = $("missions-badge");
+          if (badge) {
+            badge.textContent = String(nUnread || active);
+            badge.hidden = !(nUnread || active);
+            badge.classList.toggle("is-msg", nUnread > 0);
+          }
+        } else {
+          _setTabCount("missions-tab-decl-count", nUnread || active);
+          var tc = $("missions-tab-decl-count");
+          if (tc) tc.classList.toggle("is-msg", nUnread > 0);
+          updateMissionsBadge();
         }
         declNotifyNew(unread);
         var p = $("missions-panel");
-        if (p && !p.hidden) renderMissionsList();
+        if (p && !p.hidden) { if (state.declarant) renderMissionsList(); else if (_avail.tab === "decl") renderOwnDeclarations(); }
         // Constat ouvert depuis une notification (/field?constat=<id>)
         if (state.pendingConstat) {
           var want = state.pendingConstat;
@@ -2779,7 +2798,15 @@
     }
     try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) { /* non supporte */ }
     var x = fresh[0];
-    toast("Le PC vous ecrit sur " + (x.ref || "un constat") + " - ouvrez Mes constats", "warn");
+    toast("Le PC vous ecrit sur " + (x.ref || "un constat") + " - ouvrez " + (state.declarant ? "Mes constats" : "Missions > Constats"), "warn");
+  }
+
+  // Onglet Constats du panneau Missions (tablette non declarante)
+  function renderOwnDeclarations() {
+    var list = $("missions-decl-list");
+    if (!list) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+    renderDeclarationsList(list);
   }
 
   function renderDeclarationsList(list) {
@@ -2787,7 +2814,8 @@
     if (!items.length) {
       var empty = document.createElement("div");
       empty.className = "inbox-empty";
-      empty.textContent = "Aucun constat. Touchez « Declarer » pour signaler un probleme.";
+      empty.textContent = state.declarant ? "Aucun constat. Touchez « Declarer » pour signaler un probleme."
+        : "Aucun constat. Camera > Constat terrain, ou appui long sur la carte.";
       list.appendChild(empty);
       return;
     }
@@ -3018,11 +3046,15 @@
     var token = _decl.token || newClientKey();
     _decl.photos = [];   // les blobs restent tenus par `photos`
     closeDeclareModal();
+    // Patrouille en cours : le constat lui est rattache, meme rejoue plus tard
+    // par la file hors ligne
+    var runId = (typeof _patrol !== "undefined" && _patrol.run) ? _patrol.run.run_id : "";
 
     if (!photos.length) {
       var payload = { text: text, priority: _decl.priority, client_token: token };
       if (p) { payload.lat = p[0]; payload.lng = p[1]; }
       if (carroye) payload.carroye = carroye;
+      if (runId) payload.patrol_run = runId;
       queuedJsonPost("/field/declarations", payload, "constat").then(function (data) {
         if (!data) return;
         if (data.queued) { toast("Hors ligne : constat envoye des le retour du reseau", "warn"); return; }
@@ -3035,6 +3067,7 @@
     var fields = { text: text, priority: _decl.priority, client_token: token };
     if (p) { fields.lat = String(p[0]); fields.lng = String(p[1]); }
     if (carroye) fields.carroye = carroye;
+    if (runId) fields.patrol_run = runId;
     var files = photos.map(function (ph, i) { return { blob: ph.blob, name: "photo_" + (i + 1) + ".jpg", fieldName: "photos" }; });
     function release() { photos.forEach(function (ph) { try { URL.revokeObjectURL(ph.url); } catch (e) {} }); }
     function queue() {
@@ -3640,7 +3673,7 @@
           state.declarant = !!data.declarant;     // groupe modifie par un admin
           applyDeclarantMode();
         }
-        if (state.declarant) pollDeclarations();
+        pollDeclarations();   // declarante 8 s, autres 30 s
         // Acces piste des itineraires : case du groupe de balises, lue a chaud
         if (data.hasOwnProperty("route_piste")) state.routePiste = !!data.route_piste;
         state.selfClose = !!data.self_close;
@@ -4158,7 +4191,7 @@
                              : "terminee (" + prevId + ")");
       // Patrouille en cours : ecran maintenu allume sans limite (recalcule apres mise a jour)
       setTimeout(syncWakeLockWithStatus, 0);
-      // Vitesse maximale : GPS frequent pendant la patrouille (recalcule apres mise a jour)
+      // GPS frequent pendant la patrouille : vitesse, parcours effectue (recalcule apres mise a jour)
       setTimeout(refreshGpsProfile, 0);
     }
     if (!run && _speed.ep && _patrol.run) { _speed.ep.end = Date.now(); closeSpeeding(_patrol.run); }
@@ -4384,6 +4417,8 @@
     if (nx && run.state === "running" && state.testMode && viaLeft(nx.step).length) {
       btn("", "alt_route", "Aller au point de passage", function () { var v = viaLeft(nx.step)[0]; if (v) setSimPosition([v.lat, v.lng]); });
     }
+    // Constat terrain en cours de ronde : rattache a la patrouille (resume, fiche)
+    btn("patrol-constat", "report", "Constat", function () { openDeclareModal(); });
     btn("", "flag", nx ? "Terminer" : "Fermer", function () { patrolFinish(); });
     card.appendChild(acts);
 
@@ -5838,12 +5873,15 @@
     if (!badge) return;
     if (state.declarant) return;   // badge des constats : pollDeclarations
     var n = (state.fiches && state.fiches.length) || 0;
-    if (n > 0) {
-      badge.textContent = String(n);
+    // Message du PC sur un de mes constats : compte et couleur du badge
+    var nMsg = state.declUnread || 0;
+    if (n + nMsg > 0) {
+      badge.textContent = String(n + nMsg);
       badge.hidden = false;
     } else {
       badge.hidden = true;
     }
+    badge.classList.toggle("is-msg", nMsg > 0);
     _setTabCount("missions-tab-mine-count", n);
   }
 
@@ -5869,15 +5907,19 @@
   }
 
   function setMissionsTab(tab) {
-    _avail.tab = tab === "avail" ? "avail" : "mine";
+    _avail.tab = (tab === "avail" || tab === "decl") ? tab : "mine";
     var isAvail = _avail.tab === "avail";
-    var tMine = $("missions-tab-mine"), tAvail = $("missions-tab-avail");
-    if (tMine) { tMine.classList.toggle("active", !isAvail); tMine.setAttribute("aria-selected", String(!isAvail)); }
-    if (tAvail) { tAvail.classList.toggle("active", isAvail); tAvail.setAttribute("aria-selected", String(isAvail)); }
-    var lMine = $("missions-list"), lAvail = $("missions-avail-list");
-    if (lMine) lMine.hidden = isAvail;
-    if (lAvail) lAvail.hidden = !isAvail;
-    if (isAvail) {
+    ["mine", "avail", "decl"].forEach(function (k) {
+      var on = _avail.tab === k;
+      var t = $("missions-tab-" + k);
+      if (t) { t.classList.toggle("active", on); t.setAttribute("aria-selected", String(on)); }
+      var l = $(k === "mine" ? "missions-list" : "missions-" + k + "-list");
+      if (l) l.hidden = !on;
+    });
+    if (_avail.tab === "decl") {
+      renderOwnDeclarations();
+      pollDeclarations(true);
+    } else if (isAvail) {
       if (_avail.loaded) renderAvailableMissions();
       loadAvailableMissions();
     } else {
@@ -6759,6 +6801,13 @@
     tiles.className = "capture-chooser-tiles";
     tiles.appendChild(tile("photo_camera", "Photo", "1 a 5 photos", function () { openCameraModal(opts); }));
     tiles.appendChild(tile("qr_code_scanner", "Scan", "QR / code-barres", function () { openScanModal(opts); }));
+    // Constat terrain (degat, reparation a prevoir) : photos + description,
+    // suivi par le PC sur la page Constats terrain ; pas depuis une fiche
+    if (!(opts && opts.ficheId)) {
+      var ct = tile("report", "Constat terrain", "Signaler un degat, une reparation", function () { openDeclareModal(); });
+      ct.classList.add("capture-tile-wide");
+      tiles.appendChild(ct);
+    }
     box.appendChild(tiles);
 
     var cancel = document.createElement("button");
@@ -7018,6 +7067,7 @@
 
   function refreshComposeChips() {
     var showChips = !_cam.attachToFiche;
+    if (_cam.constatBtn) _cam.constatBtn.hidden = !!_cam.attachToFiche;
     if (_cam.catRowEl) _cam.catRowEl.hidden = !showChips;
     if (_cam.urgRowEl) _cam.urgRowEl.hidden = !showChips;
     // Une tablette categorisee ne cree de fiche que dans sa categorie ; une
@@ -7382,7 +7432,21 @@
     sendBtn.appendChild(document.createTextNode(" Envoyer"));
     sendBtn.addEventListener("click", sendCapturedPhotos);
 
+    // Ces photos deviennent un constat terrain (formulaire du constat : texte,
+    // priorite, position), au lieu d'une fiche
+    var constatBtn = document.createElement("button");
+    constatBtn.className = "field-camera-btn field-camera-btn-constat";
+    constatBtn.appendChild(_camIcon("report"));
+    constatBtn.appendChild(document.createTextNode(" Constat terrain"));
+    constatBtn.addEventListener("click", function () {
+      var blobs = _cam.photos.map(function (p) { return p.blob; });
+      var text = _cam.commentEl ? _cam.commentEl.value.trim() : "";
+      closeCameraModal();
+      openDeclareModal(null, blobs, text);
+    });
+
     btnRow.appendChild(recaptureBtn);
+    btnRow.appendChild(constatBtn);
     btnRow.appendChild(sendBtn);
 
     compose.appendChild(catRow);
@@ -7422,6 +7486,7 @@
     _cam.attachLabel = attachLabel;
     _cam.sendBtn = sendBtn;
     _cam.recaptureBtn = recaptureBtn;
+    _cam.constatBtn = constatBtn;
   }
 
   // =====================================================================
@@ -9369,6 +9434,8 @@
     var tabMine = $("missions-tab-mine"), tabAvail = $("missions-tab-avail");
     if (tabMine) tabMine.addEventListener("click", function () { setMissionsTab("mine"); });
     if (tabAvail) tabAvail.addEventListener("click", function () { setMissionsTab("avail"); });
+    var tabDecl = $("missions-tab-decl");
+    if (tabDecl) tabDecl.addEventListener("click", function () { setMissionsTab("decl"); });
     $("btn-sos").addEventListener("click", triggerSos);
 
     // Mode declarant
@@ -9662,6 +9729,8 @@
       if (state.declarant) openDeclareModal(ll);
       else openCreateFicheModal(ll);
     });
+    // Toute tablette depose aussi des constats terrain (degat, reparation...)
+    if (!state.declarant) mkItem("report", "Creer un constat terrain ici", function () { openDeclareModal(ll); });
     mkItem("navigation", "Itineraire vers ce point", function () {
       openItineraryMenu(ll, null);
     });

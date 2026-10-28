@@ -10,9 +10,15 @@ Cas d'usage : cellule d'appui prestataire qui patrouille et signale dégâts, pr
 
 Cycle : `nouvelle` → `en_suivi` → `transformee` (fiche liée) | `classee` (motif obligatoire, réouvrable). Côté tablette (`_field_state`) : Envoyé / Vu par le PC / Pris en charge / **Traité** (fiche liée close) / Classé. Les notes internes du PC ne sont pas montrées au déclarant.
 
+### Toutes les tablettes (28/10/2026)
+
+Toute tablette enrôlée dépose et suit SES constats (plus de refus `not_declarant`) ; le mode déclarant reste celui des tablettes qui ne font QUE des constats. Tablette normale : tuile « Constat terrain » du choix Caméra (Photo / Scan, pas depuis une fiche), bouton « Constat terrain » après la prise de vue (photos et commentaire repris dans le formulaire du constat), « Créer un constat terrain ici » à l'appui long sur la carte, bouton « Constat » de la carte de patrouille ; suivi dans l'onglet **Constats** du panneau Missions (relu toutes les 30 s, messages du PC non lus en violet sur l'onglet et le badge Missions).
+
+Pendant une patrouille : `patrol_run_id` / `patrol_name` (patrouille envoyée par la tablette `patrol_run`, vérifiée comme sienne, sinon celle en cours), `patrol_runs.constats_n` +1 (bilan « n constat(s) terrain »), entrée « Constat terrain C-… : texte » avec les photos dans la fiche de la patrouille (`patrols.note_constat`). `_pub.patrol {run_id, name}` ; page `/declarations?id=<id>` ouvre le constat.
+
 ### Routes
 
-- Tablette (`field_token_required`, refus `403 not_declarant` hors groupe déclarant ; **CSRF exemptée sur les deux POST seulement**, dans `app.py`) : `POST /field/declarations` (multipart ou JSON, 0-5 photos, idempotent `client_token` via `field._claim_client_request` kind `decl`), `GET /field/declarations` (100 derniers), `GET /field/declarations/<id>`, `POST /field/declarations/<id>/comment` (complément texte/photo, refusé si classé).
+- Tablette (`field_token_required`, toute tablette ; **CSRF exemptée sur les deux POST seulement**, dans `app.py`) : `POST /field/declarations` (multipart ou JSON, 0-5 photos, idempotent `client_token` via `field._claim_client_request` kind `decl`), `GET /field/declarations` (100 derniers), `GET /field/declarations/<id>`, `POST /field/declarations/<id>/comment` (complément texte/photo, refusé si classé).
 - Cockpit (user ; page dans `PAGE_REGISTRY` id `declarations`, contrôlée par « Pages accessibles ») : `GET /declarations`, `GET /api/declarations?status=a_traiter|nouvelle|en_suivi|transformee|classee&q=&days=` (500 max, `counts` par état), `GET /api/declarations/<id>` (+ `prefill` pour l'assistant), `POST …/status`, `POST …/note`, `POST …/link {fiche_id}`.
 - **Droit** : `can_convert_declaration` (« Traiter les constats terrain », Configuration > Groupes ; aucun groupe ne l'a par défaut, admin toujours) — `app._user_can_treat_declaration`. Sans lui : consultation seule. Transformer exige en plus `can_create_fiche` (vérifié par `/api/pcorg/create`).
 

@@ -1713,6 +1713,9 @@ def _bilan(run, now):
         parts.append("%d depassement%s de vitesse (max %d km/h%s)" % (
             len(sp), "s" if len(sp) > 1 else "", limit,
             ", pointe %d km/h" % round(max(s.get("max_kmh") or 0 for s in sp)) if sp else ""))
+    nc = int(run.get("constats_n") or 0)
+    if nc:
+        parts.append("%d constat%s terrain" % (nc, "s" if nc > 1 else ""))
     return ", ".join(parts), c
 
 
@@ -2091,6 +2094,82 @@ def tick(db, now=None):
 # Vues
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Parcours effectue et constats terrain d'une patrouille
+# ---------------------------------------------------------------------------
+
+TRACE_MAX_POINTS = 2000
+TRACE_GAP_S = 300        # trou de plus de 5 min (reseau, GPS) : trace coupee
+
+
+def run_trace(db, run, now=None):
+    """Positions reelles de la tablette du depart a la fin de la patrouille
+    (`anoloc_positions`, ecrites par /field/position ; les positions simulees
+    du mode test n'y sont pas). Segments coupes aux trous de plus de 5 min,
+    `pause` = pendant une intervention. Retourne {segments, distance_m, n}."""
+    started = _aware(run.get("started_at"))
+    if not isinstance(started, datetime) or not run.get("device_id"):
+        return {"segments": [], "distance_m": 0, "n": 0}
+    end = _aware(run.get("ended_at")) or now or _now()
+    cur = db["anoloc_positions"].find(
+        {"device_id": "field:" + str(run["device_id"]), "collected_at": {"$gte": started, "$lte": end}},
+        {"lat": 1, "lng": 1, "collected_at": 1, "_id": 0}).sort("collected_at", 1).limit(20000)
+    pts = [(p["lat"], p["lng"], _aware(p["collected_at"])) for p in cur
+           if p.get("lat") is not None and p.get("lng") is not None and isinstance(p.get("collected_at"), datetime)]
+    n = len(pts)
+    dist = 0.0
+    for a, b in zip(pts, pts[1:]):
+        if (b[2] - a[2]).total_seconds() <= TRACE_GAP_S:
+            dist += haversine_m(a[0], a[1], b[0], b[1])
+    if n > TRACE_MAX_POINTS:
+        k = math.ceil(n / TRACE_MAX_POINTS)
+        pts = pts[::k] + ([pts[-1]] if (n - 1) % k else [])
+    pauses = [(_aware(p["start"]), _aware(p.get("end")) or end) for p in run.get("pauses") or [] if p.get("start")]
+    segs, last = [], None
+    for lat, lng, t in pts:
+        paused = any(a <= t <= b for a, b in pauses)
+        gap = last is not None and (t - last).total_seconds() > TRACE_GAP_S
+        if not segs or gap or segs[-1]["pause"] != paused:
+            seg = {"pause": paused, "points": []}
+            if segs and not gap:
+                seg["points"].append(segs[-1]["points"][-1])   # pas de trou au changement
+            segs.append(seg)
+        segs[-1]["points"].append([round(lat, 6), round(lng, 6), int(t.timestamp())])
+        last = t
+    return {"segments": segs, "distance_m": round(dist), "n": n}
+
+
+def run_constats(db, run_id):
+    """Constats terrain deposes pendant la patrouille (declarations.py)."""
+    out = []
+    for d in db["declarations"].find({"patrol_run_id": run_id}).sort("created_at", 1).limit(100):
+        gps = d.get("gps") or {}
+        out.append({"id": d["_id"], "ref": d.get("ref"), "text": (d.get("text") or "")[:300],
+                    "at": _iso(d.get("created_at")), "lat": gps.get("lat"), "lng": gps.get("lng"),
+                    "priority": d.get("priority"), "status": d.get("status"),
+                    "photos": [{"photo": p.get("photo"), "thumb": p.get("thumb")}
+                               for p in (d.get("photos") or [])[:5]]})
+    return out
+
+
+def note_constat(db, run, decl):
+    """Constat depose pendant la patrouille : compte au bilan et entree, avec
+    ses photos, dans la fiche de main courante de la patrouille."""
+    db["patrol_runs"].update_one({"_id": run["_id"]}, {"$inc": {"constats_n": 1}})
+    if not run.get("fiche_id"):
+        return
+    photos = [{"photo": p.get("photo"), "thumb": p.get("thumb")} for p in decl.get("photos") or []]
+    extra = {"photos": photos, "photo": photos[0]["photo"], "thumb": photos[0]["thumb"]} if photos else {}
+    try:
+        PH.append_entry(db["pcorg"], run["fiche_id"], PH.make_entry(
+            "field:" + (decl.get("device_name") or run.get("device_name") or "?"),
+            "Constat terrain %s : %s" % (decl.get("ref") or "", decl.get("text") or ""),
+            origin="field", ts=decl.get("created_at") or _now(), **extra),
+            inc_bounce=True, extra_filter={"status_code": {"$ne": 10}})
+    except Exception as e:
+        logger.warning("patrouille %s : constat %s non note (%s)", run["_id"], decl.get("ref"), e)
+
+
 def _pub_steps(run):
     pts = {p["point_id"]: p for p in (run.get("scenario") or {}).get("points") or []}
     out = []
@@ -2135,6 +2214,8 @@ def pub_run(run, device=None):
         "max_speed_kmh": sc.get("max_speed_kmh"),
         "speedings": [{"at": _iso(s.get("start")), "duration_s": s.get("duration_s"), "max_kmh": s.get("max_kmh"),
                        "lat": s.get("lat"), "lng": s.get("lng")} for s in run.get("speedings") or []],
+        "constats_n": int(run.get("constats_n") or 0),
+        "pauses": [{"start": _iso(p.get("start")), "end": _iso(p.get("end"))} for p in run.get("pauses") or []],
     }
     if device is not None:
         pos = device.get("last_position") or {}

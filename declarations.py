@@ -201,6 +201,7 @@ def _pub(d, fiche=None, full=False):
         "cockpit_unread": int(d.get("cockpit_unread") or 0),
         "last_message_at": _iso(d.get("last_message_at")),
         "report_state": (d.get("report") or {}).get("state") or "none",
+        "patrol": {"run_id": d["patrol_run_id"], "name": d.get("patrol_name")} if d.get("patrol_run_id") else None,
     }
     st_key, st_label = _field_state(d, fiche)
     out["field_state"] = st_key
@@ -215,13 +216,21 @@ def _pub(d, fiche=None, full=False):
 
 
 # ---------------------------------------------------------------------------
-# Tablette (mode declarant)
+# Tablette : toute tablette enrolee depose et suit SES constats (28/10/2026 ;
+# avant : groupes en mode declarant seulement). Le mode declarant reste
+# celui des tablettes qui ne font QUE des constats.
 # ---------------------------------------------------------------------------
 
-def _require_declarant(db, device):
-    if not F._device_declarant(db, device):
-        return jsonify({"ok": False, "error": "not_declarant"}), 403
-    return None
+def _patrol_of(db, device, run_id=None):
+    """Patrouille de rattachement : celle que la tablette indique (constat
+    rejoue par la file hors ligne apres la fin), sinon celle en cours."""
+    dev_id = str(device["_id"])
+    q = {"device_id": dev_id}
+    if isinstance(run_id, str) and 0 < len(run_id.strip()) <= 64:
+        q["_id"] = run_id.strip()
+    else:
+        q["state"] = {"$in": ["running", "paused"]}
+    return db["patrol_runs"].find_one(q, {"scenario.name": 1, "fiche_id": 1, "device_name": 1, "state": 1})
 
 
 def _form_or_json():
@@ -238,9 +247,6 @@ def field_declaration_create():
     device = request.device
     db = _db()
     _ensure_indexes(db)
-    err = _require_declarant(db, device)
-    if err:
-        return err
     data, files = _form_or_json()
     text = _clean_text(data.get("text"))
     if not text:
@@ -297,9 +303,16 @@ def field_declaration_create():
         "report": {"state": "none"},
         "client_token": token or None,
     }
+    run = _patrol_of(db, device, data.get("patrol_run"))
+    if run:
+        doc["patrol_run_id"] = run["_id"]
+        doc["patrol_name"] = (run.get("scenario") or {}).get("name")
     db[COL].insert_one(doc)
     F._finish_client_request(db, device["_id"], "decl", token, {"id": doc["_id"], "ref": doc["ref"]})
-    return jsonify({"ok": True, "id": doc["_id"], "ref": doc["ref"]})
+    if run:
+        import patrols as P
+        P.note_constat(db, run, doc)
+    return jsonify({"ok": True, "id": doc["_id"], "ref": doc["ref"], "patrol": bool(run)})
 
 
 @declarations_bp.route("/field/declarations", methods=["GET"])
@@ -307,9 +320,6 @@ def field_declaration_create():
 def field_declarations_mine():
     device = request.device
     db = _db()
-    err = _require_declarant(db, device)
-    if err:
-        return err
     docs = list(db[COL].find({"device_id": str(device["_id"])})
                 .sort("created_at", DESCENDING).limit(FIELD_LIST_MAX))
     fiches = _fiches_by_id(db, [d.get("fiche_id") for d in docs])
@@ -328,10 +338,7 @@ def _own_declaration(db, device, decl_id):
 def field_declaration_detail(decl_id):
     device = request.device
     db = _db()
-    err = _require_declarant(db, device)
-    if err:
-        return err
-    d = _own_declaration(db, device, decl_id)
+    d =_own_declaration(db, device, decl_id)
     if not d:
         return jsonify({"ok": False, "error": "not_found"}), 404
     fiche = _fiches_by_id(db, [d.get("fiche_id")]).get(d.get("fiche_id"))
@@ -351,9 +358,6 @@ def field_declaration_comment(decl_id):
     """Complement du declarant (precision, photo "apres")."""
     device = request.device
     db = _db()
-    err = _require_declarant(db, device)
-    if err:
-        return err
     d = _own_declaration(db, device, decl_id)
     if not d:
         return jsonify({"ok": False, "error": "not_found"}), 404

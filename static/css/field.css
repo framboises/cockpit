@@ -622,6 +622,9 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   background: #2563eb; color: #fff; border-color: #1d4ed8;
 }
 .field-camera-btn-primary:active { background: #1d4ed8; }
+.field-camera-btn-constat { background: #b45309; color: #fff; border-color: #92400e; }
+.field-camera-btn-constat:active { background: #92400e; }
+.field-camera-btn[hidden] { display: none; }
 .field-camera-btn:disabled { opacity: 0.5; pointer-events: none; }
 
 /* Banner de mise a jour PWA : s'affiche quand un nouveau service worker
@@ -688,6 +691,8 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 .capture-chooser-tiles {
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
 }
+.capture-chooser-tiles .capture-tile-wide { grid-column: 1 / -1; border-color: #b45309; }
+.capture-chooser-tiles .capture-tile-wide .capture-tile-icon { color: #f59e0b; }
 .capture-tile {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 18px 12px 14px;
@@ -3409,6 +3414,9 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
 .decl-hist.is-msg { border-left-color: #8b5cf6; background: rgba(139, 92, 246, 0.14); margin-right: 18px; }
 .decl-hist.is-me { margin-left: 18px; }
 #missions-badge.is-msg { background: #7c3aed; }
+.missions-tab-count.is-msg { background: #7c3aed; color: #fff; }
+.declare-patrol { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: rgba(34, 197, 94, 0.14); color: #86efac; font-size: 13px; }
+.declare-patrol[hidden] { display: none; }
 
 /* =====================================================================
    PATROUILLE PROGRAMMEE (patrols.py) : carte flottante sur la carte
@@ -3454,6 +3462,7 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
 }
 .patrol-actions button .material-symbols-outlined { font-size: 20px; }
 .patrol-actions .patrol-done { background: #16a34a; border-color: #16a34a; color: #fff; }
+.patrol-actions .patrol-constat { border-color: #d97706; color: #fbbf24; }
 .patrol-actions button:disabled { opacity: .5; }
 .patrol-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .patrol-steps li { display: flex; align-items: center; gap: 8px; font-size: 13px; }

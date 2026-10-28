@@ -162,11 +162,18 @@
           Disponibles
           <span class="missions-tab-count" id="missions-tab-avail-count" hidden>0</span>
         </button>
+        <button class="missions-tab" id="missions-tab-decl" role="tab" aria-selected="false" aria-controls="missions-decl-list" data-tab="decl">
+          Constats
+          <span class="missions-tab-count" id="missions-tab-decl-count" hidden>0</span>
+        </button>
       </div>
       <div class="inbox-list" id="missions-list" role="tabpanel" aria-labelledby="missions-tab-mine">
         <div class="inbox-empty">Aucune mission.</div>
       </div>
       <div class="inbox-list" id="missions-avail-list" role="tabpanel" aria-labelledby="missions-tab-avail" hidden>
+        <div class="inbox-empty">Chargement...</div>
+      </div>
+      <div class="inbox-list" id="missions-decl-list" role="tabpanel" aria-labelledby="missions-tab-decl" hidden>
         <div class="inbox-empty">Chargement...</div>
       </div>
     </aside>
@@ -347,6 +354,7 @@
         </button>
       </div>
       <div class="fiche-create-body">
+        <div class="declare-patrol" id="declare-patrol" hidden></div>
         <label class="fiche-create-label">Photos</label>
         <div class="declare-photos" id="declare-photos"></div>
         <input type="file" id="declare-photo-input" accept="image/*" capture="environment" hidden>

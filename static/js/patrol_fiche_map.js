@@ -48,6 +48,22 @@
       ".pfm-ico span{display:flex;width:24px;height:24px;border-radius:50%;color:#fff;font-weight:700;font-size:11px;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);box-sizing:border-box}",
       ".pfm-dev{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px;font-weight:700;color:#1e293b;text-shadow:0 0 3px #fff,0 0 3px #fff}",
       ".pfm-dev i{width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px #2563eb;background:#2563eb;display:inline-block}",
+      ".pfm-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:#475569}",
+      ".pfm-legend span{display:inline-flex;align-items:center;gap:5px}",
+      ".pfm-legend i{display:inline-block;width:18px;height:0;border-top:4px solid #1d4ed8;border-radius:2px}",
+      ".pfm-legend i.est{border-top:3px dashed #94a3b8}",
+      ".pfm-legend i.pause{border-top:4px dotted #d97706}",
+      ".pfm-legend i.dot{width:10px;height:10px;border:0;border-radius:50%}",
+      ".pfm-thumbs{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}",
+      ".pfm-thumbs img{width:54px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1;cursor:zoom-in}",
+      ".pfm-sec{font-weight:700;font-size:13px;margin-top:4px;display:flex;align-items:center;gap:6px}",
+      ".pfm-sec .material-symbols-outlined{font-size:18px;color:#d97706}",
+      ".pfm-constat{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:6px 8px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;font-size:13px}",
+      ".pfm-constat a{font-weight:700;color:#b45309;text-decoration:none}",
+      ".pfm-constat a:hover{text-decoration:underline}",
+      ".pfm-constat .pfm-thumbs{grid-column:1/-1}",
+      ".pfm-cst-ico span{display:flex;width:26px;height:26px;border-radius:7px;background:#d97706;color:#fff;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);box-sizing:border-box;font-size:17px}",
+      ".pfm-pop img{display:block;max-width:220px;max-height:160px;border-radius:6px;margin-top:4px}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -82,6 +98,20 @@
     if (s == null) return "-";
     var m = Math.round(s / 60);
     return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0");
+  }
+
+  function thumbs(photos) {
+    var w = el("div", "pfm-thumbs");
+    photos.forEach(function (p) {
+      if (!p || !(p.thumb || p.photo)) return;
+      var a = el("a");
+      a.href = p.photo || p.thumb; a.target = "_blank"; a.rel = "noopener";
+      var img = el("img");
+      img.src = p.thumb || p.photo; img.alt = "Photo"; img.loading = "lazy";
+      a.appendChild(img);
+      w.appendChild(a);
+    });
+    return w;
   }
 
   function render(container, runId) {
@@ -131,6 +161,11 @@
       var end = r.ended_at ? new Date(r.ended_at) : new Date();
       fact("Duree", mins((end - new Date(r.started_at)) / 1000) + (r.paused_s >= 60 ? " dont " + mins(r.paused_s) + " de pause" : ""));
     }
+    var trace = r.trace || { segments: [], n: 0 };
+    if (r.started_at) fact("Parcouru (GPS)", trace.n > 1 ? km(trace.distance_m) : "aucune position recue");
+    var constats = r.constats || [];
+    if (constats.length) fact("Constats", String(constats.length));
+    if ((r.speedings || []).length) fact("Depassements de vitesse", String(r.speedings.length));
     box.appendChild(facts);
 
     if (total) {
@@ -155,6 +190,23 @@
     wrap.appendChild(grow);
     box.appendChild(wrap);
 
+    var legend = el("div", "pfm-legend");
+    function leg(cls, color, label) {
+      var s = el("span"), i = el("i", cls);
+      if (color) i.style.background = color;
+      s.appendChild(i); s.appendChild(document.createTextNode(label));
+      legend.appendChild(s);
+    }
+    if (trace.n > 1) leg(null, null, "parcours effectue");
+    if (trace.segments.some(function (g) { return g.pause; })) leg("pause", null, "pendant une intervention (pause)");
+    if (est.polyline) leg("est", null, "trajet prevu");
+    if (constats.length) leg("dot", "#d97706", "constat terrain");
+    if ((r.speedings || []).length) leg("dot", "#dc2626", "depassement de vitesse");
+    if (legend.children.length) box.appendChild(legend);
+    if (r.started_at && trace.n < 2) {
+      box.appendChild(el("div", "pfm-sub", "Parcours effectue indisponible : la tablette n'a pas transmis de positions pendant la patrouille (application fermee, hors reseau ou mode test)."));
+    }
+
     var steps = el("div", "pfm-steps");
     (r.steps || []).forEach(function (s, i) {
       var row = el("div", "pfm-step");
@@ -163,31 +215,89 @@
       row.appendChild(n);
       var name = el("span", null, s.name);
       if (s.state === "skipped" && s.comment) name.appendChild(el("span", "pfm-sub", " - " + s.comment));
+      else if (s.comment) name.appendChild(el("span", "pfm-sub", " - " + s.comment));
+      if (s.photo && (s.photo.thumb || s.photo.photo)) name.appendChild(thumbs([s.photo]));
       row.appendChild(name);
       row.appendChild(el("span", "pfm-when", (STEP_LABELS[s.state] || s.state) + (s.at ? " " + hm(s.at) : "") + (s.method === "gps" ? " (GPS)" : "")));
       steps.appendChild(row);
     });
     box.appendChild(steps);
 
+    if (constats.length) {
+      var sec = el("div", "pfm-sec");
+      sec.appendChild(el("span", "material-symbols-outlined", "report"));
+      sec.appendChild(document.createTextNode("Constats terrain pendant la patrouille"));
+      box.appendChild(sec);
+      constats.forEach(function (c) {
+        var row = el("div", "pfm-constat");
+        var a = el("a", null, c.ref || "Constat");
+        a.href = "/declarations?id=" + encodeURIComponent(c.id);
+        a.target = "_blank"; a.rel = "noopener";
+        row.appendChild(a);
+        row.appendChild(el("span", "pfm-when", hm(c.at)));
+        var t = el("div", null, c.text);
+        t.style.gridColumn = "1/-1";
+        row.appendChild(t);
+        if (c.photos && c.photos.length) row.appendChild(thumbs(c.photos));
+        box.appendChild(row);
+      });
+    }
+
     if (typeof L === "undefined") { wrap.remove(); return; }
     setTimeout(function () {
       var map = L.map(mapEl, { zoomControl: true, attributionControl: false });
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxNativeZoom: 19, maxZoom: 21 }).addTo(map);
       var pts = [];
+      var hasTrace = trace.n > 1;
       if (est.polyline) {
         var line = decode6(est.polyline);
         if (line.length > 1) {
-          L.polyline(line, { color: sc.color && /^#[0-9a-fA-F]{6}$/.test(sc.color) ? sc.color : "#2563eb", weight: 4, opacity: 0.75 }).addTo(map);
+          // Avec un parcours effectue, le trajet prevu passe en pointilles
+          L.polyline(line, hasTrace ? { color: "#94a3b8", weight: 3, opacity: 0.9, dashArray: "6 8" }
+                                    : { color: sc.color && /^#[0-9a-fA-F]{6}$/.test(sc.color) ? sc.color : "#2563eb", weight: 4, opacity: 0.75 }).addTo(map);
           pts = pts.concat(line);
         }
       }
+      trace.segments.forEach(function (g) {
+        var ll = g.points.map(function (p) { return [p[0], p[1]]; });
+        if (ll.length < 2) return;
+        var t0 = g.points[0][2], t1 = g.points[g.points.length - 1][2];
+        L.polyline(ll, g.pause ? { color: "#d97706", weight: 4, opacity: 0.9, dashArray: "2 7" }
+                               : { color: "#1d4ed8", weight: 4, opacity: 0.85 })
+          .bindTooltip((g.pause ? "Pendant une intervention : " : "Parcours : ") + hm(t0 * 1000) + " - " + hm(t1 * 1000), { sticky: true })
+          .addTo(map);
+        pts = pts.concat(ll);
+      });
+      (r.speedings || []).forEach(function (s) {
+        if (s.lat == null) return;
+        L.circleMarker([s.lat, s.lng], { radius: 7, color: "#fff", weight: 2, fillColor: "#dc2626", fillOpacity: 1 })
+          .bindTooltip("Depassement : " + Math.round(s.max_kmh || 0) + " km/h a " + hm(s.at) + (s.duration_s ? " pendant " + s.duration_s + " s" : ""))
+          .addTo(map);
+      });
+      constats.forEach(function (c) {
+        if (c.lat == null) return;
+        pts.push([c.lat, c.lng]);
+        var pop = "<div class='pfm-pop'><b>" + esc(c.ref || "Constat") + "</b> - " + esc(hm(c.at)) + "<br>" + esc(c.text) +
+          (c.photos && c.photos[0] ? "<img src='" + esc(c.photos[0].thumb || c.photos[0].photo) + "' alt='Photo'>" : "") +
+          "<br><a href='/declarations?id=" + encodeURIComponent(c.id) + "' target='_blank' rel='noopener'>Ouvrir le constat</a></div>";
+        L.marker([c.lat, c.lng], {
+          icon: L.divIcon({ className: "pfm-cst-ico", html: "<span class='material-symbols-outlined'>report</span>", iconSize: [26, 26], iconAnchor: [13, 13] }),
+          zIndexOffset: 1200,
+        }).bindPopup(pop, { maxWidth: 260 }).addTo(map);
+      });
       (r.steps || []).forEach(function (s, i) {
         if (s.lat == null) return;
         pts.push([s.lat, s.lng]);
-        L.marker([s.lat, s.lng], {
+        var mk = L.marker([s.lat, s.lng], {
           icon: L.divIcon({ className: "pfm-ico", html: "<span style='background:" + (STEP_COLORS[s.state] || "#94a3b8") + "'>" + (i + 1) + "</span>",
                             iconSize: [24, 24], iconAnchor: [12, 12] }),
-        }).bindTooltip(esc(s.name) + " - " + esc(STEP_LABELS[s.state] || s.state) + (s.at ? " " + hm(s.at) : ""), { direction: "top", offset: [0, -10] }).addTo(map);
+        }).bindTooltip(esc(s.name) + " - " + esc(STEP_LABELS[s.state] || s.state) + (s.at ? " " + hm(s.at) : "") +
+                       (s.photo ? " (photo : touchez le point)" : ""), { direction: "top", offset: [0, -10] }).addTo(map);
+        if (s.photo && (s.photo.thumb || s.photo.photo)) {
+          mk.bindPopup("<div class='pfm-pop'><b>" + (i + 1) + ". " + esc(s.name) + "</b> - " + esc(hm(s.at)) +
+            "<a href='" + esc(s.photo.photo || s.photo.thumb) + "' target='_blank' rel='noopener'><img src='" + esc(s.photo.thumb || s.photo.photo) + "' alt='Photo'></a>" +
+            (s.comment ? esc(s.comment) : "") + "</div>", { maxWidth: 260 });
+        }
       });
       var pos = r.position;
       if (pos && pos.lat != null && ["running", "paused", "proposed"].indexOf(r.state) >= 0) {

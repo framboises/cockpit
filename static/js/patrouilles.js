@@ -1767,7 +1767,11 @@
       }
       card.appendChild(act);
     }
-    card.addEventListener("click", function () { focusRun(r); });
+    if (r.constats_n) card.appendChild(el("div", "pt-muted", r.constats_n + " constat" + (r.constats_n > 1 ? "s" : "") + " terrain"));
+    // Clic : carte centree sur la patrouille et resume (parcours effectue,
+    // photos, constats)
+    card.title = "Voir le resume de la patrouille";
+    card.addEventListener("click", function () { focusRun(r); if (r.started_at || r.fiche_id) openRun(r); });
     return card;
   }
 
@@ -1782,7 +1786,21 @@
     return b;
   }
 
+  // Clic sur une patrouille (Suivi, Historique) : resume sur carte (parcours
+  // effectue, photos, constats) et chronologie de sa fiche si elle en a une.
+  function openRun(r) {
+    if (r.fiche_id) { openFiche(r.fiche_id); return; }
+    var body = $("pt-fiche-body");
+    clear(body);
+    $("pt-fiche-title").textContent = "Patrouille : " + (r.scenario.name || "?");
+    $("pt-fiche-home").style.display = "none";
+    $("pt-fiche-modal").hidden = false;
+    if (window.PatrolFicheMap) window.PatrolFicheMap.render(body, r.id);
+    if (r.not_taken_fiche) body.appendChild(ficheLink(r.not_taken_fiche, "Voir la fiche Non prise"));
+  }
+
   function openFiche(id) {
+    $("pt-fiche-home").style.display = "";
     var body = $("pt-fiche-body");
     clear(body);
     body.appendChild(el("div", "pt-hint", "Chargement..."));
@@ -1907,9 +1925,15 @@
         tr.appendChild(el("td", "num", dur != null ? fmtMin(dur) : "-"));
         var tdd = el("td", "pt-muted", x.end_reason || (x.created_by ? "par " + x.created_by : ""));
         if (x.max_speed_kmh && (x.speedings || []).length) tdd.insertBefore(speedLine(x), tdd.firstChild);
+        if (x.constats_n) tdd.appendChild(el("div", null, x.constats_n + " constat" + (x.constats_n > 1 ? "s" : "") + " terrain"));
         var fid = x.fiche_id || x.not_taken_fiche;
         if (fid) { tdd.appendChild(document.createTextNode(" ")); tdd.appendChild(ficheLink(fid, "Fiche")); }
         tr.appendChild(tdd);
+        if (x.started_at || x.fiche_id) {
+          tr.className = "pt-row-click";
+          tr.title = "Voir le resume de la patrouille";
+          tr.addEventListener("click", function () { openRun(x); });
+        }
         list.appendChild(tr);
       });
     }).catch(function (e) { toast("error", errLabel(e)); });

@@ -130,11 +130,43 @@ class TestTablette:
         html = env.client.get("/api/declarations/%s/report/preview" % did).get_data(as_text=True)
         assert "24H MOTOS 2027" in html
 
-    def test_tablette_normale_refusee(self, env):
+    def test_tablette_normale_acceptee(self, env):
+        # Toute tablette enrolee depose et suit ses constats (28/10/2026)
         _as(env.client, "tok-tech")
-        rep = env.client.post("/field/declarations", json={"text": "x"})
-        assert rep.status_code == 403
-        assert rep.get_json()["error"] == "not_declarant"
+        rep = env.client.post("/field/declarations", json={"text": "Grille ouverte", "client_token": "tok-tech-0001"})
+        assert rep.status_code == 200, rep.get_json()
+        assert rep.get_json()["patrol"] is False
+        lst = env.client.get("/field/declarations").get_json()["declarations"]
+        assert [x["text"] for x in lst] == ["Grille ouverte"]
+        assert lst[0]["patrol"] is None
+
+    def test_constat_pendant_une_patrouille(self, env):
+        import patrols as P
+        env.db["pcorg"].insert_one({"_id": "f-pat", "status_code": 1, "comment_history": []})
+        env.db["patrol_runs"].insert_one({"_id": "run-1", "device_id": "dev-tech", "device_name": "Tech 1",
+                                          "state": "running", "fiche_id": "f-pat", "scenario": {"name": "Ronde nord"},
+                                          "steps": [], "pauses": []})
+        _as(env.client, "tok-tech")
+        body = env.client.post("/field/declarations", json={"text": "Cloture coupee", "client_token": "tok-pat-0001"}).get_json()
+        assert body["patrol"] is True
+        d = env.db["declarations"].find_one({"_id": body["id"]})
+        assert (d["patrol_run_id"], d["patrol_name"]) == ("run-1", "Ronde nord")
+        run = env.db["patrol_runs"].find_one({"_id": "run-1"})
+        assert run["constats_n"] == 1
+        hist = env.db["pcorg"].find_one({"_id": "f-pat"})["comment_history"]
+        assert any("Constat terrain C-2026-0001 : Cloture coupee" in (h.get("text") or "") for h in hist)
+        assert [c["ref"] for c in P.run_constats(env.db, "run-1")] == ["C-2026-0001"]
+        assert "1 constat terrain" in P._bilan(run, datetime.now(timezone.utc))[0]
+        # Rejoue par la file hors ligne apres la fin : rattache a la patrouille indiquee
+        env.db["patrol_runs"].update_one({"_id": "run-1"}, {"$set": {"state": "done"}})
+        b2 = env.client.post("/field/declarations", json={"text": "Lampadaire", "client_token": "tok-pat-0002",
+                                                          "patrol_run": "run-1"}).get_json()
+        assert env.db["declarations"].find_one({"_id": b2["id"]})["patrol_run_id"] == "run-1"
+        # Une patrouille d'une autre tablette n'est jamais rattachee
+        _as(env.client, "tok-cap")
+        b3 = env.client.post("/field/declarations", json={"text": "Autre", "client_token": "tok-pat-0003",
+                                                          "patrol_run": "run-1"}).get_json()
+        assert b3["patrol"] is False
 
     def test_liste_et_complement(self, env):
         did = _depose(env).get_json()["id"]

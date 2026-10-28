@@ -426,6 +426,22 @@ class TestExecution:
         active, prop = P.tablet_view(db, db["field_devices"].find_one({"_id": a["_id"]}))
         assert prop is None and active["state"] == "running" and len(active["steps"]) == 3
 
+    def test_trace_effectuee_pauses_et_trous(self, db):
+        t0 = NOW - timedelta(minutes=30)
+        run = {"_id": "r-trace", "device_id": "abc", "started_at": t0, "ended_at": t0 + timedelta(minutes=25),
+               "pauses": [{"start": t0 + timedelta(minutes=5), "end": t0 + timedelta(minutes=8)}]}
+        mins = [0, 1, 2, 3, 6, 7, 9, 10, 20, 21, 40]       # trou 10 -> 20 ; 40 apres la fin
+        db["anoloc_positions"].insert_many([{"device_id": "field:abc", "lat": LAT + 0.001 * i, "lng": LNG,
+                                             "collected_at": t0 + timedelta(minutes=m)} for i, m in enumerate(mins)])
+        db["anoloc_positions"].insert_one({"device_id": "field:autre", "lat": LAT, "lng": LNG, "collected_at": t0})
+        tr = P.run_trace(db, run)
+        assert tr["n"] == 10
+        assert [s["pause"] for s in tr["segments"]] == [False, True, False, False]
+        assert [len(s["points"]) for s in tr["segments"]] == [4, 3, 3, 2]
+        # 8 intervalles de 111 m (le trou de 10 min ne compte pas)
+        assert 850 < tr["distance_m"] < 900
+        assert P.run_trace(db, {"_id": "x", "device_id": "abc"})["segments"] == []
+
 
 # ---------------------------------------------------------------------------
 # Planifications (livraison 2)
