@@ -1,8 +1,8 @@
 """momentus_lieux.py - Ce que Momentus prevoit dans un lieu de la carte.
 
 Module pur (ni Flask ni connexion Mongo propre : `db` en argument).
-⚠️ COPIE IDENTIQUE dans ../groundmaster/momentus_lieux.py : les deux apps sont
-des depots separes. Toute modification se reporte dans les deux fichiers.
+⚠️ COPIE IDENTIQUE dans cockpit, groundmaster et looker (momentus_lieux.py) :
+depots separes. Toute modification se reporte dans les trois fichiers.
 
 Donnees :
   - momentus_events / momentus_rooms : alimentees par cockpit/momentus_sync.py
