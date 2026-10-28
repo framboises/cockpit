@@ -377,8 +377,11 @@
     function drawLieu(layer, l, periode, from, to) {
       var color = l.today ? LAYER_COLOR : "#a78bfa";
       if (l.geometry) {
-        var ring = l.geometry.type === "Polygon" ? l.geometry.coordinates[0] : l.geometry.coordinates[0][0];
-        L.polygon(ring.map(function (c) { return [c[1], c[0]]; }), {
+        // tous les anneaux (trous compris : ruban d'une piste) et tous les polygones d'un MultiPolygon
+        var polys = l.geometry.type === "Polygon" ? [l.geometry.coordinates] : l.geometry.coordinates;
+        L.polygon(polys.map(function (p) {
+          return p.map(function (ring) { return ring.map(function (c) { return [c[1], c[0]]; }); });
+        }), {
           color: color, weight: 2, dashArray: "6 4", fillColor: color, fillOpacity: 0.12, interactive: false
         }).addTo(layer);
       }
