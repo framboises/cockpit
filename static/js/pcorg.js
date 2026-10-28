@@ -2990,9 +2990,12 @@
     ["resolu", "Resolu", "task_alt"], ["transmis", "Transmis", "forward"], ["sans_suite", "Sans suite", "do_not_disturb_on"],
     ["fausse_alerte", "Fausse alerte", "notifications_off"], ["doublon", "Doublon", "content_copy"],
   ];
-  function closeIntervention(id) {
+  // hooks (autres pages, window.PcorgClose) : {draft, onDraft(texte),
+  // onClosed(issue), onError()} ; sans hooks : comportement de l'accueil.
+  function closeIntervention(id, hooks) {
     if (closingIds[id]) return;   // double clic : une seule boite
     closingIds[id] = true;
+    hooks = hooks || null;
     var issue = null;
     var ov = mkEl("div", "pcorg-close-overlay");
     var box = mkEl("div", "pcorg-close-box");
@@ -3024,7 +3027,7 @@
     var ta = mkEl("textarea", "form-input pcorg-close-text");
     ta.rows = 4;
     ta.placeholder = "Ce qui a ete fait, suites eventuelles...";
-    ta.value = ficheDrafts[id] || "";
+    ta.value = hooks ? (hooks.draft || "") : (ficheDrafts[id] || "");
     box.appendChild(ta);
 
     var unitRow = mkEl("label", "pcorg-close-unit");
@@ -3059,7 +3062,10 @@
     ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
     bCancel.addEventListener("click", close);
     // Brouillon garde pendant la saisie (annuler ne perd rien)
-    ta.addEventListener("input", function () { ficheDrafts[id] = ta.value; });
+    ta.addEventListener("input", function () {
+      if (hooks) { if (hooks.onDraft) hooks.onDraft(ta.value); }
+      else ficheDrafts[id] = ta.value;
+    });
 
     // Resume de la fiche et unite engagee
     fetch("/api/pcorg/detail/" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
@@ -3090,16 +3096,18 @@
         .then(function (r) {
           if (r.ok) {
             close();
+            showToast("success", "Fiche close" + (issue ? " (" + CLOSE_ISSUES.filter(function (x) { return x[0] === issue; })[0][1].toLowerCase() + ")" : ""));
+            if (hooks) { if (hooks.onClosed) hooks.onClosed(issue); return; }
             delete ficheDrafts[id];
             hideFiche();
             removePin(id);
-            showToast("success", "Fiche close" + (issue ? " (" + CLOSE_ISSUES.filter(function (x) { return x[0] === issue; })[0][1].toLowerCase() + ")" : ""));
             refresh();
           } else {
             bOk.disabled = false;
             err.textContent = r.error || "Erreur";
             err.hidden = false;
             // Fiche close ou modifiee ailleurs entre-temps : etat a jour
+            if (hooks) { if (hooks.onError) hooks.onError(r); return; }
             refresh();
             reloadFiche(id);
           }
@@ -6660,6 +6668,13 @@
       hideCreate();
     });
   }
+
+  // Fenetre de cloture de l'accueil (issue, bilan, liberation de l'unite)
+  // pour les autres pages : une seule fenetre dans toute l'application.
+  // PcorgClose.open(id, {draft, onDraft, onClosed(issue), onError(res)}).
+  window.PcorgClose = {
+    open: function (id, hooks) { closeIntervention(id, hooks || {}); return true; }
+  };
 
   window.PcorgCreate = {
     open: function (opts) {

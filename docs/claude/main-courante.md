@@ -106,6 +106,7 @@ Prysm a les deux orthographes de plusieurs libellés (« Signaletique » / « Si
 - Clic droit → véhicule → fiche complète : le véhicule était effacé par `resetCreateWizard`.
 - Carroyage résolu sur une grille chargée en mémoire (`sharedGridMeta`), plus sur celle affichée.
 - `apiCall()` ne rejette jamais : plus de bouton bloqué ni d'échec muet. Échap ferme fiche, assistant et modale GPS.
+- **Une seule fenêtre de clôture** (`closeIntervention` : issue, bilan pré-rempli par le brouillon, libération de l'unité, résumé). Les autres pages l'appellent par `window.PcorgClose.open(id, {draft, onDraft, onClosed, onError})` (pcorg.js chargé, même en mode création seule) : File du service depuis le 28/10/2026 (`dispatch_service.js closeFiche`, l'ancienne invite à motif ne reste qu'en secours). Toute nouvelle page qui clôt une fiche passe par là. La tablette garde sa fin d'intervention à elle (agent).
 
 ### Capture caméra jointe à une fiche
 

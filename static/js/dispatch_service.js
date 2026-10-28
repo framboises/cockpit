@@ -1839,9 +1839,26 @@
   function closeFiche(btn) {
     var fs = state.fiche;
     if (!fs) return;
-    if (typeof window.showPromptToast !== "function") { toast("error", "Confirmation indisponible : rechargez la page."); return; }
     var id = fs.id;
     var draft = fs.textarea ? fs.textarea.value.trim() : "";
+    // Meme fenetre de cloture que l'accueil (pcorg.js, charge sur cette page
+    // pour l'assistant de creation) : issue, bilan, liberation de l'unite
+    if (window.PcorgClose) {
+      window.PcorgClose.open(id, {
+        draft: draft,
+        onDraft: function (txt) { if (state.fiche && state.fiche.id === id && state.fiche.textarea) state.fiche.textarea.value = txt; },
+        onClosed: function () {
+          if (state.fiche && state.fiche.id === id) closeFicheModal(true);
+          refresh();
+        },
+        onError: function () {
+          if (state.fiche && state.fiche.id === id) loadFiche(false);
+          refresh();
+        },
+      });
+      return;
+    }
+    if (typeof window.showPromptToast !== "function") { toast("error", "Confirmation indisponible : rechargez la page."); return; }
     window.showPromptToast("Cloturer cette fiche ? Motif de cloture (facultatif) :", {
       okLabel: "Cloturer", cancelLabel: "Annuler", type: "warning", defaultValue: draft
     }).then(function (motif) {
