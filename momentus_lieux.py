@@ -16,13 +16,31 @@ Donnees :
     automatique n'est jamais consideree comme vraie tant qu'un humain ne l'a
     pas confirmee (ex. "Hunaudieres" du PEC, une salle, rapproche a tort du
     parking HUNAUDIERES).
+  - momentus_lieux_sources : couches carto hors categories Groundmaster dont
+    les lieux peuvent etre rattaches, editees par les super_admin dans
+    Groundmaster. Un doc par collection, qui decrit son format :
+      {_id: <collection>, label,
+       liste: "features" (chemin d'une liste de lieux dans chaque doc) | "" (un doc = un lieu),
+       id: "properties._id_feature", nom: "properties.Name" (chemins dans un lieu),
+       position: {mode: "geojson", champ}            geometrie GeoJSON
+               | {mode: "latlng", lat, lng}           deux champs numeriques
+               | {mode: "point", champ, ordre}        "47.9, 0.2", [a, b] ou {lat, lng}
+                                                      ordre "latlng" | "lnglat" (texte et liste)
+       updated_at, updated_by}
+    Une collection absente de cette liste est lue au format historique
+    (features[].properties._id_feature + geometry).
 
 Information seulement : aucune notion de conflit ici.
 """
 
+import re
 from datetime import date, datetime, timedelta
 
 COL_MAPPING = "momentus_lieux_mapping"
+COL_SOURCES = "momentus_lieux_sources"
+
+# Identifiant de lieu utilisable dans une URL (/api/momentus/lieu/<feature_id>).
+FEATURE_ID_RE = re.compile(r"[A-Za-z0-9_\-]{1,64}")
 
 # ⚠️ "moveIn" est le mode de reservation PAR DEFAUT dans Momentus (79 % des
 # espaces des seminaires, 91 % des travaux, mesure en septembre 2026), pas un
@@ -254,11 +272,124 @@ def _geometry_point(geom):
     return None, None
 
 
+def get_path(obj, path):
+    """Valeur au chemin pointe `a.b.c` (None si absente) ; chemin vide = l'objet."""
+    if not path:
+        return obj
+    for part in path.split("."):
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(part)
+    return obj
+
+
+def _num(v):
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.strip().replace(",", "."))
+        except ValueError:
+            return None
+    return None
+
+
+def _pair(a, b, ordre):
+    """(lat, lng) d'un couple de nombres dans l'ordre annonce, None si hors bornes."""
+    a, b = _num(a), _num(b)
+    if a is None or b is None:
+        return None
+    lat, lng = (a, b) if ordre == "latlng" else (b, a)
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180) or (lat == 0 and lng == 0):
+        return None
+    return lat, lng
+
+
+def point_value(v, ordre="latlng"):
+    """(lat, lng) d'une position libre : texte "47.9, 0.2", liste [a, b], {lat, lng} ou GeoJSON."""
+    if isinstance(v, str):
+        parts = [p for p in re.split(r"[,;\s]+", v.strip()) if p]
+        return _pair(parts[0], parts[1], ordre) if len(parts) == 2 else None
+    if isinstance(v, (list, tuple)):
+        return _pair(v[0], v[1], ordre) if len(v) == 2 else None
+    if isinstance(v, dict):
+        if "coordinates" in v:
+            lat, lng = _geometry_point(v)
+            return (lat, lng) if lat is not None else None
+        low = {str(k).lower(): x for k, x in v.items()}
+        lat = next((low[k] for k in ("lat", "latitude") if k in low), None)
+        lng = next((low[k] for k in ("lng", "lon", "long", "longitude") if k in low), None)
+        return _pair(lat, lng, "latlng")
+    return None
+
+
+def source_position(item, src):
+    """Geometrie GeoJSON d'un lieu selon le format de sa couche (None si absente)."""
+    pos = src.get("position") or {}
+    mode = pos.get("mode")
+    if mode == "geojson":
+        geom = get_path(item, pos.get("champ") or "geometry")
+        lat, _ = _geometry_point(geom)
+        return geom if lat is not None else None
+    if mode == "latlng":
+        ll = _pair(get_path(item, pos.get("lat")), get_path(item, pos.get("lng")), "latlng")
+    elif mode == "point":
+        ll = point_value(get_path(item, pos.get("champ")), pos.get("ordre") or "latlng")
+    else:
+        return None
+    return {"type": "Point", "coordinates": [ll[1], ll[0]]} if ll else None
+
+
+def source_projection(src):
+    """Projection Mongo : seuls les champs de premier niveau utiles a la couche."""
+    pos = src.get("position") or {}
+    paths = [src.get("liste")] if src.get("liste") else [
+        src.get("id"), src.get("nom"), pos.get("champ"), pos.get("lat"), pos.get("lng")]
+    return {p.split(".")[0]: 1 for p in paths if p} or None
+
+
+def iter_source(db, src, limit=None):
+    """Lieux bruts d'une couche configuree : (item, id_brut, nom_brut, geometrie).
+
+    `id_brut` est rendu en texte (ObjectId compris), None si absent. `limit`
+    borne le nombre de lieux parcourus (une collection de positions GPS peut
+    en contenir des millions).
+    """
+    n = 0
+    for doc in db[src["_id"]].find({}, source_projection(src)):
+        items = get_path(doc, src.get("liste")) if src.get("liste") else [doc]
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            if limit is not None and n >= limit:
+                return
+            n += 1
+            fid = get_path(it, src.get("id"))
+            fid = None if fid is None or isinstance(fid, (dict, list)) else str(fid).strip()
+            name = get_path(it, src.get("nom"))
+            name = str(name).strip() if isinstance(name, (str, int, float)) else ""
+            yield it, fid or None, name, source_position(it, src)
+
+
 def _features_geo(db, wanted):
     """{feature_id: {name, lat, lng, geometry}} pour les (collection -> {ids}) demandes."""
     out = {}
+    sources = {s["_id"]: s for s in db[COL_SOURCES].find({"_id": {"$in": [c for c in wanted if c]}})}
     for col, ids in wanted.items():
         if not col:
+            continue
+        src = sources.get(col)
+        if src:
+            for _, fid, name, geom in iter_source(db, src):
+                if fid not in ids or not geom:
+                    continue
+                lat, lng = _geometry_point(geom)
+                out[fid] = {"name": name, "lat": lat, "lng": lng,
+                            "geometry": geom if geom.get("type") in ("Polygon", "MultiPolygon") else None}
             continue
         for doc in db[col].find({}, {"features": 1, "properties": 1, "geometry": 1}):
             feats = doc.get("features") if isinstance(doc.get("features"), list) else [doc]
