@@ -3429,6 +3429,11 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
 .patrol-next small { display: block; font-size: 12px; font-weight: 500; color: #94a3b8; margin-top: 2px; }
 .patrol-instr { font-size: 13px; color: #fde68a; background: rgba(245,158,11,.12); border-radius: 8px; padding: 6px 8px; white-space: pre-wrap; }
 .patrol-paused-msg { font-size: 13px; color: #fbbf24; }
+.patrol-speed { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #94a3b8; }
+.patrol-speed .material-symbols-outlined { font-size: 18px; }
+.patrol-speed.over { color: #fff; background: #dc2626; font-weight: 700; padding: 6px 8px; border-radius: 8px;
+  animation: patrol-speed-blink 1s steps(2, start) infinite; }
+@keyframes patrol-speed-blink { 50% { background: #991b1b; } }
 .patrol-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .patrol-actions button {
   flex: 1; min-width: 90px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;

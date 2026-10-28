@@ -530,6 +530,20 @@ troncons ; arret injoignable dans le mode (no_route) retire.
   `localStorage` (rechargement de l'app). Mode test : « Passage suivant ».
 - Limite : les passages sont declares par la tablette (pas de verification serveur sur les positions).
 
+### Vitesse maximale d'une patrouille (28/10/2026)
+
+- Scenario : `max_speed_kmh` (3-130, vide = pas de limite), copie dans l'instantane du run ; affichee
+  dans la proposition et la carte de patrouille de la tablette.
+- Tablette (`checkPatrolSpeed`, field.js) : GPS en profil `high` pendant une patrouille limitee ;
+  vitesse du GPS, sinon calculee entre deux positions (1-15 s, precision <= 50 m). Depassement =
+  plus de max + 3 km/h pendant 4 s : vibration, bip, bandeau rouge clignotant, rappel toutes les
+  15 s. Fin = sous le max pendant 5 s (ou pause / fin de patrouille) : episode envoye a
+  `/field/patrol/<run>/speeding` (file hors ligne, idempotent par `id`). Rien pendant une pause.
+- Serveur : `patrols.record_speeding` -> `patrol_runs.speedings [{id, start, end, duration_s, max_kmh,
+  limit_kmh, lat, lng}]` (200 au plus), entree « Depassement de vitesse : 52 km/h (max 30 km/h)
+  pendant 25 s a HH:MM, pres de <point> » ; bilan de fin « n depassement(s) de vitesse (max, pointe) ».
+  Page : ligne vitesse dans Suivi et Historique.
+
 ### Livraison 2 : planifications (27/10/2026)
 
 - `patrol_plans {name, scenario_id, target, enabled, launch {rule: span_start | every, every_min},

@@ -73,6 +73,9 @@ PARCOURS_DIRECTIONS = {"course": "normal_piste", "inverse": "god_piste"}
 PARCOURS_MIN_RATIO = 0.8
 PARCOURS_MAX_GATES = 30
 PARCOURS_GATE_RADIUS = 40
+# Vitesse maximale d'un scenario : bornes de saisie, et depassements gardes
+MIN_SPEED_KMH, MAX_SPEED_KMH = 3, 130
+MAX_SPEEDINGS = 200
 BUSY_STATUSES = ("intervention", "sur_place", "fin_intervention", "pause")
 
 
@@ -793,8 +796,19 @@ def _clean_scenario(db, data):
     # Tour de piste : en vehicule seulement (la piste est une option du moteur vehicule)
     if travel == "pedestrian" and any(p.get("kind") == "parcours" for p in by_id.values()):
         return None, "parcours_en_vehicule"
+    # Vitesse maximale autorisee (patrouille lente ou rapide) : alerte sur la
+    # tablette et depassements notes au compte rendu. Vide = pas de limite.
+    vmax = None
+    if data.get("max_speed_kmh") not in (None, ""):
+        try:
+            vmax = int(data.get("max_speed_kmh"))
+        except (TypeError, ValueError):
+            return None, "vitesse_invalide"
+        if not MIN_SPEED_KMH <= vmax <= MAX_SPEED_KMH:
+            return None, "vitesse_invalide"
     return {"name": name, "travel": travel, "loop": bool(data.get("loop")), "points": ids,
-            "color": color, "dominante": dominante, "note": str(data.get("note") or "").strip()[:500]}, None
+            "color": color, "dominante": dominante, "note": str(data.get("note") or "").strip()[:500],
+            "max_speed_kmh": vmax}, None
 
 
 def estimate(db, sc):
@@ -905,7 +919,7 @@ def pub_scenario(db, sc, with_points=False, zone_labels=None):
     out = {
         "id": str(sc["_id"]), "name": sc.get("name"), "travel": sc.get("travel") or "vehicle",
         "loop": bool(sc.get("loop")), "color": sc.get("color") or "#2563eb", "note": sc.get("note") or "",
-        "dominante": sc.get("dominante") or "generale",
+        "dominante": sc.get("dominante") or "generale", "max_speed_kmh": sc.get("max_speed_kmh"),
         "points": sc.get("points") or [], "archived": bool(sc.get("archived")),
         "version": sc.get("version") or 1, "updated_at": _iso(sc.get("updated_at")),
         "updated_by": sc.get("updated_by"),
@@ -1024,7 +1038,7 @@ def _snapshot(db, sc):
     return {
         "id": str(sc["_id"]), "name": sc.get("name"), "travel": sc.get("travel") or "vehicle",
         "loop": bool(sc.get("loop")), "color": sc.get("color"), "version": sc.get("version") or 1,
-        "dominante": sc.get("dominante") or "generale",
+        "dominante": sc.get("dominante") or "generale", "max_speed_kmh": sc.get("max_speed_kmh"),
         "points": [_snap_point(p) for p in pts],
         "estimate": {k: (sc.get("estimate") or {}).get(k) for k in ("distance_m", "duration_s", "polyline")},
     }
@@ -1422,6 +1436,48 @@ def step(db, run_id, device, point_id, action, method="manual", comment=None, ph
     return True, "ok", run
 
 
+def record_speeding(db, run_id, device, data, now=None):
+    """Depassement de la vitesse maximale du scenario, envoye par la tablette
+    a la fin de l'episode ({id, start, end, max_kmh, lat, lng}). Idempotent
+    par `id` (file hors ligne). Entree en main courante. Retourne (ok, code)."""
+    now = now or _now()
+    run = db["patrol_runs"].find_one({"_id": run_id}, {"device_id": 1, "scenario": 1, "fiche_id": 1,
+                                                       "device_name": 1, "speedings": 1, "state": 1})
+    if not run or run.get("device_id") != str(device["_id"]):
+        return False, "not_assigned"
+    limit = (run.get("scenario") or {}).get("max_speed_kmh")
+    if not limit:
+        return False, "sans_limite"
+    sid = str(data.get("id") or "")[:40]
+    try:
+        vmax = round(float(data.get("max_kmh")), 1)
+        start, end = _aware(data.get("start")), _aware(data.get("end"))
+    except (TypeError, ValueError):
+        return False, "invalide"
+    if not sid or not isinstance(start, datetime) or not isinstance(end, datetime) or vmax <= limit:
+        return False, "invalide"
+    dur = max(0, int((end - start).total_seconds()))
+    ev = {"id": sid, "start": start, "end": end, "duration_s": dur, "max_kmh": vmax, "limit_kmh": limit}
+    try:
+        ev["lat"], ev["lng"] = float(data.get("lat")), float(data.get("lng"))
+    except (TypeError, ValueError):
+        pass
+    if len(run.get("speedings") or []) >= MAX_SPEEDINGS:
+        return True, "plafond"
+    r = db["patrol_runs"].update_one({"_id": run_id, "speedings.id": {"$ne": sid}}, {"$push": {"speedings": ev}})
+    if not r.modified_count:
+        return True, "deja_note"
+    near = ""
+    if ev.get("lat") is not None:
+        pts = (run.get("scenario") or {}).get("points") or []
+        best = min(pts, key=lambda p: haversine_m(ev["lat"], ev["lng"], p["lat"], p["lng"]), default=None)
+        if best and haversine_m(ev["lat"], ev["lng"], best["lat"], best["lng"]) <= 500:
+            near = ", pres de %s" % best["name"]
+    _fiche_entry(db, run, "Depassement de vitesse : %d km/h (max %d km/h) pendant %d s a %s%s" % (
+        round(vmax), limit, dur, start.astimezone(PARIS).strftime("%H:%M"), near), end)
+    return True, "ok"
+
+
 def _bilan(run, now):
     c = _counts(run.get("steps") or [])
     total = len(run.get("steps") or [])
@@ -1435,6 +1491,12 @@ def _bilan(run, now):
         parts.append("%d non fait%s" % (c["missed"], "s" if c["missed"] > 1 else ""))
     if dur is not None:
         parts.append("duree %d min" % dur + (" dont %d min de pause" % round(paused_s / 60) if paused_s >= 60 else ""))
+    sp = run.get("speedings") or []
+    limit = (run.get("scenario") or {}).get("max_speed_kmh")
+    if limit:
+        parts.append("%d depassement%s de vitesse (max %d km/h%s)" % (
+            len(sp), "s" if len(sp) > 1 else "", limit,
+            ", pointe %d km/h" % round(max(s.get("max_kmh") or 0 for s in sp)) if sp else ""))
     return ", ".join(parts), c
 
 
@@ -1851,6 +1913,9 @@ def pub_run(run, device=None):
         "started_at": _iso(run.get("started_at")), "ended_at": _iso(run.get("ended_at")),
         "end_reason": run.get("end_reason"), "abandoned": bool(run.get("abandoned")),
         "paused_s": sum(int(p.get("duration_s") or 0) for p in run.get("pauses") or []),
+        "max_speed_kmh": sc.get("max_speed_kmh"),
+        "speedings": [{"at": _iso(s.get("start")), "duration_s": s.get("duration_s"), "max_kmh": s.get("max_kmh"),
+                       "lat": s.get("lat"), "lng": s.get("lng")} for s in run.get("speedings") or []],
     }
     if device is not None:
         pos = device.get("last_position") or {}
@@ -1876,6 +1941,7 @@ def tablet_view(db, device, now=None):
                         "loop": bool(sc.get("loop")), "points": [p["name"] for p in sc.get("points") or []],
                         "distance_m": est.get("distance_m"), "duration_s": est.get("duration_s"),
                         "polyline": est.get("polyline"), "distance_to_start_m": cur.get("distance_m"),
+                        "max_speed_kmh": sc.get("max_speed_kmh"),
                         "expires_at": _iso(exp), "remaining_s": max(0, round((exp - now).total_seconds()))}
     active = None
     if device.get("active_patrol_run"):
@@ -1886,6 +1952,7 @@ def tablet_view(db, device, now=None):
             active = {"run_id": run["_id"], "name": sc.get("name"), "travel": sc.get("travel"),
                       "loop": bool(sc.get("loop")), "color": sc.get("color"), "state": run["state"],
                       "fiche_id": run.get("fiche_id"), "steps": _pub_steps(run),
+                      "max_speed_kmh": sc.get("max_speed_kmh"),
                       "polyline": (sc.get("estimate") or {}).get("polyline"),
                       "started_at": _iso(run.get("started_at"))}
     return active, prop

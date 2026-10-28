@@ -267,6 +267,27 @@ class TestExecution:
         assert any("2/3 points faits, 1 passe" in t for t in texts)
         assert db["field_devices"].find_one({"_id": a["_id"]})["active_patrol_run"] is None
 
+    def test_vitesse_maximale(self, db):
+        sc = _scenario(db)
+        assert P.save_scenario(db, {"name": "R", "points": sc["points"], "max_speed_kmh": 500}, "t")[1] == "vitesse_invalide"
+        P.save_scenario(db, {"name": "Ronde", "travel": "pedestrian", "points": sc["points"], "max_speed_kmh": "30"}, "t",
+                        scenario_id=str(sc["_id"]))
+        a = _dev(db, "A")
+        run, _, _ = P.create_run(db, str(sc["_id"]), {"kind": "device", "device_id": str(a["_id"])}, "op")
+        P.accept(db, run["_id"], a)
+        run = _run(db, run["_id"])
+        assert run["scenario"]["max_speed_kmh"] == 30
+        ev = {"id": "e1", "start": NOW - timedelta(seconds=40), "end": NOW - timedelta(seconds=15), "max_kmh": 52.4,
+              "lat": LAT, "lng": LNG}
+        assert P.record_speeding(db, run["_id"], a, ev) == (True, "ok")
+        assert P.record_speeding(db, run["_id"], a, ev) == (True, "deja_note")
+        assert P.record_speeding(db, run["_id"], a, dict(ev, id="e2", max_kmh=20))[1] == "invalide"
+        assert any("Depassement de vitesse : 52 km/h (max 30 km/h) pendant 25 s" in t and "pres de P1" in t
+                   for t in _texts(db, run["fiche_id"]))
+        P.finish(db, run["_id"], a, reason="fin", abandon=True)
+        assert any("1 depassement de vitesse (max 30 km/h, pointe 52 km/h)" in t for t in _texts(db, run["fiche_id"]))
+        assert P.pub_run(_run(db, run["_id"]))["speedings"][0]["max_kmh"] == 52.4
+
     def test_photo_exigee(self, db):
         a, run = self._accepted(db, photo_on=0)
         pid = run["steps"][0]["point_id"]

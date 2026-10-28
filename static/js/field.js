@@ -737,6 +737,8 @@
     var status = state.patrolStatus || "patrouille";
     var critical = status === "intervention" || status === "sur_place" || state.sosInFlight;
     if (critical) return "high";
+    // Patrouille avec vitesse maximale : positions frequentes pour mesurer la vitesse
+    if (typeof _patrol !== "undefined" && _patrol.run && _patrol.run.state === "running" && _patrol.run.max_speed_kmh) return "high";
     // App en background sans statut critique : pas besoin de GPS continu
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return "paused";
     if (status === "pause" || status === "fin_intervention") return "low";
@@ -786,6 +788,7 @@
     renderMeMarker(latlng, pos.coords.accuracy);
     maybePushPosition(pos);
     try { checkPatrolProximity(latlng, pos.coords.accuracy); } catch (e) { /* jamais bloquant */ }
+    try { checkPatrolSpeed(pos); } catch (e) { /* jamais bloquant */ }
   }
 
   function onGpsError(err) {
@@ -4050,6 +4053,7 @@
     infos.className = "dispatch-alert-infos";
     var n = (p.points || []).length;
     infos.appendChild(_mkInfoRow("location_on", n + " point" + (n > 1 ? "s" : "") + (p.loop ? ", retour au depart" : "")));
+    if (p.max_speed_kmh) infos.appendChild(_mkInfoRow("speed", "Vitesse max " + p.max_speed_kmh + " km/h"));
     if (p.distance_m) infos.appendChild(_mkInfoRow(p.travel === "pedestrian" ? "directions_walk" : "directions_car",
       _fmtDistance(p.distance_m) + (p.duration_s ? ", environ " + Math.round(p.duration_s / 60) + " min" : "")));
     if (p.distance_to_start_m != null) infos.appendChild(_mkInfoRow("near_me", "Depart a " + _fmtDistance(p.distance_to_start_m) + " de vous"));
@@ -4154,7 +4158,10 @@
                              : "terminee (" + prevId + ")");
       // Patrouille en cours : ecran maintenu allume sans limite (recalcule apres mise a jour)
       setTimeout(syncWakeLockWithStatus, 0);
+      // Vitesse maximale : GPS frequent pendant la patrouille (recalcule apres mise a jour)
+      setTimeout(refreshGpsProfile, 0);
     }
+    if (!run && _speed.ep && _patrol.run) { _speed.ep.end = Date.now(); closeSpeeding(_patrol.run); }
     if (!run) {
       if (prevId) {
         toast("Patrouille terminee", "ok");
@@ -4253,6 +4260,15 @@
     card.appendChild(head);
     if (_patrol.collapsed) return;
 
+    if (run.max_speed_kmh) {
+      var spd = document.createElement("div");
+      spd.className = "patrol-speed" + (_speed.ep ? " over" : "");
+      spd.appendChild(_mkIcon("speed"));
+      spd.appendChild(document.createTextNode(_speed.ep
+        ? " RALENTISSEZ : max " + run.max_speed_kmh + " km/h (pointe " + Math.round(_speed.ep.max) + " km/h)"
+        : " Vitesse max " + run.max_speed_kmh + " km/h"));
+      card.appendChild(spd);
+    }
     if (run.state === "paused") {
       var pm = document.createElement("div");
       pm.className = "patrol-paused-msg";
@@ -5134,6 +5150,80 @@
     }
     _patrol.near = null;
     patrolDone(s, "gps");
+  }
+
+  // Vitesse maximale de la patrouille (scenario) : vitesse du GPS (sinon
+  // calculee entre deux positions). Depassement = plus de max + 3 km/h
+  // pendant 4 s : alerte (vibration, bip, bandeau rouge, rappel toutes les
+  // 15 s). Fin = sous le max pendant 5 s : l'episode {pointe, debut, fin,
+  // position} part au serveur (file hors ligne, idempotent par id) et va au
+  // compte rendu. Rien pendant une pause (intervention).
+  var SPEED_TOL_KMH = 3, SPEED_START_MS = 4000, SPEED_END_MS = 5000, SPEED_REMIND_MS = 15000;
+  var _speed = { last: null, overSince: null, underSince: null, ep: null, remindAt: 0, kmh: null };
+  function speedBeep() {
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      _speed.audio = _speed.audio || new Ctx();
+      var ctx = _speed.audio, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "square"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.15, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.5);
+    } catch (e) { /* son indisponible */ }
+  }
+  function speedAlert(kmh, limit) {
+    toast("Ralentissez : " + Math.round(kmh) + " km/h (max " + limit + " km/h)", "err");
+    try { if (navigator.vibrate) navigator.vibrate([400, 150, 400]); } catch (e) {}
+    speedBeep();
+    _speed.remindAt = Date.now() + SPEED_REMIND_MS;
+  }
+  function closeSpeeding(run) {
+    var ep = _speed.ep;
+    _speed.ep = null;
+    _speed.overSince = null;
+    _speed.underSince = null;
+    if (!ep || !run) return;
+    tlog("vitesse", "depassement termine : pointe " + Math.round(ep.max) + " km/h, " + Math.round((ep.end - ep.start) / 1000) + " s");
+    queuedJsonPost("/field/patrol/" + encodeURIComponent(run.run_id) + "/speeding",
+      { id: ep.id, start: ep.start, end: ep.end, max_kmh: ep.max, lat: ep.lat, lng: ep.lng }, "Depassement de vitesse");
+    renderPatrol();
+  }
+  function checkPatrolSpeed(pos) {
+    var run = _patrol.run, now = Date.now();
+    var lat = pos.coords.latitude, lng = pos.coords.longitude;
+    var kmh = null;
+    if (typeof pos.coords.speed === "number" && pos.coords.speed >= 0 && !isNaN(pos.coords.speed)) kmh = pos.coords.speed * 3.6;
+    else if (_speed.last) {
+      var dt = (now - _speed.last.t) / 1000;
+      if (dt >= 1 && dt <= 15 && (pos.coords.accuracy || 0) <= 50) kmh = haversine([_speed.last.lat, _speed.last.lng], [lat, lng]) / dt * 3.6;
+    }
+    _speed.last = { lat: lat, lng: lng, t: now };
+    _speed.kmh = kmh;
+    var limit = run && run.state === "running" ? run.max_speed_kmh : null;
+    if (!limit) { if (_speed.ep) { _speed.ep.end = now; closeSpeeding(run); } return; }
+    if (kmh === null) return;
+    if (kmh > limit + SPEED_TOL_KMH) {
+      _speed.underSince = null;
+      if (!_speed.overSince) _speed.overSince = now;
+      if (!_speed.ep && now - _speed.overSince >= SPEED_START_MS) {
+        _speed.ep = { id: run.run_id.slice(0, 8) + "-" + now.toString(36), start: _speed.overSince, end: now, max: kmh, lat: lat, lng: lng };
+        tlog("vitesse", "depassement : " + Math.round(kmh) + " km/h (max " + limit + ")");
+        speedAlert(kmh, limit);
+        renderPatrol();
+      } else if (_speed.ep) {
+        _speed.ep.end = now;
+        if (kmh > _speed.ep.max) { _speed.ep.max = kmh; _speed.ep.lat = lat; _speed.ep.lng = lng; }
+        if (now >= _speed.remindAt) speedAlert(kmh, limit);
+      }
+    } else {
+      _speed.overSince = null;
+      if (_speed.ep) {
+        if (!_speed.underSince) _speed.underSince = now;
+        if (now - _speed.underSince >= SPEED_END_MS) closeSpeeding(run);
+      }
+    }
   }
 
   // Parcours impose (tour de piste) : passages franchis dans l'ordre, a moins

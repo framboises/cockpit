@@ -98,6 +98,9 @@
 .pt-editor-head input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
 .pt-editor-head input[type=color]::-webkit-color-swatch { border: 0; border-radius: 6px; }
 .pt-editor-head input[type=color]::-moz-color-swatch { border: 0; border-radius: 6px; }
+.pt-speed { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #15803d; }
+.pt-speed .material-symbols-outlined { font-size: 16px; }
+.pt-speed.over { color: #b91c1c; font-weight: 600; }
 /* Outils de l'onglet Points : boutons compacts, aide au survol */
 .pt-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pt-tool-hint { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; }
@@ -117,7 +120,7 @@
 .pt-merge[hidden], .pt-mg-keep[hidden] { display: none; }
 .pt-estimate.pt-warn-box { color: #92400e; background: #fffbeb; border: 1px solid #fcd34d; }
 .pt-warn-line { font-weight: 500; font-size: 13px; margin-top: 4px; }
-.pt-pc-rule { align-self: end; padding-bottom: 8px; }
+.pt-pc-rule, .pt-vmax-hint { align-self: end; padding-bottom: 6px; font-size: 12px; }
 .pt-item-title .material-symbols-outlined, .pt-step-name .material-symbols-outlined { font-size: 17px; vertical-align: -3px; margin-right: 4px; color: #7c3aed; }
 .pt-merge-title { display: flex; align-items: center; gap: 6px; font-weight: 700; color: #92400e; }
 .pt-merge select[size] { padding: 4px; }

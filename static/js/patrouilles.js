@@ -51,6 +51,7 @@
     trois_passages_minimum: "3 passages au moins", trop_de_passages: "30 passages au plus",
     parcours_en_vehicule: "Un tour de piste se fait en vehicule", parcours_sans_trace: "Parcours sans trace (a recalculer)",
     est_un_parcours: "C'est un parcours : ouvrez-le depuis la liste",
+    vitesse_invalide: "Vitesse max entre 3 et 130 km/h (ou vide)",
   };
   function errLabel(e) { var c = (e && e.message) || String(e); return ERRORS[c] || c; }
 
@@ -1123,9 +1124,10 @@
 
   function openScenario(s) {
     S.sc = s ? { id: s.id, name: s.name, travel: s.travel, loop: s.loop, color: s.color, note: s.note,
-                 dominante: s.dominante || "generale", points: s.points.slice(), archived: s.archived, estimate: s.estimate }
+                 dominante: s.dominante || "generale", points: s.points.slice(), archived: s.archived, estimate: s.estimate,
+                 max_speed_kmh: s.max_speed_kmh || null }
              : { id: null, name: "", travel: "vehicle", loop: false, color: "#2563eb", note: "", dominante: "generale",
-                 points: [], estimate: null };
+                 points: [], estimate: null, max_speed_kmh: null };
     $("pt-sc-editor").hidden = false;
     $("pt-sc-listpane").hidden = true;
     // Nouveau scenario : les points a ajouter sont montres ; scenario existant :
@@ -1133,6 +1135,7 @@
     $("pt-sc-others").checked = !s;
     $("pt-sc-name").value = S.sc.name;
     $("pt-sc-dominante").value = S.sc.dominante;
+    $("pt-sc-vmax").value = S.sc.max_speed_kmh || "";
     $("pt-sc-color").value = S.sc.color;
     renderSwatches();
     $("pt-sc-loop").checked = S.sc.loop;
@@ -1159,6 +1162,7 @@
     S.sc.loop = $("pt-sc-loop").checked;
     S.sc.note = $("pt-sc-note").value;
     S.sc.dominante = $("pt-sc-dominante").value || "generale";
+    S.sc.max_speed_kmh = $("pt-sc-vmax").value ? Number($("pt-sc-vmax").value) : null;
     var r = document.querySelector('input[name="pt-sc-travel"]:checked');
     S.sc.travel = r ? r.value : "vehicle";
   }
@@ -1430,7 +1434,7 @@
   function saveScenario() {
     readScenarioForm();
     var body = { name: S.sc.name, travel: S.sc.travel, loop: S.sc.loop, color: S.sc.color, note: S.sc.note,
-                 dominante: S.sc.dominante, points: S.sc.points };
+                 dominante: S.sc.dominante, points: S.sc.points, max_speed_kmh: S.sc.max_speed_kmh };
     var req = S.sc.id ? apiPut("/api/patrols/scenarios/" + S.sc.id, body) : apiPost("/api/patrols/scenarios", body);
     req.then(function (r) {
       toast("success", "Scenario enregistre (v" + r.scenario.version + ")");
@@ -1522,6 +1526,18 @@
   // Messages sur cette page quand une patrouille change d'etat (acceptee,
   // non prise, terminee...) : plus besoin de l'accueil pour voir un refus.
   // Le premier chargement ne fait que memoriser les etats.
+  // Vitesse max du scenario et depassements notes par la tablette
+  function speedLine(r) {
+    var sp = r.speedings || [];
+    var top = sp.reduce(function (m, s) { return Math.max(m, s.max_kmh || 0); }, 0);
+    var d = el("div", "pt-speed" + (sp.length ? " over" : ""));
+    d.appendChild(icon(sp.length ? "speed" : "check_circle"));
+    d.appendChild(document.createTextNode(sp.length
+      ? " " + sp.length + " depassement" + (sp.length > 1 ? "s" : "") + " de " + r.max_speed_kmh + " km/h (pointe " + Math.round(top) + " km/h, dernier " + fmtTime(sp[sp.length - 1].at) + ")"
+      : " Vitesse max " + r.max_speed_kmh + " km/h respectee"));
+    return d;
+  }
+
   var LIVE_MSG = {
     running: ["success", function (r) { return r.device_name + " a accepte la patrouille " + r.scenario.name; }],
     paused: ["info", function (r) { return "Patrouille " + r.scenario.name + " en pause (" + r.device_name + " engage ailleurs)"; }],
@@ -1589,6 +1605,7 @@
       card.appendChild(chips);
     }
     if (r.end_reason) card.appendChild(el("div", "pt-muted", r.end_reason));
+    if (r.max_speed_kmh) card.appendChild(speedLine(r));
     if (r.attempts.length && !r.started_at) {
       card.appendChild(el("div", "pt-muted", r.attempts.map(function (a) {
         return a.device_name + " : " + ({ refused: "refus", timeout: "sans reponse", accepted: "acceptee" }[a.answer] || a.answer) + (a.reason ? " (" + a.reason + ")" : "");
@@ -1746,6 +1763,7 @@
         var dur = x.started_at && x.ended_at ? Math.round((new Date(x.ended_at) - new Date(x.started_at)) / 1000) : null;
         tr.appendChild(el("td", "num", dur != null ? fmtMin(dur) : "-"));
         var tdd = el("td", "pt-muted", x.end_reason || (x.created_by ? "par " + x.created_by : ""));
+        if (x.max_speed_kmh && (x.speedings || []).length) tdd.insertBefore(speedLine(x), tdd.firstChild);
         var fid = x.fiche_id || x.not_taken_fiche;
         if (fid) { tdd.appendChild(document.createTextNode(" ")); tdd.appendChild(ficheLink(fid, "Fiche")); }
         tr.appendChild(tdd);

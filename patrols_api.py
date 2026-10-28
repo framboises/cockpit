@@ -693,6 +693,19 @@ def field_patrol_step(run_id):
     return jsonify({"ok": True, "code": code, "state": (run or {}).get("state")})
 
 
+@patrols_field_bp.route("/field/patrol/<run_id>/speeding", methods=["POST"])
+@field_token_required
+def field_patrol_speeding(run_id):
+    """Depassement de la vitesse maximale (episode termine, start / end en ms).
+    Idempotent par `id` : rejouable par la file hors ligne."""
+    data = request.get_json(silent=True) or {}
+    data = dict(data, start=_at_from_ms(data.get("start")), end=_at_from_ms(data.get("end")))
+    ok, code = P.record_speeding(_db(), run_id, request.device, data)
+    if not ok:
+        return _err(code, 403 if code == "not_assigned" else 400)
+    return jsonify({"ok": True, "code": code})
+
+
 @patrols_field_bp.route("/field/patrol/<run_id>/finish", methods=["POST"])
 @field_token_required
 def field_patrol_finish(run_id):
