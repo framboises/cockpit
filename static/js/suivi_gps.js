@@ -223,6 +223,8 @@
     toutes().forEach(function (o) {
       var b = o.b;
       if (!aPosition(b) || !visible(b)) return;
+      // Hors ligne depuis plus de 24 h : plus de pin, sauf engagee ou selectionnee
+      if (b.stale && !engagee(b) && S.sel !== b.id) return;
       vus[b.id] = true;
       if (S.traces && b.en_ligne && b.trace && b.trace.length > 1) {
         var tr = b.trace.concat([[b.lat, b.lng]]), n = tr.length;

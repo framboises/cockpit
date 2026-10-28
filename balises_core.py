@@ -59,6 +59,9 @@ MOVING_SPEED_KMH = 5
 # Anoloc (regles historiques de anoloc.py, inchangees)
 ANOLOC_STALE_S = 1800
 ANOLOC_GPS_FRESH_S = 300
+# Balise hors ligne depuis plus longtemps : retiree de la carte (reste dans
+# la liste, "hors ligne depuis ..."). Toutes sources.
+MAP_HIDE_AFTER_S = 24 * 3600
 
 
 def _utc(dt):
@@ -479,15 +482,24 @@ def device_state(doc, now=None, device=None, settings=None):
         age = (now - last).total_seconds() if last else None
         online = age is not None and age <= MISSED_PERIODS * expected + ONLINE_GRACE_S
         return {"online": online, "gps_fix": 1 if online and doc.get("gps_valid_last") else 0,
-                "last_at": last, "age_s": age, "expected_s": expected}
+                "last_at": last, "age_s": age, "expected_s": expected,
+                "stale": _is_stale(online, age)}
     status = doc.get("status", "offline")
     online = status != "offline"
     last_real = _utc(doc.get("last_real_at"))
-    age = (now - last_real).total_seconds() if last_real else None
-    if online and age is not None and age > ANOLOC_STALE_S:
+    # Sans vraie trame connue, l'age part de la derniere collecte : un statut
+    # fige (collecteur arrete) ne doit pas rester "en ligne" indefiniment.
+    last_at = last_real or _utc(doc.get("collected_at"))
+    age = (now - last_at).total_seconds() if last_at else None
+    if online and (age is None or age > ANOLOC_STALE_S):
         online = False
-    gps_fix = doc.get("gps_fix", 0)
+    gps_fix = doc.get("gps_fix", 0) if online else 0
     if last_real and online:
         gps_fix = 1 if age < ANOLOC_GPS_FRESH_S else 0
-    return {"online": online, "gps_fix": gps_fix, "last_at": last_real or _utc(doc.get("collected_at")),
-            "age_s": age, "expected_s": ANOLOC_STALE_S}
+    return {"online": online, "gps_fix": gps_fix, "last_at": last_at,
+            "age_s": age, "expected_s": ANOLOC_STALE_S, "stale": _is_stale(online, age)}
+
+
+def _is_stale(online, age):
+    """Hors ligne depuis plus de MAP_HIDE_AFTER_S (ou depuis toujours)."""
+    return not online and (age is None or age > MAP_HIDE_AFTER_S)

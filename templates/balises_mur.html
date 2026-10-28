@@ -374,10 +374,16 @@
   // Cadre = balises en ligne ; sans balise en ligne, toutes les positions
   // connues. Recadre seulement si une balise en ligne sort du cadre actuel ou
   // si l'ensemble a cadrer change (groupes, balise qui revient...).
+  // Pin sur la carte : position connue, et pas hors ligne depuis plus de
+  // 24 h (stale), sauf engagee sur une fiche
+  function surCarte(b) {
+    return b.lat != null && b.lng != null && !(b.stale && !engagee(b));
+  }
+
   function cadrer() {
     var d = S.data;
     if (!d || !carte) return;
-    var tout = toutesBalises(d).filter(function (o) { return o.b.lat != null && o.b.lng != null; });
+    var tout = toutesBalises(d).filter(function (o) { return surCarte(o.b); });
     var enLigne = tout.filter(function (o) { return o.b.en_ligne; });
     var base = enLigne.length ? enLigne : tout;
     if (!base.length) { carte.setView(CENTRE, 14); return; }
@@ -428,7 +434,7 @@
     coucheTraces.clearLayers();
     toutesBalises(d).forEach(function (o) {
       var b = o.b;
-      if (b.lat == null || b.lng == null) return;
+      if (!surCarte(b)) return;
       vus[b.id] = true;
       // Trainee : du plus ancien (transparent) au plus recent
       if (b.en_ligne && b.trace && b.trace.length > 1) {

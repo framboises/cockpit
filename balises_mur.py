@@ -191,7 +191,7 @@ def _balise(dev_id, doc, grp, tlt_devices, tlt_settings, now):
         return {"id": dev_id, "label": (grp.get("device_labels") or {}).get(dev_id, dev_id),
                 "lat": None, "lng": None, "en_ligne": False, "mouvement": False, "gps": False,
                 "vitesse": 0, "cap": 0, "batterie": None, "charge": None, "vu_a": None,
-                "age_s": None, "source": B.source_of(dev_id), "trace": []}
+                "age_s": None, "stale": True, "source": B.source_of(dev_id), "trace": []}
     st = B.device_state(doc, now=now, device=tlt_devices.get(dev_id), settings=tlt_settings)
     vitesse = doc.get("speed") or 0
     try:
@@ -199,6 +199,8 @@ def _balise(dev_id, doc, grp, tlt_devices, tlt_settings, now):
     except (TypeError, ValueError):
         vitesse = 0
     en_ligne = bool(st["online"])
+    # Hors ligne : batterie et charge sont celles du dernier contact, figees
+    # (collecteur arrete...) ; on ne les presente pas comme actuelles.
     mouvement = en_ligne and (vitesse >= EN_MOUVEMENT_KMH or
                               (B.is_teltonika_id(dev_id) and bool(doc.get("movement"))))
     return {
@@ -210,11 +212,13 @@ def _balise(dev_id, doc, grp, tlt_devices, tlt_settings, now):
         "gps": bool(st["gps_fix"]),
         "vitesse": round(vitesse) if en_ligne else 0,
         "cap": doc.get("heading") or 0,
-        "batterie": doc.get("battery_pct"),
-        "charge": doc.get("charging"),
-        "gsm": doc.get("gsm_level"),
+        "batterie": doc.get("battery_pct") if en_ligne else None,
+        "charge": doc.get("charging") if en_ligne else None,
+        "gsm": doc.get("gsm_level") if en_ligne else None,
         "vu_a": _iso(st["last_at"]),
         "age_s": round(st["age_s"]) if st["age_s"] is not None else None,
+        # Hors ligne depuis > 24 h (B.MAP_HIDE_AFTER_S) : plus de pin sur la carte
+        "stale": st["stale"],
         "source": B.source_of(dev_id),
         "trace": [],
     }

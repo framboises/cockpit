@@ -73,6 +73,18 @@ def test_groupes_dans_l_ordre_et_etat_des_balises(db):
     assert a3["label"] == "AMBU 3" and a3["lat"] is None     # jamais collectee
 
 
+def test_balise_hors_ligne_valeurs_figees_masquees(db):
+    # Collecteur arrete : statut et batterie du dernier contact restent en base
+    _config(db)
+    _latest(db, "a1", "AMBU 1", 7200)                      # muette depuis 2 h
+    _latest(db, "a2", "AMBU 2", 100 * 86400)                # muette depuis 100 jours
+    db.anoloc_latest.update_many({}, {"$set": {"battery_pct": 100}})
+    a1, a2, _a3 = M.etat_mur(db, ["med"], now=MAINTENANT)["groupes"][0]["balises"]
+    assert (a1["en_ligne"], a1["batterie"], a1["stale"]) == (False, None, False)
+    assert (a2["batterie"], a2["stale"]) == (None, True)    # plus de pin sur la carte
+    assert _a3["stale"] is True                             # jamais collectee
+
+
 def test_trois_groupes_au_plus_et_visibilite(db):
     _config(db)
     assert M.lire_groupes("med, sur,med,,dep,fou") == ["med", "sur", "dep"]

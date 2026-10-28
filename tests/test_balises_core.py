@@ -122,6 +122,22 @@ def test_etat_anoloc_inchange():
     assert B.device_state(doc, now=NOW)["online"] is False
 
 
+def test_anoloc_statut_fige_hors_ligne_puis_retire_de_la_carte():
+    # Collecteur arrete : le statut "running" reste en base, la balise est
+    # hors ligne, sans GPS, et retiree de la carte au-dela de 24 h.
+    doc = {"_id": "anoloc-1", "status": "running", "gps_fix": 7,
+           "last_real_at": NOW - timedelta(hours=2)}
+    s = B.device_state(doc, now=NOW)
+    assert (s["online"], s["gps_fix"], s["stale"]) == (False, 0, False)
+    doc["last_real_at"] = NOW - timedelta(days=100)
+    assert B.device_state(doc, now=NOW)["stale"] is True
+    # Sans vraie trame : l'age part de la derniere collecte
+    doc = {"_id": "anoloc-2", "status": "running", "collected_at": NOW - timedelta(days=3)}
+    s = B.device_state(doc, now=NOW)
+    assert (s["online"], s["stale"]) == (False, True)
+    assert B.device_state({"_id": "anoloc-3", "status": "running"}, now=NOW)["online"] is False
+
+
 def test_suppression_retire_des_groupes(db):
     B.ingest(db, [msg(NOW)], "flespi", now=NOW)
     B.delete_device(db, IMEI)

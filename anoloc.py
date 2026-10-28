@@ -363,8 +363,15 @@ def anoloc_live():
                     "last_real_at": _iso(doc.get("last_real_at")),
                     "collected_at": _iso(doc.get("collected_at")),
                     "online": st["online"],
+                    # Hors ligne depuis > 24 h : plus de pin sur la carte
+                    "stale": st["stale"],
+                    "last_at": _iso(st["last_at"]),
                     "source": B.source_of(dev_id),
                 }
+                if not st["online"]:
+                    # Valeurs figees du dernier contact : ne pas les presenter
+                    # comme actuelles (statut "en mouvement", batterie, vitesse).
+                    entry.update({"status": "offline", "speed": 0})
                 if B.is_teltonika_id(dev_id):
                     entry.update({
                         "last_msg_at": _iso(doc.get("last_msg_at")),
@@ -389,6 +396,7 @@ def anoloc_live():
                     "sent_at": "",
                     "collected_at": "",
                     "online": False,
+                    "stale": True,
                     "source": B.source_of(dev_id),
                 })
 

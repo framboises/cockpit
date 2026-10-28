@@ -290,6 +290,14 @@
       devices.forEach(function (dev, idx) {
         var statusClass = dev.online ? "online" : "offline";
         var statusLabel = "hors ligne";
+        if (!dev.online && dev.last_at) {
+          var since = new Date(dev.last_at);
+          if (!isNaN(since)) {
+            statusLabel = "hors ligne depuis " + since.toLocaleString("fr-FR", {
+              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+            });
+          }
+        }
         if (dev.online) {
           if (dev.status === "running") statusLabel = "en mouvement";
           else if (dev.status === "waiting") statusLabel = "en attente";
@@ -450,12 +458,16 @@
 
       devices.forEach(function (dev, idx) {
         dev._groupId = gid; // store for trail functions
+        // Balise hors ligne depuis plus de 24 h (stale) : plus de pin, elle
+        // reste dans la liste du panneau. Non marquee vue : la pin existante
+        // est retiree plus bas.
+        if (dev.kind !== "tablet" && dev.stale) return;
         seenDevices[dev.id] = true;
         var lat = dev.lat;
         var lng = dev.lng;
         if (lat == null || lng == null) return;
 
-        // Balises hors ligne : on garde la pin mais grisee (cf. createBeaconIcon).
+        // Balises hors ligne recentes : on garde la pin mais grisee (cf. createBeaconIcon).
         // Tablettes hors ligne : pin normale (utile pour voir ou la patrouille a perdu signal).
 
         var existing = anolocMarkers[dev.id];
@@ -891,8 +903,9 @@
       ]));
     }
 
-    // Battery (with icon + color)
-    if (dev.battery_pct != null) {
+    // Battery (with icon + color) : hors ligne, la valeur est celle du
+    // dernier contact, on ne l'affiche pas comme actuelle.
+    if (dev.online && dev.battery_pct != null) {
       var batPct = dev.battery_pct;
       var batIconName = batPct > 60 ? "battery_full" : batPct > 20 ? "battery_3_bar" : "battery_1_bar";
       var batColor = batPct > 60 ? "#22c55e" : batPct > 20 ? "#eab308" : "#ef4444";
