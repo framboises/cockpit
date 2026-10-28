@@ -254,8 +254,37 @@ def lieu_payload(db, feature_id, date_from=None, date_to=None, event=None, year=
     }
 
 
+def _traversees(rings, lat):
+    """Longitudes ou la parallele `lat` coupe les anneaux, triees.
+
+    Regle pair-impair : entre la 1re et la 2e, la 3e et la 4e... on est dans la
+    forme (hors des trous).
+    """
+    xs = []
+    for ring in rings:
+        for (x1, y1), (x2, y2) in zip(ring, ring[1:] + ring[:1]):
+            if (y1 <= lat < y2) or (y2 <= lat < y1):
+                xs.append(x1 + (lat - y1) * (x2 - x1) / (y2 - y1))
+    return sorted(xs)
+
+
+def _point_sur_forme(rings, lat, lng):
+    """(lat, lng) dans la forme : le point donne s'il y est, sinon le milieu de
+    la traversee la plus proche sur la meme parallele (ruban d'une piste dont le
+    centre tombe dans le trou, forme en croissant)."""
+    xs = _traversees(rings, lat)
+    if sum(1 for x in xs if x > lng) % 2:
+        return lat, lng
+    milieux = [(xs[i] + xs[i + 1]) / 2 for i in range(0, len(xs) - 1, 2)]
+    if not milieux:
+        return lat, lng
+    return lat, min(milieux, key=lambda x: abs(x - lng))
+
+
 def _geometry_point(geom):
-    """(lat, lng) representatif d'une geometrie GeoJSON, polygone ou point."""
+    """(lat, lng) representatif d'une geometrie GeoJSON : le point, ou pour un
+    polygone un point a l'interieur de la forme (pin pose sur le lieu, pas dans
+    le trou d'une piste)."""
     if not isinstance(geom, dict):
         return None, None
     t, c = geom.get("type"), geom.get("coordinates")
@@ -264,10 +293,12 @@ def _geometry_point(geom):
             return c[1], c[0]
         if t == "MultiPoint":
             return c[0][1], c[0][0]
-        ring = c[0] if t == "Polygon" else c[0][0] if t == "MultiPolygon" else None
+        polys = [c] if t == "Polygon" else c if t == "MultiPolygon" else None
+        ring = polys[0][0] if polys else None
         if ring:
             pts = ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else ring
-            return (sum(p[1] for p in pts) / len(pts), sum(p[0] for p in pts) / len(pts))
+            lat, lng = sum(p[1] for p in pts) / len(pts), sum(p[0] for p in pts) / len(pts)
+            return _point_sur_forme([[(p[0], p[1]) for p in r] for poly in polys for r in poly], lat, lng)
     except (TypeError, IndexError, ZeroDivisionError):
         pass
     return None, None
