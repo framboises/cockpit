@@ -724,8 +724,9 @@
       var g = it.geo;
       map = L.map(mapBox).setView(g ? [g.lat, g.lng] : LIEU_DEFAULT, g ? 16 : 14);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "OSM", maxZoom: 19 }).addTo(map);
+      // Infobulle en texte (Leaflet interprete une chaine en HTML ; le nom peut etre saisi)
       if (g) L.circleMarker([g.lat, g.lng], { radius: 7, color: "#94a3b8", fillColor: "#cbd5e1", fillOpacity: 0.9 })
-        .bindTooltip("Position actuelle" + (g.name ? " : " + g.name : "")).addTo(map);
+        .bindTooltip(el("span", null, "Position actuelle" + (g.name ? " : " + g.name : ""))).addTo(map);
       map.on("click", function (e) {
         choose({ name: txt.value.trim() || "Lieu corrige", label: "Point pose", layer: "appris", lat: e.latlng.lat, lng: e.latlng.lng });
       });
