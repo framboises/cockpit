@@ -40,6 +40,10 @@
 .pt-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
 .pt-foot { flex: none; border-top: 1px solid #e2e8f0; padding-top: 10px; }
 .pt-editor-body { display: flex; flex-direction: column; gap: 10px; }
+/* Aucun bloc ne retrecit : la liste des points garde sa hauteur et le volet
+   defile, sinon les lignes suivantes (Envoyer maintenant, Archiver) passent
+   par-dessus les derniers points. */
+.pt-editor-body > *, .pt-steps > * { flex-shrink: 0; }
 
 .pt-map-wrap { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; min-height: 0; }
 #pt-map { position: absolute; inset: 0; }
