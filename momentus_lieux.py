@@ -22,6 +22,7 @@ Donnees :
       {_id: <collection>, label,
        liste: "features" (chemin d'une liste de lieux dans chaque doc) | "" (un doc = un lieu),
        id: "properties._id_feature", nom: "properties.Name" (chemins dans un lieu),
+       nom_modele: "Box {}" (optionnel : {} = valeur du champ nom),
        position: {mode: "geojson", champ}            geometrie GeoJSON
                | {mode: "latlng", lat, lng}           deux champs numeriques
                | {mode: "point", champ, ordre}        "47.9, 0.2", [a, b] ou {lat, lng}
@@ -371,7 +372,11 @@ def iter_source(db, src, limit=None):
             fid = get_path(it, src.get("id"))
             fid = None if fid is None or isinstance(fid, (dict, list)) else str(fid).strip()
             name = get_path(it, src.get("nom"))
-            name = str(name).strip() if isinstance(name, (str, int, float)) else ""
+            if isinstance(name, float) and name.is_integer():
+                name = int(name)
+            name = str(name).strip() if isinstance(name, (str, int, float)) and not isinstance(name, bool) else ""
+            if name and src.get("nom_modele"):
+                name = src["nom_modele"].replace("{}", name).strip()
             yield it, fid or None, name, source_position(it, src)
 
 
