@@ -1942,8 +1942,13 @@ def field_create_fiche():
 @field_token_required
 def field_my_fiche_close(fiche_id):
     """Cloture une fiche creee par la tablette (field_created=true).
-    Les fiches creees par cockpit ne peuvent PAS etre cloturees depuis field."""
+    Les fiches creees par cockpit ne peuvent PAS etre cloturees depuis field.
+    Body facultatif {issue, comment} : memes issues et meme entree que la
+    fenetre de cloture du Cockpit (PH.CLOSE_ISSUES, PH.close_text)."""
     device = request.device
+    data = request.get_json(silent=True) or {}
+    issue = data.get("issue") if data.get("issue") in PH.CLOSE_ISSUES else None
+    bilan = (data.get("comment") or "").strip()[:2000]
     name = device.get("name")
     if not name:
         return jsonify({"ok": False, "error": "unnamed_device"}), 400
@@ -1965,17 +1970,20 @@ def field_my_fiche_close(fiche_id):
     now_local = _now_local()
     operator = "field:" + name
 
-    history_entry = PH.make_entry(operator, "Statut: En cours -> Terminé", origin="field", ts=now)
+    history_entry = PH.make_entry(operator, PH.close_text(issue, bilan), origin="field", ts=now)
+    sets = {
+        "status_code": 10,
+        "close_ts": now,
+        "close_iso": now_local.isoformat(),
+        "operator_close": operator,
+        "operator_id_close": "field:" + str(device.get("_id")),
+        "cockpit_status_at": now,
+    }
+    if issue:
+        sets["cloture"] = {"issue": issue, "bilan": bilan or None}
     n = PH.append_entry(
         db["pcorg"], fiche_id, history_entry,
-        set_fields={
-            "status_code": 10,
-            "close_ts": now,
-            "close_iso": now_local.isoformat(),
-            "operator_close": operator,
-            "operator_id_close": "field:" + str(device.get("_id")),
-            "cockpit_status_at": now,
-        },
+        set_fields=sets,
         owned={"status"}, inc_bounce=True,
         extra_filter={"status_code": {"$ne": 10}},
     )

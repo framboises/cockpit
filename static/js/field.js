@@ -8594,15 +8594,125 @@
     else if (reason === "ice_failed") toast("Flux interrompu (reseau)", "warn");
   }
 
+  // Cloture d'une fiche creee par la tablette (ou SOS) : meme fenetre que le
+  // Cockpit (issue facultative, bilan facultatif ; PH.CLOSE_ISSUES cote serveur)
+  var CLOSE_ISSUES = [
+    { id: "resolu", label: "Resolu", icon: "task_alt", color: "#16a34a" },
+    { id: "transmis", label: "Transmis", icon: "forward", color: "#2563eb" },
+    { id: "sans_suite", label: "Sans suite", icon: "do_not_disturb_on", color: "#64748b" },
+    { id: "fausse_alerte", label: "Fausse alerte", icon: "notifications_off", color: "#ca8a04" },
+    { id: "doublon", label: "Doublon", icon: "content_copy", color: "#7c3aed" },
+  ];
+
   function closeFicheFromField(f) {
+    var existing = $("close-fiche-modal");
+    if (existing) existing.remove();
+    var chosen = null;
+    var overlay = document.createElement("div");
+    overlay.className = "field-modal";
+    overlay.id = "close-fiche-modal";
+    var box = document.createElement("div");
+    box.className = "field-modal-box";
+
+    var header = document.createElement("div");
+    header.className = "field-modal-header";
+    var h2 = document.createElement("h2");
+    h2.textContent = "Clore la fiche";
+    header.appendChild(h2);
+    var x = document.createElement("button");
+    x.className = "icon-btn";
+    x.setAttribute("aria-label", "Fermer");
+    x.appendChild(_mkIcon("close"));
+    x.onclick = function () { overlay.remove(); };
+    header.appendChild(x);
+    box.appendChild(header);
+
+    var body = document.createElement("div");
+    body.className = "field-modal-body";
+    body.style.padding = "16px";
+    if (f.text) {
+      var sum = document.createElement("div");
+      sum.style.cssText = "font-size:13px;color:#cbd5e1;background:rgba(148,163,184,.12);border-radius:8px;padding:8px 10px;margin-bottom:12px;";
+      sum.textContent = ((f.category || "").replace("PCO.", "") + " - " + f.text).slice(0, 160);
+      body.appendChild(sum);
+    }
+    var lbl = document.createElement("div");
+    lbl.style.cssText = "font-size:13px;color:#94a3b8;margin-bottom:8px;";
+    lbl.textContent = "Issue";
+    body.appendChild(lbl);
+    var grid = document.createElement("div");
+    grid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;";
+    var chips = [];
+    CLOSE_ISSUES.forEach(function (o) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.dataset.id = o.id;
+      b.style.cssText = "display:flex;align-items:center;gap:6px;min-height:48px;padding:8px 10px;"
+        + "border-radius:10px;border:2px solid rgba(148,163,184,.35);background:transparent;"
+        + "color:inherit;font-size:14px;font-weight:600;text-align:left;";
+      var ic = _mkIcon(o.icon);
+      ic.style.color = o.color;
+      b.appendChild(ic);
+      b.appendChild(document.createTextNode(o.label));
+      b.addEventListener("click", function () {
+        chosen = chosen === o.id ? null : o.id;     // re-toucher = aucune issue
+        chips.forEach(function (c) {
+          var on = c.dataset.id === chosen;
+          c.style.borderColor = on ? CLOSE_ISSUES.find(function (y) { return y.id === c.dataset.id; }).color : "rgba(148,163,184,.35)";
+          c.style.background = on ? "rgba(148,163,184,.15)" : "transparent";
+        });
+      });
+      chips.push(b);
+      grid.appendChild(b);
+    });
+    body.appendChild(grid);
+    var ta = document.createElement("textarea");
+    ta.className = "fiche-create-text";
+    ta.rows = 3;
+    ta.maxLength = 2000;
+    ta.placeholder = "Bilan (facultatif) : ce qui a ete fait, suites eventuelles...";
+    ta.setAttribute("autocapitalize", "sentences");
+    body.appendChild(ta);
+    var msg = document.createElement("div");
+    msg.className = "fiche-create-msg";
+    body.appendChild(msg);
+    box.appendChild(body);
+
+    var actions = document.createElement("div");
+    actions.className = "field-modal-actions";
+    actions.style.padding = "12px 16px";
+    var ok = document.createElement("button");
+    ok.className = "btn-confirm-ack";
+    ok.appendChild(_mkIcon("task_alt"));
+    ok.appendChild(document.createTextNode(" Clore la fiche"));
+    actions.appendChild(ok);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
+
+    ok.addEventListener("click", function () {
+      ok.disabled = true;
+      sendFieldClose(f, { issue: chosen, comment: ta.value.trim() }, function (err) {
+        if (!err) { overlay.remove(); return; }
+        ok.disabled = false;
+        msg.textContent = err;
+        msg.className = "fiche-create-msg error";
+      });
+    });
+  }
+
+  function sendFieldClose(f, payload, done) {
     fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/close", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data && data.ok) {
-          toast("Fiche cloturee", "ok");
+          done(null);
+          toast("Fiche close", "ok");
           $("fiche-detail-modal").hidden = true;
           // Le serveur ne repasse en patrouille que si c'etait la fiche
           // active : cloturer une ancienne fiche ne doit pas afficher
@@ -8613,10 +8723,11 @@
           if (state.routeFicheId === f.id) clearRoute();
           pollFiches();
         } else {
-          toast("Erreur : " + ((data && data.error) || "?"), "err");
+          var e = (data && data.error) || "?";
+          done(e === "already_closed" ? "La fiche est deja close." : e === "not_assigned" ? "Cette fiche ne vous est plus affectee." : "Erreur : " + e);
         }
       })
-      .catch(function () { toast("Erreur reseau", "err"); });
+      .catch(function () { done("Pas de reseau, reessayez."); });
   }
 
   // ---------------------------------------------------------------------

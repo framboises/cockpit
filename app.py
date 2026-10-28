@@ -7818,10 +7818,7 @@ def pcorg_set_urgency(doc_id):
 
 # Issues proposees par la fenetre de cloture (memes codes que l'issue des
 # fiches structurees pcorg_digest : resolu, transmis, sans_suite)
-PCORG_CLOSE_ISSUES = {
-    "resolu": "Resolu", "transmis": "Transmis", "sans_suite": "Sans suite",
-    "fausse_alerte": "Fausse alerte", "doublon": "Doublon",
-}
+PCORG_CLOSE_ISSUES = PH.CLOSE_ISSUES   # partagee avec la cloture depuis la tablette (field.py)
 
 
 @app.route('/api/pcorg/close/<doc_id>', methods=['POST'])
@@ -7851,9 +7848,7 @@ def pcorg_close(doc_id):
     user = request.user_payload
     operator_name = _pcorg_operator(user)
     now = datetime.now(ZoneInfo("Europe/Paris"))
-    text = "Statut: En cours -> Terminé" + (f"\nIssue : {PCORG_CLOSE_ISSUES[issue]}" if issue else "") \
-        + (f"\n{motif}" if motif else "")
-    entry = PH.make_entry(operator_name, text, ts=now)
+    entry = PH.make_entry(operator_name, PH.close_text(issue, motif), ts=now)
     sets = {
         "close_ts": now,
         "close_iso": now.isoformat(),

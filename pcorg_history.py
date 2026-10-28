@@ -265,6 +265,20 @@ def merge_sync_doc(new_doc, existing):
 # Ecriture atomique d'une entree
 # ---------------------------------------------------------------------------
 
+# Issues de cloture d'une fiche : fenetre de cloture du Cockpit (pcorg.js)
+# et cloture depuis la tablette (field.js), meme liste, meme entree.
+CLOSE_ISSUES = {
+    "resolu": "Resolu", "transmis": "Transmis", "sans_suite": "Sans suite",
+    "fausse_alerte": "Fausse alerte", "doublon": "Doublon",
+}
+
+
+def close_text(issue=None, bilan=None):
+    """Texte de l'entree de cloture : statut (format Prysm), issue, bilan."""
+    return "Statut: En cours -> Terminé" + (f"\nIssue : {CLOSE_ISSUES[issue]}" if issue in CLOSE_ISSUES else "") \
+        + (f"\n{bilan}" if bilan else "")
+
+
 def make_entry(operator, text, origin="cockpit", ts=None, **extra):
     entry = {
         "ts": iso_paris(ts or now_paris()),

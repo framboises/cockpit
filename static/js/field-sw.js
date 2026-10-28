@@ -14,7 +14,7 @@
 // coquille (field.py, _shell_fingerprint) : modifier field.js / field.css /
 // field.html suffit, plus besoin d'incrementer a la main. Un nouveau fichier
 // de la coquille s'ajoute a APP_SHELL_URLS ET a field._SHELL_FILES.
-const SW_VERSION = "field-sw-v52";
+const SW_VERSION = "field-sw-v53";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
