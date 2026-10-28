@@ -158,9 +158,17 @@
                     <div class="pt-tab" data-tab="points" hidden>
                         <div class="pt-pane" id="pt-pt-listpane">
                             <div class="pt-view-head">
-                                <div class="pt-callout"><span class="material-symbols-outlined">add_location_alt</span> Cliquez sur la carte pour creer un point, ou importez-les d'une couche.</div>
-                                <button type="button" class="btn btn-primary" id="pt-imp-open"><span class="material-symbols-outlined">layers</span> Importer depuis une couche (sanitaires, tribunes, portails...)</button>
-                                <button type="button" class="btn" id="pt-pc-new"><span class="material-symbols-outlined">sports_score</span> Nouveau parcours impose (tour de piste)</button>
+                                <div class="pt-tools">
+                                    <div class="pt-tool-hint"><span class="material-symbols-outlined">add_location_alt</span> Cliquez sur la carte pour creer un point</div>
+                                    <button type="button" class="pt-tool" id="pt-imp-open" aria-describedby="pt-help-imp">
+                                        <span class="material-symbols-outlined">layers</span><span>Importer</span>
+                                        <span class="pt-help" id="pt-help-imp" role="tooltip">Creer des points depuis une couche de la carte : sanitaires, tribunes, portails... Filtre par nom, lasso, tout cocher, ou directement un scenario.</span>
+                                    </button>
+                                    <button type="button" class="pt-tool" id="pt-pc-new" aria-describedby="pt-help-pc">
+                                        <span class="material-symbols-outlined">sports_score</span><span>Tour de piste</span>
+                                        <span class="pt-help" id="pt-help-pc" role="tooltip">Parcours impose a rouler en entier sur la piste : cliquez les passages dans l'ordre, choisissez le sens. La tablette suit le trace et valide le tour a 80 % des passages.</span>
+                                    </button>
+                                </div>
                                 <div class="pt-row">
                                     <input type="search" id="pt-pt-search" class="pt-input" placeholder="Rechercher un point">
                                     <label class="pt-check"><input type="checkbox" id="pt-pt-inactive"> Desactives</label>
