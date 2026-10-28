@@ -27,6 +27,10 @@ LAYERS = {
     "campements_commissaires": "Campement commissaires", "box_numerotation": "Box", "Boutiques": "Boutique",
 }
 ZONES_COLLECTION = "competences"
+# Lieux appris des corrections des admins (page /admin/gravite-fiches) : texte
+# cite normalise (_id) -> lieu {name, lat, lng, layer, label}. Prime sur le
+# referentiel des couches pour le lieu cite et le titre.
+LEARNED_COLLECTION = "pcorg_lieux_appris"
 MIN_NAME_CHARS = 4          # un nom plus court n'est rapproche que par motif dedie (T12, V3...)
 # Un nom d'UN seul mot n'est retenu que si le lieu cite est exactement ce nom, et
 # jamais pour ces mots generiques : « PS.Nord » tombait sur un lieu « Nord »,
@@ -208,6 +212,25 @@ class Gazetteer:
                 if name and str(name) != "None" and f.get("geometry"):
                     self.polys.append({"layer": coll, "label": label, "name": str(name),
                                        "geom": f["geometry"], "bbox": _bbox(f["geometry"])})
+        self.learned = []
+        for l in db[LEARNED_COLLECTION].find({}):
+            if l.get("lat") is not None and l.get("_id"):
+                self.learned.append({"norm": l["_id"], "name": l.get("name") or l.get("texte"),
+                                     "layer": l.get("layer") or "appris", "label": l.get("label") or "Lieu appris",
+                                     "lat": float(l["lat"]), "lng": float(l["lng"])})
+        self.learned.sort(key=lambda e: -len(e["norm"]))
+
+    def match_learned(self, text):
+        """Lieu appris cite dans un texte : texte identique, ou nom de plusieurs
+        mots (ou de 6 lettres et plus) contenu dans le texte."""
+        n = norm(text)
+        if not n:
+            return None
+        t = " %s " % n
+        for e in getattr(self, "learned", []):
+            if n == e["norm"] or ((" " in e["norm"] or len(e["norm"]) >= 6) and " %s " % e["norm"] in t):
+                return e
+        return None
 
     def zone_of(self, lat, lng):
         """Zone de competence la plus FINE contenant le point (secteur > zone >
@@ -264,8 +287,11 @@ class Gazetteer:
             return self.virages[int(m.group(1))], "moyenne"
         return None, None
 
-    def locate(self, fiche, lieu=None):
-        """Position de la fiche : GPS d'origine > carroyage > lieu cite (modele puis titre)."""
+    def locate(self, fiche, lieu=None, override=None):
+        """Position de la fiche : correction d'un admin > GPS d'origine >
+        carroyage > lieu appris > lieu cite (modele puis titre)."""
+        if override and override.get("lat") is not None:
+            return dict(override, source="operateur", confidence="haute")
         gps = fiche.get("gps") or {}
         coords = gps.get("coordinates") if isinstance(gps, dict) else None
         if coords and len(coords) >= 2:
@@ -277,6 +303,10 @@ class Gazetteer:
         for src, txt in (("lieu", lieu), ("titre", fiche.get("text"))):
             if not txt or norm(txt) in ("", "non precise"):
                 continue
+            le = self.match_learned(txt)
+            if le:
+                return {"lat": le["lat"], "lng": le["lng"], "source": src, "layer": le["layer"],
+                        "layer_label": le["label"], "name": le["name"], "confidence": "haute", "appris": le["norm"]}
             e, conf = self.match_text(txt)
             if e:
                 return {"lat": e["lat"], "lng": e["lng"], "source": src, "layer": e["layer"],
@@ -421,7 +451,7 @@ def _relances(fiche):
 
 def enrich(gaz, fiche, d, taxo=None):
     """Champs calcules a stocker dans le digest."""
-    geo = gaz.locate(fiche, d.get("lieu"))
+    geo = gaz.locate(fiche, d.get("lieu"), override=(d.get("lieu_corrige") or {}).get("geo"))
     around = gaz.surroundings(geo["lat"], geo["lng"], geo["source"]) if geo and hasattr(gaz, "near") else {}
     out = {"geo": geo, "zone": gaz.zone_of(geo["lat"], geo["lng"]) if geo else None,
            "competence": around.get("competence"), "dans": around.get("dans") or [], "pres": around.get("pres") or [],

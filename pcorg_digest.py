@@ -589,6 +589,12 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
                     "prompt_version": PROMPT_VERSION, "batch": batch, "at": _now()}
             try:
                 res, meta = analyze(doc, sess, sc_lists)
+                # Lieu corrige par un admin : garde au retraitement (lieu cite et position)
+                lc = (db[COLL].find_one({"_id": doc["_id"]}, {"lieu_corrige": 1}) or {}).get("lieu_corrige")
+                if lc:
+                    res["lieu_corrige"] = lc
+                    if lc.get("lieu"):
+                        res["lieu"] = lc["lieu"]
                 res.update(PE.enrich(gaz, doc, res, taxo))
                 db[COLL].update_one({"_id": doc["_id"]}, {
                     "$set": dict(base, **res, meta=meta, error=None, attempts=0)}, upsert=True)

@@ -65,6 +65,8 @@ def _pub_digest(d, fiche=None):
                                   "doublon_declare", "alarme_non_remise", "a_controler",
                                   "competence", "dans", "pres", "ignoree", "plaques",
                                   "agression_agent", "chaleur")}
+    lc = d.get("lieu_corrige")
+    out["lieu_corrige"] = dict(lc, at=_iso(lc.get("at"))) if lc else None
     out["id"] = d["_id"]
     out["at"] = _iso(d.get("at"))
     out["ms"] = (d.get("meta") or {}).get("ms")
@@ -646,6 +648,174 @@ def gravite_fiches_operateur():
     ids = ids[:50]
     digests = {d["_id"]: d for d in _db()[PD.COLL].find({"_id": {"$in": ids}})}
     return jsonify({"items": _with_fiches([digests[i] for i in ids if i in digests])})
+
+
+# ---------------------------------------------------------------------------
+# Correction du lieu d'une fiche et lieux appris (pcorg_enrich.LEARNED_COLLECTION)
+# ---------------------------------------------------------------------------
+# L'admin choisit un lieu existant (couches Looker, points de patrouille,
+# lieux appris) ou pose un point sur la carte. La fiche est corrigee
+# (`lieu_corrige`, prime sur tout, garde au retraitement) ; « retenir » ajoute
+# le texte cite aux lieux appris : les fiches qui le citent sont replacees
+# tout de suite (code pur, sans le modele) et les suivantes le seront a leur
+# traitement. Les propositions de patrouille lisent ces positions.
+_GAZ = {"at": None, "g": None}
+GAZ_TTL_S = 300
+
+
+def _gazetteer(fresh=False):
+    import pcorg_enrich as PE
+    now = datetime.now(timezone.utc)
+    if fresh or _GAZ["g"] is None or (now - _GAZ["at"]).total_seconds() > GAZ_TTL_S:
+        _GAZ.update(g=PE.Gazetteer(_db()), at=now)
+    return _GAZ["g"]
+
+
+def _reenrich(ids, gaz):
+    """Recalcule les champs « code pur » (position, zone, voisinage...) des fiches."""
+    import pcorg_enrich as PE
+    db = _db()
+    col = db[PD.COLL]
+    taxo = PE.Taxonomy(db)
+    ids = list(ids)
+    n = 0
+    for i in range(0, len(ids), 200):
+        chunk = ids[i:i + 200]
+        fiches = {f["_id"]: f for f in db["pcorg"].find({"_id": {"$in": chunk}}, PD.SOURCE_PROJECTION)}
+        for d in col.find({"_id": {"$in": chunk}}):
+            f = fiches.get(d["_id"])
+            if f:
+                col.update_one({"_id": d["_id"]}, {"$set": PE.enrich(gaz, f, d, taxo)})
+                n += 1
+    return n
+
+
+def _who():
+    return (getattr(request, "admin_user", None) or {}).get("email", "?")
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/lieux")
+@admin_required
+def gravite_fiches_lieux():
+    """Lieux connus dont le nom contient tous les mots cherches : lieux
+    appris, points de patrouille (et leurs autres noms), couches Looker."""
+    import pcorg_enrich as PE
+    words = PE.norm(request.args.get("q")).split()
+    if not words or len("".join(words)) < 2:
+        return jsonify({"items": []})
+    gaz = _gazetteer()
+    out, seen = [], set()
+
+    def add(name, label, lat, lng, layer, also=""):
+        n = PE.norm(name + " " + also)
+        if not all(w in n for w in words) or lat is None:
+            return
+        key = (PE.norm(name), round(float(lat), 4), round(float(lng), 4))
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"name": name, "label": label, "lat": float(lat), "lng": float(lng), "layer": layer,
+                    "starts": PE.norm(name).startswith(words[0])})
+
+    for e in gaz.learned:
+        add(e["name"], "Lieu appris", e["lat"], e["lng"], e["layer"], e["norm"])
+    for p in _db()["patrol_points"].find({"active": {"$ne": False}, "merged_into": {"$exists": False},
+                                          "kind": {"$ne": "parcours"}}, {"name": 1, "aliases": 1, "lat": 1, "lng": 1}):
+        add(p.get("name") or "", "Point de patrouille", p.get("lat"), p.get("lng"), "patrouille",
+            " ".join(p.get("aliases") or []))
+    for e in gaz.entries + list(gaz.tribunes.values()) + list(gaz.virages.values()) + gaz.near:
+        add(e["name"], e["label"], e["lat"], e["lng"], e["layer"])
+    out.sort(key=lambda x: (not x["starts"], len(x["name"])))
+    return jsonify({"items": out[:30]})
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/<fiche_id>/lieu", methods=["POST"])
+@admin_required
+def gravite_fiches_lieu(fiche_id):
+    """Corrige le lieu d'une fiche ({lieu, place {name, lat, lng, label,
+    layer}, learn}) ou annule la correction ({annuler: true})."""
+    import pcorg_enrich as PE
+    data = request.get_json(silent=True) or {}
+    db = _db()
+    col = db[PD.COLL]
+    d = col.find_one({"_id": fiche_id}, {"lieu": 1, "geo": 1, "lieu_corrige": 1, "review": 1})
+    if not d:
+        return jsonify({"error": "not_found"}), 404
+    now = datetime.now(timezone.utc)
+    if data.get("annuler"):
+        lc = d.get("lieu_corrige") or {}
+        col.update_one({"_id": fiche_id}, {"$set": {"lieu_corrige": None, "lieu": lc.get("ancien_lieu", d.get("lieu"))}})
+        _reenrich([fiche_id], _gazetteer())
+        return jsonify({"ok": True, "item": _with_fiches([col.find_one({"_id": fiche_id})])[0], "replacees": 0})
+    lieu = str(data.get("lieu") or "").strip()[:120]
+    place = data.get("place") or {}
+    try:
+        lat, lng = float(place.get("lat")), float(place.get("lng"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "position_invalide"}), 400
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return jsonify({"error": "position_invalide"}), 400
+    name = str(place.get("name") or lieu or "Lieu corrige").strip()[:80]
+    label = str(place.get("label") or "Point pose").strip()[:40]
+    layer = str(place.get("layer") or "appris").strip()[:40]
+    geo = {"lat": lat, "lng": lng, "name": name, "layer": layer, "layer_label": label}
+    prev = d.get("lieu_corrige") or {}
+    lc = {"lieu": lieu or d.get("lieu"), "geo": geo, "by": _who(), "at": now,
+          "ancien_lieu": prev.get("ancien_lieu", d.get("lieu")), "ancien_geo": prev.get("ancien_geo", d.get("geo"))}
+    sets = {"lieu_corrige": lc, "lieu": lc["lieu"]}
+    if d.get("review"):
+        col.update_one({"_id": fiche_id}, {"$addToSet": {"review.champs_faux": "lieu"}})
+    col.update_one({"_id": fiche_id}, {"$set": sets})
+    key = PE.norm(lc["lieu"])
+    learned = bool(data.get("learn")) and key not in ("", "non precise")
+    if learned:
+        db[PE.LEARNED_COLLECTION].update_one({"_id": key}, {"$set": {
+            "texte": lc["lieu"], "name": name, "lat": lat, "lng": lng, "layer": layer, "label": label,
+            "by": _who(), "at": now}, "$setOnInsert": {"created_at": now}}, upsert=True)
+    gaz = _gazetteer(fresh=learned)
+    replaced = 0
+    if learned:
+        # Fiches dont le lieu cite renvoie a ce lieu appris : replacees maintenant
+        ids = [x["_id"] for x in col.find({"error": None, "gravite": {"$ne": None}, "_id": {"$ne": fiche_id}},
+                                          {"lieu": 1})
+               if (gaz.match_learned(x.get("lieu")) or {}).get("norm") == key]
+        _reenrich(ids, gaz)
+        replaced = col.count_documents({"geo.appris": key})
+    _reenrich([fiche_id], gaz)
+    logger.info("Lieu de la fiche %s corrige par %s : %s -> %s%s", fiche_id, _who(), d.get("lieu"), name,
+                " (appris, %d fiche(s))" % replaced if learned else "")
+    return jsonify({"ok": True, "item": _with_fiches([col.find_one({"_id": fiche_id})])[0],
+                    "appris": learned, "replacees": replaced})
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/lieux-appris")
+@admin_required
+def gravite_fiches_lieux_appris():
+    import pcorg_enrich as PE
+    db = _db()
+    counts = {r["_id"]: r["n"] for r in db[PD.COLL].aggregate([
+        {"$match": {"geo.appris": {"$ne": None}}}, {"$group": {"_id": "$geo.appris", "n": {"$sum": 1}}}])}
+    items = [{"key": l["_id"], "texte": l.get("texte"), "name": l.get("name"), "label": l.get("label"),
+              "lat": l.get("lat"), "lng": l.get("lng"), "by": l.get("by"), "at": _iso(l.get("at")),
+              "fiches": counts.get(l["_id"], 0)}
+             for l in db[PE.LEARNED_COLLECTION].find().sort("at", -1)]
+    corrected = db[PD.COLL].count_documents({"lieu_corrige": {"$ne": None}})
+    return jsonify({"items": items, "fiches_corrigees": corrected})
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/lieux-appris/delete", methods=["POST"])
+@admin_required
+def gravite_fiches_lieu_appris_delete():
+    """Oublie un lieu appris ; les fiches placees par lui sont recalculees."""
+    import pcorg_enrich as PE
+    key = str((request.get_json(silent=True) or {}).get("key") or "")
+    db = _db()
+    if not db[PE.LEARNED_COLLECTION].delete_one({"_id": key}).deleted_count:
+        return jsonify({"error": "not_found"}), 404
+    ids = [x["_id"] for x in db[PD.COLL].find({"geo.appris": key}, {"_id": 1})]
+    n = _reenrich(ids, _gazetteer(fresh=True))
+    logger.info("Lieu appris %r oublie par %s (%d fiche(s) recalculee(s))", key, _who(), n)
+    return jsonify({"ok": True, "recalculees": n})
 
 
 @gravite_fiches_bp.route("/api/gravite-fiches/night", methods=["POST"])

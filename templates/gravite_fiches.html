@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='libs/leaflet/leaflet.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/gravite_fiches.css') }}?v={{ asset_v }}">
 </head>
 
@@ -116,6 +117,19 @@
                 <div class="widget-body" id="gf-quality"><div class="gf-muted">Chargement...</div></div>
             </section>
 
+            <section class="widget-card gf-dash" id="gf-sec-lieux" style="margin-top:16px;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle;">wrong_location</span> Lieux corriges et appris</h3>
+                    <div class="gf-muted" style="margin-left:auto;" id="gf-lieux-stats">Corrigez un lieu depuis une fiche (bouton Corriger le lieu)</div>
+                </header>
+                <div class="widget-body gf-scroll">
+                    <table class="table table-striped gf-lieux">
+                        <thead><tr><th>Texte cite</th><th>Place sur</th><th class="gf-num">Fiches</th><th>Par</th><th></th></tr></thead>
+                        <tbody id="gf-lieux-body"><tr><td colspan="5" class="gf-muted">Chargement...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
             <section class="widget-card gf-dash" id="gf-sec-lots" style="margin-top:16px;">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">inventory_2</span> Lots de fiches</h3>
@@ -218,6 +232,7 @@
 </div>
 
 <div id="toast-container"></div>
+<script src="{{ url_for('static', filename='libs/leaflet/leaflet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/gravite_fiches.js') }}?v={{ asset_v }}"></script>

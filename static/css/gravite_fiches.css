@@ -21,6 +21,21 @@
 .gf-progress-run .gf-progress-bar { background: #16a34a; }
 .gf-run-box.gf-waiting .gf-progress-bar { width: 100% !important; background: repeating-linear-gradient(45deg, #cbd5e1 0 10px, #e2e8f0 10px 20px); }
 
+/* Correction du lieu d'une fiche */
+.gf-lieu-btn { margin-left: 8px; font-size: 12px; }
+.gf-lieu-fix { margin-top: 8px; padding: 10px; border: 1px solid #fcd34d; background: #fffbeb; border-radius: 8px;
+  display: flex; flex-direction: column; gap: 8px; }
+.gf-lieu-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; color: var(--text); }
+.gf-lieu-field .gf-select { font-size: 13px; padding: 6px 8px; }
+.gf-lieu-results { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.gf-lieu-results:empty { display: none; }
+.gf-lieu-item { text-align: left; border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 5px 8px;
+  font: inherit; font-size: 13px; cursor: pointer; }
+.gf-lieu-item:hover { background: #eff6ff; border-color: #93c5fd; }
+.gf-lieu-map { height: 240px; border-radius: 8px; border: 1px solid var(--border); }
+.gf-lieu-chosen { font-size: 13px; font-weight: 600; color: #1e3a8a; }
+.gf-lieu-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
 .gf-gravites { display: flex; flex-direction: column; gap: 6px; }
 .gf-grav-row { display: grid; grid-template-columns: 210px 1fr 70px; gap: 10px; align-items: center; font-size: 13px; }
 .gf-grav-track { height: 14px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }

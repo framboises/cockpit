@@ -270,6 +270,17 @@ accordable explicitement a un groupe). But : mesurer la justesse du modele et co
   sondage pour comparer les versions.
 - Hors perimetre pour l'instant : afficher la gravite evaluee dans la main courante (badge), a decider
   une fois la justesse mesuree.
+- **Correction du lieu (28/10/2026)** : bouton « Corriger le lieu » sur chaque fiche. Lieu cite
+  modifiable, lieu existant cherche (`/api/gravite-fiches/lieux` : lieux appris, points de patrouille et
+  leurs autres noms, couches du `Gazetteer`) ou point pose sur une carte. Fiche : `lieu_corrige {lieu,
+  geo, ancien_lieu, ancien_geo, by, at}`, position `source "operateur"` qui prime sur tout (GPS
+  compris), gardee au retraitement par `pcorg_digest`, annulable ; `lieu` ajoute aux champs faux si la
+  fiche est controlee. « Retenir » (coche par defaut) : `pcorg_lieux_appris {_id: texte normalise, texte,
+  name, lat, lng, layer, label}`, lu par `Gazetteer.match_learned` AVANT le referentiel pour le lieu cite
+  et le titre (texte identique, ou nom de plusieurs mots / 6 lettres contenu dans le texte) ; position
+  `geo.appris = <cle>`. Les fiches dont le lieu cite renvoie au lieu appris sont recalculees aussitot
+  (code pur, `_reenrich`). Section « Lieux corriges et appris » : liste, nombre de fiches, « Oublier »
+  (fiches recalculees). Le modele n'est pas re-entraine : c'est le placement qui apprend.
 
 ### 6.1 Moteur de propositions (code seul, toujours disponible)
 

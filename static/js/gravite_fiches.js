@@ -23,7 +23,8 @@
   var CHAMPS_BLOCS = ["ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service",
                       "agression_agent", "chaleur"];
   var NATURE_LABELS = { incident: "Incident", routine: "Routine", information: "Information" };
-  var POS_LABELS = { gps: "GPS d'origine", carroyage: "Carroyage", lieu: "Lieu cite", titre: "Titre", aucune: "Aucune" };
+  var POS_LABELS = { gps: "GPS d'origine", carroyage: "Carroyage", lieu: "Lieu cite", titre: "Titre", aucune: "Aucune",
+                     operateur: "Corrige a la main" };
   var ISSUE_LABELS = { resolu: "Resolu", transmis: "Transmis", sans_suite: "Sans suite", en_attente: "En attente", non_precise: "Non precise" };
 
   // ---------- HTTP ----------
@@ -621,6 +622,176 @@
     return span;
   }
 
+  // ---------- Correction du lieu (lieu existant ou point pose, lieu appris) ----------
+  var LIEU_DEFAULT = [47.952, 0.212];
+  function lieuPanel(it) {
+    var panel = el("div", "gf-lieu-fix");
+    panel.addEventListener("click", function (ev) { ev.stopPropagation(); });
+    var chosen = null, marker = null, map = null, timer = null;
+
+    var lab1 = el("label", "gf-lieu-field", "Lieu cite dans la fiche");
+    var txt = document.createElement("input");
+    txt.type = "text"; txt.className = "gf-select"; txt.maxLength = 120;
+    txt.value = it.lieu && it.lieu !== "non precise" ? it.lieu : "";
+    lab1.appendChild(txt);
+    panel.appendChild(lab1);
+
+    var lab2 = el("label", "gf-lieu-field", "Choisir un lieu existant");
+    var q = document.createElement("input");
+    q.type = "search"; q.className = "gf-select"; q.placeholder = "Porte, tribune, parking, batiment, point de patrouille...";
+    lab2.appendChild(q);
+    panel.appendChild(lab2);
+    var results = el("div", "gf-lieu-results");
+    panel.appendChild(results);
+    panel.appendChild(el("div", "gf-muted", "ou cliquez sur la carte pour poser le point (nouveau lieu)"));
+    var mapBox = el("div", "gf-lieu-map");
+    panel.appendChild(mapBox);
+    var chosenEl = el("div", "gf-lieu-chosen", "Aucun lieu choisi");
+    panel.appendChild(chosenEl);
+    var learnLab = el("label", "gf-check");
+    var learn = document.createElement("input");
+    learn.type = "checkbox"; learn.checked = true;
+    learnLab.appendChild(learn);
+    var learnTxt = el("span");
+    learnLab.appendChild(learnTxt);
+    panel.appendChild(learnLab);
+    function refreshLearn() {
+      var t = txt.value.trim();
+      learnTxt.textContent = t ? " Retenir : toutes les fiches qui citent \"" + t + "\" iront a ce lieu" : " Retenir (indiquez le lieu cite)";
+      learn.disabled = !t;
+    }
+    txt.addEventListener("input", refreshLearn);
+    refreshLearn();
+
+    var acts = el("div", "gf-lieu-actions");
+    var cancel = el("button", "btn", "Fermer"); cancel.type = "button";
+    cancel.addEventListener("click", function () { if (map) map.remove(); panel.remove(); });
+    acts.appendChild(cancel);
+    if (it.lieu_corrige) {
+      var undo = el("button", "btn", "Annuler la correction"); undo.type = "button";
+      undo.addEventListener("click", function () { sendLieu(it, { annuler: true }); });
+      acts.appendChild(undo);
+    }
+    var save = el("button", "btn btn-primary", "Enregistrer"); save.type = "button"; save.disabled = true;
+    save.addEventListener("click", function () {
+      if (!chosen) return;
+      save.disabled = true;
+      sendLieu(it, { lieu: txt.value.trim(), place: chosen, learn: learn.checked && !learn.disabled });
+    });
+    acts.appendChild(save);
+    panel.appendChild(acts);
+
+    function choose(p) {
+      chosen = p;
+      chosenEl.textContent = "Lieu choisi : " + p.name + " (" + p.label + ")";
+      save.disabled = false;
+      if (!map) return;
+      if (marker) marker.setLatLng([p.lat, p.lng]);
+      else {
+        marker = L.marker([p.lat, p.lng], { draggable: true }).addTo(map);
+        marker.on("dragend", function () {
+          var ll = marker.getLatLng();
+          choose({ name: txt.value.trim() || "Lieu corrige", label: "Point pose", layer: "appris", lat: ll.lat, lng: ll.lng });
+        });
+      }
+      map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16));
+    }
+
+    q.addEventListener("input", function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        var v = q.value.trim();
+        clear(results);
+        if (v.length < 2) return;
+        apiGet("/api/gravite-fiches/lieux?q=" + encodeURIComponent(v)).then(function (r) {
+          clear(results);
+          if (!r.items.length) results.appendChild(el("div", "gf-muted", "Aucun lieu connu : posez le point sur la carte."));
+          r.items.forEach(function (p) {
+            var b = el("button", "gf-lieu-item");
+            b.type = "button";
+            b.appendChild(el("strong", null, p.name));
+            b.appendChild(el("span", "gf-muted", " " + p.label));
+            b.addEventListener("click", function () { choose(p); clear(results); q.value = p.name; });
+            results.appendChild(b);
+          });
+        }).catch(function (e) { toast("error", "Recherche impossible : " + e.message); });
+      }, 250);
+    });
+
+    // Carte apres insertion dans la page (Leaflet mesure son conteneur)
+    setTimeout(function () {
+      if (typeof L === "undefined") { mapBox.textContent = "Carte indisponible"; return; }
+      var g = it.geo;
+      map = L.map(mapBox).setView(g ? [g.lat, g.lng] : LIEU_DEFAULT, g ? 16 : 14);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "OSM", maxZoom: 19 }).addTo(map);
+      if (g) L.circleMarker([g.lat, g.lng], { radius: 7, color: "#94a3b8", fillColor: "#cbd5e1", fillOpacity: 0.9 })
+        .bindTooltip("Position actuelle" + (g.name ? " : " + g.name : "")).addTo(map);
+      map.on("click", function (e) {
+        choose({ name: txt.value.trim() || "Lieu corrige", label: "Point pose", layer: "appris", lat: e.latlng.lat, lng: e.latlng.lng });
+      });
+    }, 0);
+    setTimeout(function () { q.focus(); }, 50);
+    return panel;
+  }
+
+  function sendLieu(it, body) {
+    apiPost("/api/gravite-fiches/" + encodeURIComponent(it.id) + "/lieu", body).then(function (r) {
+      var idx = state.items.indexOf(it);
+      if (idx >= 0) {
+        // Controle en cours garde (la reponse relit la fiche avec son controle)
+        state.items[idx] = r.item;
+        var old = document.querySelector('.gf-item[data-idx="' + idx + '"]');
+        if (old) {
+          var fresh = renderItem(r.item, idx);
+          if (old.classList.contains("gf-focus")) fresh.classList.add("gf-focus");
+          old.parentNode.replaceChild(fresh, old);
+        }
+      }
+      toast("success", body.annuler ? "Correction annulee"
+        : "Lieu corrige" + (r.appris ? " et appris : " + r.replacees + " fiche(s) placee(s) par ce lieu" : ""));
+      loadLieux();
+    }).catch(function (e) { toast("error", "Correction refusee : " + e.message); });
+  }
+
+  function loadLieux() {
+    return apiGet("/api/gravite-fiches/lieux-appris").then(function (r) {
+      var body = document.getElementById("gf-lieux-body");
+      if (!body) return;
+      document.getElementById("gf-lieux-stats").textContent =
+        fmtInt(r.fiches_corrigees) + " fiche(s) corrigee(s) a la main, " + fmtInt(r.items.length) + " lieu(x) appris";
+      clear(body);
+      if (!r.items.length) {
+        var tr0 = el("tr"), td0 = el("td", "gf-muted", "Aucun lieu appris : corrigez un lieu depuis une fiche et laissez \"Retenir\" coche.");
+        td0.colSpan = 5; tr0.appendChild(td0); body.appendChild(tr0);
+        return;
+      }
+      r.items.forEach(function (l) {
+        var tr = el("tr");
+        tr.appendChild(el("td", null, l.texte));
+        tr.appendChild(el("td", null, l.name + " (" + (l.label || "") + ")"));
+        tr.appendChild(el("td", "gf-num", fmtInt(l.fiches)));
+        tr.appendChild(el("td", "gf-muted", (l.by || "?").split("@")[0] + " " + fmtTime(l.at)));
+        var td = el("td"), b = el("button", "btn", "Oublier");
+        b.type = "button";
+        b.addEventListener("click", function () {
+          var go = function () {
+            apiPost("/api/gravite-fiches/lieux-appris/delete", { key: l.key }).then(function (x) {
+              toast("success", "Lieu oublie (" + x.recalculees + " fiche(s) recalculee(s))");
+              loadLieux();
+            }).catch(function (e) { toast("error", e.message); });
+          };
+          if (typeof window.showConfirmToast === "function") {
+            window.showConfirmToast("Oublier \"" + l.texte + "\" -> " + l.name + " ? Les fiches placees par ce lieu seront recalculees.",
+              { okLabel: "Oublier", cancelLabel: "Annuler", type: "warning" }).then(function (ok) { if (ok) go(); });
+          } else go();
+        });
+        td.appendChild(b);
+        tr.appendChild(td);
+        body.appendChild(tr);
+      });
+    }).catch(function (e) { toast("error", "Lieux appris illisibles : " + e.message); });
+  }
+
   function renderFacts(it) {
     var dl = el("dl", "gf-facts");
     function row(label, node) {
@@ -630,15 +801,27 @@
       dl.appendChild(dd);
     }
     var geo = it.geo || null;
+    var lieuBox = el("div");
     var lieu = el("span", null, it.lieu || "-");
     if (geo) {
       var src = POS_LABELS[geo.source] || geo.source;
       var txt = " -> " + src + (geo.name ? " : " + geo.name : "") + (geo.layer_label ? " (" + geo.layer_label + ")" : "");
-      lieu.appendChild(el("span", "gf-tag " + (geo.source === "gps" ? "gf-good" : (geo.confidence === "haute" ? "gf-good" : "gf-warn")), txt));
+      if (geo.appris) txt += " - lieu appris";
+      lieu.appendChild(el("span", "gf-tag " + (geo.source === "gps" || geo.source === "operateur" ? "gf-good" : (geo.confidence === "haute" ? "gf-good" : "gf-warn")), txt));
     } else {
       lieu.appendChild(el("span", "gf-tag gf-warn", "non localisee"));
     }
-    row("Lieu", lieu);
+    if (it.lieu_corrige) lieu.appendChild(el("span", "gf-muted", " corrige par " + (it.lieu_corrige.by || "?").split("@")[0]));
+    lieuBox.appendChild(lieu);
+    var fixBtn = el("button", "gf-link gf-lieu-btn", "Corriger le lieu");
+    fixBtn.type = "button";
+    fixBtn.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      if (lieuBox.querySelector(".gf-lieu-fix")) return;
+      lieuBox.appendChild(lieuPanel(it));
+    });
+    lieuBox.appendChild(fixBtn);
+    row("Lieu", lieuBox);
     var cp = it.competence;
     if (cp) {
       var comp = el("span");
@@ -1042,5 +1225,6 @@
     document.getElementById("gf-op-year").addEventListener("change", loadOperateurs);
     loadSummary();
     loadOperateurs();
+    loadLieux();
   });
 })();
