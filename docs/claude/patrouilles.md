@@ -146,6 +146,34 @@ mais **80 le 24/10** ; 61 `personne`, 51 `vehicule` ; sur 70 avis operateur, 16 
 
 ⚠️ Champ reel du verdict : `ai.status` (`confirmed` / `filtered` / `unverified`), pas `ai.verdict`.
 
+**Etat du code (livraison 3, 28/10/2026)** : `intrusion_dispatch.py` (sans Flask).
+- Reglage `detection_groups.field_dispatch {mode off|ai|operator, labels, burst_min, max_per_hour,
+  category}` (`clean_settings`, **off par defaut** : rien ne part tant qu'un groupe n'est pas regle),
+  bloc « Envoi aux tablettes » de la fenetre de groupe (page Detection). `_group_fields` ne touche le
+  bloc que s'il est transmis.
+- Mode `ai` : `tick` dans `patrol_engine.py` (episodes de moins de 15 min, `armed` != false,
+  `ai.status` confirmed, pas `portee == ecartee`, libelle retenu ; avis operateur prioritaire, velo =
+  personne). Mode `operator` : `on_operator_truth` appele par `/ai-vote` sur une reponse personne /
+  vehicule / velo. Bouton « Envoyer a une patrouille » (`/api/detection/episodes/<id>/send-field`)
+  quel que soit le mode. Etat `hik_intrusions.field_dispatch {state claimed|sent|grouped|pc_org,
+  fiche_id, by, reason, label, group_id}`, pose par find_one_and_update (un seul envoi).
+- Fiche `_id` = uuid5(« intrusion|<episode> »), categorie du groupe (Securite), GPS = position de la
+  camera (`detection._device_position`), photo de l'IA copiee dans `uploads/field_photos/<ev>/<an>/`
+  (les images Detection sont reservees aux admins), `content_category.intrusion_*` (episode, camera
+  `<id>:<canal>`, nom, libelle, groupe, zones de competence, photo). `dispatch.timeout_s = 60`, puis
+  `dispatch_auto.start` (trigger « intrusion ») : la proposition reprend toute la mecanique des fiches
+  (tablette suivante, file du service). `find_candidates` filtre la zone de competence quand la fiche
+  porte `intrusion_zone_ids` ; `propose_next` prend `dispatch.timeout_s` avant celui de la categorie.
+- Anti-rafale : fiche ouverte de la meme camera creee depuis moins de `burst_min` : entree + photo
+  ajoutees, `grouped`. Plafond : plus de `max_per_hour` fiches du groupe sur l'heure : fiche creee,
+  pas de proposition, `pc_org`. Camera sans position : `pc_org`.
+- Tablette : `proposal_for_device.intrusion {camera, label, photo, thumb}`, titre « Intrusion detectee »
+  et photo dans l'alerte plein ecran. Acceptee : statut intervention, la patrouille programmee en
+  cours passe en pause (`sync_pause`). Page Detection : badge « Patrouille » / « PC Org » sur la
+  carte, bloc « Patrouille » de la fiche (etat, unite, refus).
+- Non fait : priorite aux tablettes en patrouille programmee (classement = distance, comme les fiches).
+- Cameras du Campus hors de toute zone de competence : seules les tablettes sans zone y sont proposees.
+
 ## 6. Propositions d'apres l'historique (apres la planification)
 
 Trois etages. Le socle (6.0) tourne la nuit. Le moteur (6.1) se suffit a lui-meme : il fonctionne sans

@@ -5421,7 +5421,8 @@
     var titleWrap = document.createElement("div");
     var title = document.createElement("div");
     title.className = "dispatch-alert-title";
-    title.textContent = "Intervention proposee" + (p.metier ? " - " + p.metier : "");
+    title.textContent = p.intrusion ? "Intrusion detectee : " + (p.intrusion.label || "cible")
+                                    : "Intervention proposee" + (p.metier ? " - " + p.metier : "");
     titleWrap.appendChild(title);
     if (urgency) {
       var urgBadge = document.createElement("span");
@@ -5435,6 +5436,15 @@
 
     var bodyEl = document.createElement("div");
     bodyEl.className = "dispatch-alert-body";
+    // Intrusion camera : photo de l'IA (photos des tablettes, /field/photos)
+    if (p.intrusion && (p.intrusion.photo || p.intrusion.thumb)) {
+      var ph = document.createElement("img");
+      ph.className = "dispatch-alert-photo";
+      ph.alt = "Photo de la camera";
+      ph.src = p.intrusion.photo || p.intrusion.thumb;
+      ph.addEventListener("error", function () { ph.remove(); });
+      bodyEl.appendChild(ph);
+    }
     var descEl = document.createElement("div");
     descEl.className = "dispatch-alert-desc";
     descEl.textContent = p.text || "(sans description)";

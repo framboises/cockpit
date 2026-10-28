@@ -190,6 +190,11 @@ def _local_label(dt_utc, now_utc):
     return "%s %s" % (DAY_ABBR[loc.isoweekday()], loc.strftime("%H:%M"))
 
 
+def _field_dispatch_settings(g):
+    import intrusion_dispatch as ID
+    return ID.group_settings(g)
+
+
 def _pub_group(g, now, dropped=None, db=None):
     db = db if db is not None else _ensure_db()
     on, source = arming.group_state(g, now, db)
@@ -217,6 +222,7 @@ def _pub_group(g, now, dropped=None, db=None):
             "override": {"state": ov.get("state"), "until": _iso(ov.get("until"))} if source == "override" else None,
         },
         "armed": on, "source": source, "next_change": _iso(nxt), "state_label": label,
+        "field_dispatch": _field_dispatch_settings(g),
         "today_rule": {"source": rule["source"], "label": rule["label"]} if rule else None,
         "dropped_today": (dropped or {}).get(str(g["_id"]), 0),
     }
@@ -374,6 +380,8 @@ def _pub_episode(ep, zones, now, full=False):
         "ai": _pub_ai(ep),
         # Hors planning : gardee sans alerte (champ absent = dans le planning)
         "armed": ep.get("armed") is not False,
+        # Envoi aux tablettes (intrusion_dispatch) : sent | grouped | pc_org
+        "sent": (ep.get("field_dispatch") or {}).get("state"),
     }
     if full:
         item["photos"] = [{"photo": _img(p.get("photo")), "thumb": _img(p.get("thumb")), "at": _iso(p.get("at")),
@@ -552,10 +560,16 @@ def _group_fields(data):
             x.update({"start": start.isoformat(), "end": end.isoformat(), "yearly": bool(e.get("yearly"))})
         exceptions.append(x)
     hol = a.get("holidays") if a.get("holidays") in arming.HOLIDAY_RULES else "normal"
-    return {"name": name, "color": color, "members": members,
-            "arming.mode": mode, "arming.weeks": weeks, "arming.default_week": default,
-            "arming.exceptions": exceptions, "arming.holidays": hol,
-            "notes": (data.get("notes") or "").strip()[:300]}, None
+    out = {"name": name, "color": color, "members": members,
+           "arming.mode": mode, "arming.weeks": weeks, "arming.default_week": default,
+           "arming.exceptions": exceptions, "arming.holidays": hol,
+           "notes": (data.get("notes") or "").strip()[:300]}
+    # Envoi des intrusions aux tablettes (intrusion_dispatch) : seulement s'il
+    # est transmis (un enregistrement sans ce bloc ne le remet pas a zero)
+    if "field_dispatch" in data:
+        import intrusion_dispatch as ID
+        out["field_dispatch"] = ID.clean_settings(data.get("field_dispatch"))
+    return out, None
 
 
 @detection_bp.route("/api/detection/groups", methods=["POST"])
@@ -569,6 +583,8 @@ def create_group():
            "arming": {"mode": f["arming.mode"], "weeks": f["arming.weeks"], "default_week": f["arming.default_week"],
                       "exceptions": f["arming.exceptions"], "holidays": f["arming.holidays"], "override": None},
            "createdAt": now, "updatedAt": now}
+    if "field_dispatch" in f:
+        doc["field_dispatch"] = f["field_dispatch"]
     gid = db["detection_groups"].insert_one(doc).inserted_id
     arming.invalidate()
     return jsonify(_pub_group(db["detection_groups"].find_one({"_id": gid}), now)), 201
@@ -870,7 +886,9 @@ def episode_detail(eid):
     if not ep:
         return jsonify({"error": "Intrusion introuvable"}), 404
     item = _pub_episode(ep, _zones(db), datetime.now(timezone.utc), full=True)
-    item["messages"] = [{"at": _iso(e.get("event_dt")), "type": e.get("event_type"),
+    import intrusion_dispatch as ID
+    item["field_dispatch"] = ID.pub_dispatch(db, ep)
+    item["messages"] =[{"at": _iso(e.get("event_dt")), "type": e.get("event_type"),
                          "target": (e.get("regions") or [{}])[0].get("target"),
                          "region": (e.get("regions") or [{}])[0].get("region_id"),
                          "target_id": e.get("target_id")}
@@ -949,8 +967,31 @@ def set_ai_vote(eid):
     else:
         upd = {"$unset": {"ai_vote": ""}}
     db["hik_intrusions"].update_one({"_id": oid}, upd)
+    # Avis "vrai" : envoi aux tablettes si le groupe de la camera est en mode operateur
+    sent = None
+    if truth in AI_TRUTH_REAL:
+        import intrusion_dispatch as ID
+        sent = ID.on_operator_truth(db, oid, truth, _who())
     ep = db["hik_intrusions"].find_one({"_id": oid}, {"ai": 1, "ai_vote": 1})
-    return jsonify({"ok": True, "ai": _pub_ai(ep)})
+    return jsonify({"ok": True, "ai": _pub_ai(ep), "sent": sent})
+
+
+@detection_bp.route("/api/detection/episodes/<eid>/send-field", methods=["POST"])
+def send_to_field(eid):
+    """Bouton "Envoyer a une patrouille" : fiche + proposition aux tablettes
+    (reglage du groupe de la camera : categorie, anti-rafale, plafond), quel
+    que soit le mode d'envoi du groupe. Un seul envoi par episode."""
+    import intrusion_dispatch as ID
+    db = _ensure_db()
+    oid = _oid(eid)
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"photos": 0, "targets": 0}) if oid else None
+    if not ep:
+        return jsonify({"error": "Intrusion introuvable"}), 404
+    ok, code, fid = ID.dispatch_episode(db, ep, by=_who())
+    if code == "deja_envoye":
+        return jsonify({"error": "Intrusion deja envoyee", "fiche_id": fid}), 409
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"field_dispatch": 1})
+    return jsonify({"ok": ok, "code": code, "fiche_id": fid, "field_dispatch": ID.pub_dispatch(db, ep)})
 
 
 def _photo_at(ep, idx, url):

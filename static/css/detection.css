@@ -531,6 +531,11 @@ button.chip.dt-truth.is-on { background: #16a34a; border-color: #16a34a; color: 
 .dt-field-inline { flex-direction: row; align-items: center; gap: 10px; }
 .dt-field input[type="color"] { width: 44px; height: 28px; border: none; padding: 0; background: none; }
 .dt-plan-side .dt-link-row { font-size: .82rem; }
+/* Envoi des intrusions aux tablettes (reglage du groupe, fiche d'intrusion) */
+.dt-fd-opts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.dt-fd-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dt-fd { display: flex; flex-direction: column; gap: 4px; }
+.dt-fd .dt-btn { align-self: flex-start; }
 .dt-mode-col { flex-direction: column; gap: 6px; }
 .dt-mode-col label { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: .84rem; }
 .dt-mode-col em { flex-basis: 100%; padding-left: 22px; font-style: normal; color: var(--muted); font-size: .74rem; }

@@ -2771,6 +2771,8 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 .dispatch-alert-body {
   padding: 16px 18px;
 }
+.dispatch-alert-photo { display: block; width: 100%; max-height: 38vh; object-fit: contain; border-radius: 10px;
+  background: #000; margin-bottom: 10px; }
 .dispatch-alert-desc {
   font-size: 16px; line-height: 1.5; color: #f1f5f9;
   background: #0f172a;

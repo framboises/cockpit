@@ -905,6 +905,41 @@
         return box;
     }
 
+    // Envoi aux tablettes (intrusion_dispatch) : etat de la fiche et des
+    // propositions, ou bouton "Envoyer a une patrouille"
+    var FD_LABELS = { sent: "Envoyee aux tablettes", grouped: "Ajoutee a la fiche en cours de cette camera",
+                      pc_org: "Fiche creee pour le PC Org (pas de proposition aux tablettes)" };
+    var FD_ANSWERS = { accepted: "acceptee", refused: "refusee", timeout: "sans reponse" };
+    function fieldDispatchPanel(ep) {
+        var sec = el("div", "dt-fd");
+        sec.appendChild(el("h4", "dt-sec", "Patrouille"));
+        var fd = ep.field_dispatch;
+        if (fd) {
+            sec.appendChild(el("div", "", (FD_LABELS[fd.state] || fd.state) + (fd.reason ? " (" + fd.reason + ")" : "") +
+                (fd.by ? ", par " + fd.by : "") + (fd.at ? " " + ago(fd.at) : "")));
+            var line = fd.closed ? "Fiche close" : fd.unit ? "Unite engagee : " + fd.unit
+                : fd.current ? "Proposee a " + fd.current + "..." : fd.dispatch_state === "queued" ? "Personne n'a accepte : file du service Securite" : "";
+            if (line) sec.appendChild(el("div", "dt-help", line));
+            if (fd.attempts && fd.attempts.length) {
+                sec.appendChild(el("div", "dt-help", fd.attempts.map(function (a) { return a.device_name + " : " + (FD_ANSWERS[a.answer] || a.answer); }).join(" - ")));
+            }
+            if (fd.fiche_id) sec.appendChild(el("div", "dt-help", "Fiche de main courante " + fd.fiche_id.slice(0, 8)));
+            return sec;
+        }
+        sec.appendChild(el("p", "dt-help", "Fiche a la position de la camera, photo jointe, proposee a la tablette la plus proche (reglage d'envoi du groupe de la camera)."));
+        var b = el("button", "dt-btn dt-btn-primary"); b.type = "button";
+        b.appendChild(icon("directions_run")); b.appendChild(document.createTextNode("Envoyer a une patrouille"));
+        b.addEventListener("click", function () {
+            b.disabled = true;
+            send("POST", API.episodes + "/" + ep.id + "/send-field", {}).then(function (r) {
+                toast(r.ok ? "success" : "warning", FD_LABELS[r.code] || r.code);
+                openDetail(ep.id);
+            }).catch(function (e) { b.disabled = false; toast("error", e.message); });
+        });
+        sec.appendChild(b);
+        return sec;
+    }
+
     // Avis de l'operateur = clic sur une pilule : ce qu'est VRAIMENT la cible
     // signalee par la camera. Les propositions de l'IA d'abord (avec leur
     // pourcentage), puis les autres categories ; second clic = retire l'avis.
@@ -982,6 +1017,8 @@
             ep.ai = r.ai;
             refreshAi(ep);
             toast("success", truth ? "Avis enregistre, merci" : "Avis retire");
+            // Groupe en envoi "sur avis de l'operateur" : la fiche est partie
+            if (r.sent && S.openId === ep.id) { toast("info", FD_LABELS[r.sent] || "Envoi : " + r.sent); openDetail(ep.id); }
         }).catch(function (e) { toast("error", e.message); });
     }
     // Reponse sur UNE photo (une photo = une cible signalee par la camera) :
@@ -1086,6 +1123,8 @@
         if (ep.armed === false) top.appendChild(badge("dt-b-offplan", "schedule", "Hors planning"));
         var ab = aiBadge(ep.ai);
         if (ab) top.appendChild(ab);
+        // Envoyee aux tablettes (intrusion_dispatch)
+        if (ep.sent) top.appendChild(badge("dt-b-confirmed", "directions_run", ep.sent === "pc_org" ? "PC Org" : "Patrouille"));
         top.appendChild(el("span", "dt-card-time", fmtTime(ep.started_at)));
         b.appendChild(top);
         b.appendChild(el("div", "dt-card-where", ep.camera_name + (ep.channel_name ? " - " + ep.channel_name : "")));
@@ -1427,6 +1466,7 @@
             if (ep.regions.length) zr.appendChild(el("span", "", "Zone camera " + ep.regions.join(", ")));
             where.appendChild(zr);
             body.appendChild(where);
+            body.appendChild(fieldDispatchPanel(ep));
 
             if (ep.messages && ep.messages.length) {
                 var tl = el("div");
@@ -1821,6 +1861,8 @@
         });
         side.appendChild(modes);
 
+        renderFieldDispatch(side, g);
+
         side.appendChild(el("div", "dt-sec", "Priorites"));
         side.appendChild(el("p", "dt-help", "1. Forcage temporaire  2. Exception datee (la premiere de la liste)  3. Jour ferie  4. Semaine type par defaut."));
 
@@ -1844,6 +1886,54 @@
             ov.appendChild(cancel);
             side.appendChild(ov);
         }
+    }
+
+    /* Envoi des intrusions aux tablettes Field (intrusion_dispatch.py) :
+       mode, cibles, anti-rafale, plafond horaire */
+    var FD_DEFAULTS = { mode: "off", labels: ["personne"], burst_min: 10, max_per_hour: 6, category: "PCO.Securite" };
+    function renderFieldDispatch(side, g) {
+        var fd = g.field_dispatch = Object.assign({}, FD_DEFAULTS, g.field_dispatch || {});
+        fd.labels = (fd.labels || ["personne"]).slice();
+        side.appendChild(el("div", "dt-sec", "Envoi aux tablettes"));
+        var modes = el("div", "dt-mode dt-mode-col");
+        [["off", "Non", "les intrusions restent sur cette page"],
+         ["operator", "Sur avis de l'operateur", "envoi quand vous dites \"personne\" ou \"vehicule\""],
+         ["ai", "Automatique", "des que l'IA confirme"]].forEach(function (m) {
+            var l = el("label"); var r = document.createElement("input");
+            r.type = "radio"; r.name = "dt-plan-fd"; r.value = m[0]; r.checked = fd.mode === m[0];
+            r.addEventListener("change", function () { fd.mode = m[0]; planDirty(); opts.hidden = fd.mode === "off"; });
+            l.appendChild(r); l.appendChild(document.createTextNode(m[1])); l.appendChild(el("em", "", m[2]));
+            modes.appendChild(l);
+        });
+        side.appendChild(modes);
+        var opts = el("div", "dt-fd-opts");
+        opts.hidden = fd.mode === "off";
+        var labs = el("div", "dt-fd-row");
+        labs.appendChild(el("span", "dt-help", "Cibles :"));
+        [["personne", "Personne"], ["vehicule", "Vehicule"]].forEach(function (x) {
+            var l = el("label", "dt-link-row"); var cb = document.createElement("input");
+            cb.type = "checkbox"; cb.checked = fd.labels.indexOf(x[0]) >= 0;
+            cb.addEventListener("change", function () {
+                fd.labels = fd.labels.filter(function (v) { return v !== x[0]; });
+                if (cb.checked) fd.labels.push(x[0]);
+                if (!fd.labels.length) { fd.labels = ["personne"]; toast("info", "Au moins une cible : personne gardee"); renderPlanSide(); }
+                planDirty();
+            });
+            l.appendChild(cb); l.appendChild(el("span", "", x[1])); labs.appendChild(l);
+        });
+        opts.appendChild(labs);
+        function num(label, key, min, max, help) {
+            var l = el("label", "dt-field dt-field-inline", label);
+            var i = document.createElement("input"); i.type = "number"; i.min = min; i.max = max; i.value = fd[key];
+            i.style.width = "70px";
+            i.addEventListener("change", function () { fd[key] = Math.max(min, Math.min(max, Number(i.value) || 0)); i.value = fd[key]; planDirty(); });
+            l.appendChild(i); opts.appendChild(l);
+            opts.appendChild(el("p", "dt-help", help));
+        }
+        num("Anti-rafale (min)", "burst_min", 0, 120, "Une camera deja envoyee depuis moins de ce delai ne relance pas d'envoi : la nouvelle intrusion s'ajoute a la fiche en cours.");
+        num("Envois max par heure", "max_per_hour", 1, 60, "Au-dela, la fiche est creee pour le PC Org seulement, sans proposition aux tablettes.");
+        opts.appendChild(el("p", "dt-help", "Fiche Securite a la position de la camera, photo jointe, proposee 60 s a la tablette Securite la plus proche (zone de competence couvrant la camera), puis a la suivante, puis file du service."));
+        side.appendChild(opts);
     }
 
     /* Onglet Semaines types : grille a peindre */
@@ -2167,6 +2257,7 @@
             members: (g.members || []).map(function (m) { return { camera_id: m.camera_id, channel: m.channel }; }),
             arming: { mode: plan.a.mode, weeks: plan.a.weeks, default_week: plan.a.default_week,
                 exceptions: plan.a.exceptions, holidays: plan.a.holidays },
+            field_dispatch: g.field_dispatch || FD_DEFAULTS,
         };
     }
     function renderCalendar(pane) {

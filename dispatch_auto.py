@@ -289,6 +289,8 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
     exclude = {str(x) for x in exclude_ids}
     category = fiche.get("category")
     metier = (fiche.get("content_category") or {}).get("sous_classification")
+    zs = (fiche.get("content_category") or {}).get("intrusion_zone_ids")
+    zone_ids = {str(z) for z in zs} if isinstance(zs, list) else None
     point = _fiche_point(fiche)
     group_cats = F._group_categories(db)
     groups = F._beacon_groups(db)
@@ -313,6 +315,10 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
         if _proposal_pending(d, now):
             continue
         if not _device_metiers_ok(d, metier):
+            continue
+        # Intrusion camera : zone de competence de la tablette couvrant la
+        # camera (tablette sans zone : partout)
+        if zone_ids is not None and d.get("competence_zones") and not (set(map(str, d["competence_zones"])) & zone_ids):
             continue
         # Evenement vu par la tablette, pas reserve a une homonyme, epreuve
         # de la tablette pas terminee (balayage paresseux).
@@ -467,7 +473,8 @@ def propose_next(db, fiche_id, now=None):
         return _queue(db, fiche, "%d proposition(s) sans suite" % len(tried), now)
 
     candidates = find_candidates(db, fiche, exclude_ids=[a.get("device_id") for a in tried], now=now)
-    timeout = ccfg["timeout_s"]
+    # Delai propre a la fiche (intrusion camera : proposition courte), sinon celui de la categorie
+    timeout = int(d.get("timeout_s") or ccfg["timeout_s"])
     expires = now + timedelta(seconds=timeout)
     chosen = None
     for c in candidates:
@@ -1003,6 +1010,10 @@ def proposal_for_device(db, device, now=None):
         "distance_m": cur.get("distance_m"),
         "expires_at": _iso(exp),
         "remaining_s": max(0, round((exp - now).total_seconds())),
+        # Intrusion camera (intrusion_dispatch.py) : camera, cible, photo de l'IA
+        "intrusion": {"camera": cc.get("intrusion_camera_name"), "label": cc.get("intrusion_label"),
+                      "photo": cc.get("intrusion_photo"), "thumb": cc.get("intrusion_thumb")}
+        if cc.get("intrusion_episode") else None,
     }
 
 

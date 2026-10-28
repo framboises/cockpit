@@ -8,7 +8,8 @@ s'arrete :
 
 - propositions de patrouille expirees -> tablette suivante du groupe ;
 - pauses / reprises selon le statut de l'agent, fiche close par le PC Org ;
-- (livraison 2) lancements des planifications ; (livraison 3) intrusions.
+- (livraison 2) lancements des planifications ; (livraison 3) intrusions
+  confirmees envoyees aux tablettes (intrusion_dispatch.tick).
 
 Verrou en base (`cockpit_settings._id = "patrol_engine_lock"`, bail de 70 s
 pose par find_one_and_update) : une execution qui chevauche la precedente
@@ -28,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
+import intrusion_dispatch as ID
 import patrols as P
 
 LOCK_ID = "patrol_engine_lock"
@@ -87,6 +89,10 @@ def run(db, once=False):
                 actions += P.tick(db)
             except Exception:
                 log.exception("passage du moteur en echec")
+            try:        # livraison 3 : intrusions confirmees -> tablettes (groupes en mode ai)
+                actions += ID.tick(db)
+            except Exception:
+                log.exception("passage des intrusions en echec")
             if once or time.monotonic() - start >= RUN_FOR_S:
                 break
             time.sleep(TICK_S)
