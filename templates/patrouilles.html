@@ -138,7 +138,7 @@
                                     <div class="pt-hint pt-vmax-hint">Alerte sur la tablette au-dela, depassements notes dans le compte rendu. Ex. 20 = ronde lente.</div>
                                 </div>
                                 <div id="pt-sc-estimate" class="pt-estimate">-</div>
-                                <div class="pt-hint">Ordre de passage : glissez une ligne (poignee a gauche) ou utilisez les fleches.</div>
+                                <div class="pt-hint">Ordre de passage : glissez une ligne (poignee a gauche) ou utilisez les fleches. Entre deux points, "+ Point de passage" impose le chemin (sans arret). En vehicule, le bouton <span class="material-symbols-outlined pt-inline-icon">directions_walk</span> fait faire le point a pied : le vehicule reste au point precedent.</div>
                                 <ol id="pt-sc-points" class="pt-steps"></ol>
                                 <label class="pt-check"><input type="checkbox" id="pt-sc-others"> Montrer les autres points sur la carte (cliquer pour ajouter)</label>
                                 <button type="button" class="btn pt-add-points" id="pt-sc-add"><span class="material-symbols-outlined">playlist_add</span> Ajouter des points (recherche, plusieurs a la fois)</button>
@@ -171,6 +171,10 @@
                                     <button type="button" class="pt-tool" id="pt-pc-new" aria-describedby="pt-help-pc">
                                         <span class="material-symbols-outlined">sports_score</span><span>Tour de piste</span>
                                         <span class="pt-help" id="pt-help-pc" role="tooltip">Parcours impose a rouler en entier sur la piste : cliquez les passages dans l'ordre, choisissez le sens. La tablette suit le trace et valide le tour a 80 % des passages.</span>
+                                    </button>
+                                    <button type="button" class="pt-tool" id="pt-ch-new" aria-describedby="pt-help-ch">
+                                        <span class="material-symbols-outlined">conversion_path</span><span>Cheminement</span>
+                                        <span class="pt-help" id="pt-help-ch" role="tooltip">Longer une cloture ou suivre un chemin en entier, a pied ou en vehicule : dessinez la ligne sur la carte. La tablette guide sur le trace et valide a 80 % des jalons (un tous les 50 m).</span>
                                     </button>
                                 </div>
                                 <div class="pt-row">
@@ -248,13 +252,29 @@
                                 <input type="text" id="pt-pc-name" class="pt-input" placeholder="Nom du parcours (ex. Tour piste Bugatti)" maxlength="80">
                             </div>
                             <div class="pt-scroll pt-editor-body">
-                                <div class="pt-callout"><span class="material-symbols-outlined">sports_score</span> Cliquez sur la carte les points de passage, dans l'ordre de roulage (3 au moins). Glissez-les pour ajuster. Le trace emprunte la piste : la tablette doit etre d'un groupe avec acces piste.</div>
-                                <div class="pt-seg" role="radiogroup" aria-label="Sens">
+                                <div class="pt-seg" role="radiogroup" aria-label="Type de parcours">
+                                    <label><input type="radio" name="pt-pc-type" value="piste" checked><span class="material-symbols-outlined">sports_score</span> Tour de piste</label>
+                                    <label><input type="radio" name="pt-pc-type" value="chemin"><span class="material-symbols-outlined">conversion_path</span> Cheminement</label>
+                                </div>
+                                <div class="pt-callout" id="pt-pc-help-piste"><span class="material-symbols-outlined">sports_score</span> Cliquez sur la carte les points de passage, dans l'ordre de roulage (3 au moins). Glissez-les pour ajuster. Le trace emprunte la piste : la tablette doit etre d'un groupe avec acces piste.</div>
+                                <div class="pt-callout" id="pt-pc-help-chemin" hidden><span class="material-symbols-outlined">conversion_path</span> Cliquez sur la carte le long du chemin a suivre (cloture, chemin de ronde...), dans l'ordre (2 au moins). Glissez les points pour ajuster. Des jalons sont poses tous les 50 m le long du trace : il faut en franchir 80 %.</div>
+                                <div class="pt-seg" role="radiogroup" aria-label="Sens" id="pt-pc-dirs">
                                     <label><input type="radio" name="pt-pc-dir" value="course" checked><span class="material-symbols-outlined">east</span> Sens de course</label>
                                     <label><input type="radio" name="pt-pc-dir" value="inverse"><span class="material-symbols-outlined">west</span> Sens inverse</label>
                                 </div>
+                                <div id="pt-pc-chemin-opts" hidden>
+                                    <div class="pt-seg" role="radiogroup" aria-label="Deplacement">
+                                        <label><input type="radio" name="pt-pc-travel" value="pedestrian" checked><span class="material-symbols-outlined">directions_walk</span> A pied</label>
+                                        <label><input type="radio" name="pt-pc-travel" value="vehicle"><span class="material-symbols-outlined">directions_car</span> En vehicule</label>
+                                    </div>
+                                    <div class="pt-seg" role="radiogroup" aria-label="Trace">
+                                        <label title="Chemin absent des cartes (cloture...) : la ligne cliquee telle quelle"><input type="radio" name="pt-pc-follow" value="trace" checked><span class="material-symbols-outlined">draw</span> Exactement mon trace</label>
+                                        <label title="L'itineraire suit les routes et passe par vos points"><input type="radio" name="pt-pc-follow" value="routes"><span class="material-symbols-outlined">route</span> Par les routes</label>
+                                    </div>
+                                    <div class="pt-hint">A pied dans un scenario en vehicule : le vehicule reste au point precedent, l'agent y revient a la fin.</div>
+                                </div>
                                 <div class="pt-row">
-                                    <label class="pt-check"><input type="checkbox" id="pt-pc-closed" checked> Tour complet (retour au premier passage)</label>
+                                    <label class="pt-check"><input type="checkbox" id="pt-pc-closed" checked> <span id="pt-pc-closed-label">Tour complet (retour au premier passage)</span></label>
                                     <span class="pt-spacer"></span>
                                     <button type="button" class="pt-link" id="pt-pc-reverse">Inverser l'ordre</button>
                                 </div>

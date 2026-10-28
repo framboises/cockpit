@@ -48,12 +48,18 @@
     valhalla_unreachable: "Moteur d'itineraire injoignable", scenario_vide: "Scenario sans point",
     cible_invalide: "Choisissez une tablette ou un groupe", not_found: "Introuvable",
     meme_point: "Choisissez un autre point", types_differents: "Un parcours ne se fusionne qu'avec un parcours",
-    trois_passages_minimum: "3 passages au moins", trop_de_passages: "30 passages au plus",
-    parcours_en_vehicule: "Un tour de piste se fait en vehicule", parcours_sans_trace: "Parcours sans trace (a recalculer)",
+    trois_passages_minimum: "3 passages au moins", deux_passages_minimum: "2 points au moins",
+    trop_de_passages: "Trop de passages (30 par tour de piste, 80 par cheminement, 30 points de passage par scenario)",
+    parcours_en_vehicule: "Tour de piste ou cheminement en vehicule : pas dans un scenario a pied", parcours_sans_trace: "Parcours sans trace (a recalculer)",
     est_un_parcours: "C'est un parcours : ouvrez-le depuis la liste",
     vitesse_invalide: "Vitesse max entre 3 et 130 km/h (ou vide)",
   };
   function errLabel(e) { var c = (e && e.message) || String(e); return ERRORS[c] || c; }
+  // Parcours : tour de piste ou cheminement (a pied / en vehicule)
+  function pcLabel(p) {
+    if (p.ptype !== "chemin") return "tour de piste";
+    return "cheminement " + (p.travel === "vehicle" ? "en vehicule" : "a pied");
+  }
 
   // ---------- DOM ----------
   function $(id) { return document.getElementById(id); }
@@ -152,9 +158,10 @@
 
   function onMapClick(e) {
     if (S.tab === "proposer" && PR.placing) { placeAt(e.latlng); return; }
+    if (S.tab === "scenarios" && S.sc && S.viaAfter) { addVia(e.latlng); return; }
     if (S.tab !== "points" || S.merge) return;
     if (S.pc) {         // parcours : chaque clic ajoute un passage
-      if (S.pc.gates.length >= 30) { toast("warning", "30 passages au plus"); return; }
+      if (S.pc.gates.length >= pcMaxGates()) { toast("warning", pcMaxGates() + " points au plus"); return; }
       S.pc.gates.push({ lat: e.latlng.lat, lng: e.latlng.lng });
       parcoursChanged();
       return;
@@ -265,14 +272,14 @@
       // Parcours : son trace, cliquable comme le point (ouvre son editeur)
       if (p.kind === "parcours" && !faint && p.track && p.track.polyline) {
         var tl = L.polyline(decode6(p.track.polyline), { color: p.active ? "#7c3aed" : "#94a3b8", weight: 4, opacity: 0.7 })
-          .bindTooltip(esc(p.name) + " (tour de piste)", { sticky: true });
+          .bindTooltip(esc(p.name) + " (" + pcLabel(p) + ")", { sticky: true });
         tl.on("click", function (e) { L.DomEvent.stopPropagation(e); if (S.merge) pickMerge(p.id); else openParcours(p); });
         tl.addTo(S.layers.points);
       }
       var m = faint
         ? L.circleMarker([p.lat, p.lng], { radius: 5, color: "#64748b", weight: 1, fillColor: "#cbd5e1", fillOpacity: 0.9 })
         : L.marker([p.lat, p.lng], { icon: dotIcon(p.active ? (p.kind === "parcours" ? "#7c3aed" : "#2563eb") : "#94a3b8", p.name) });
-      m.bindTooltip(esc(p.name) + (p.kind === "parcours" ? " (depart du tour de piste)" : "") + (faint ? " - cliquer pour ajouter" : ""), { direction: "top", offset: [0, -6] });
+      m.bindTooltip(esc(p.name) + (p.kind === "parcours" ? " (depart, " + pcLabel(p) + ")" : "") + (faint ? " - cliquer pour ajouter" : ""), { direction: "top", offset: [0, -6] });
       if (!faint && p.kind !== "parcours") L.circle([p.lat, p.lng], { radius: p.radius_m, color: "#2563eb", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(S.layers.points);
       if (editable && S.merge && S.merge.other === p.id) m.setIcon(dotIcon("#f59e0b", p.name));
       m.on("click", function (e) {
@@ -310,11 +317,12 @@
       main.appendChild(el("div", "pt-item-title", p.name));
       var sub = [];
       if (p.kind === "parcours") {
-        main.firstChild.insertBefore(icon("sports_score"), main.firstChild.firstChild);
-        sub.push("tour de piste, " + (p.gates || []).length + " passages, " + PC_DIR_LABELS[p.direction || "course"]);
+        main.firstChild.insertBefore(icon(p.ptype === "chemin" ? "conversion_path" : "sports_score"), main.firstChild.firstChild);
+        sub.push(pcLabel(p) + ", " + (p.gates || []).length + " points, " +
+                 (p.ptype === "chemin" ? (p.follow === "trace" ? "trace dessine" : "par les routes") : PC_DIR_LABELS[p.direction || "course"]));
         if (p.track && p.track.distance_m) sub.push(fmtKm(p.track.distance_m) + " - " + fmtMin(p.track.duration_s));
         if (p.track && p.track.error) sub.push("TRACE IMPOSSIBLE");
-        else if (p.track && p.track.uses_raceway === false) sub.push("hors piste !");
+        else if (p.ptype !== "chemin" && p.track && p.track.uses_raceway === false) sub.push("hors piste !");
       } else sub.push(p.radius_m + " m");
       if (p.photo_required) sub.push("photo exigee");
       if (p.instruction) sub.push("consigne");
@@ -489,10 +497,32 @@
   // S.pc = {id, name, gates:[{lat,lng}], direction, closed, radius_m, track} ;
   // trace calcule par le serveur en mode piste force (patrols.parcours_track).
   var PC_DIR_LABELS = { course: "sens de course", inverse: "sens inverse" };
+  // Cheminement (ptype chemin) : meme editeur, a pied ou en vehicule, trace
+  // dessine ou par les routes, jalons tous les 50 m (patrols.chemin_track).
+  function pcMaxGates() { return S.pc && S.pc.ptype === "chemin" ? 80 : 30; }
+  function pcMinGates() { return S.pc && S.pc.ptype === "chemin" ? 2 : 3; }
+  function radioSet(name, value) {
+    document.querySelectorAll('input[name="' + name + '"]').forEach(function (r) { r.checked = r.value === value; });
+  }
+  function radioGet(name, dflt) {
+    var r = document.querySelector('input[name="' + name + '"]:checked');
+    return r ? r.value : dflt;
+  }
+  function syncParcoursType() {
+    var ch = S.pc.ptype === "chemin";
+    $("pt-pc-help-piste").hidden = ch;
+    $("pt-pc-help-chemin").hidden = !ch;
+    $("pt-pc-dirs").hidden = ch;
+    $("pt-pc-chemin-opts").hidden = !ch;
+    $("pt-pc-closed-label").textContent = ch ? "Boucle (retour au premier point)" : "Tour complet (retour au premier passage)";
+    $("pt-pc-name").placeholder = ch ? "Nom du cheminement (ex. Cloture parking Nord)" : "Nom du parcours (ex. Tour piste Bugatti)";
+  }
   function openParcours(p) {
     p = p || {};
+    var ch = p.ptype === "chemin";
     S.pc = { id: p.id || null, name: p.name || "", gates: (p.gates || []).map(function (g) { return { lat: g.lat, lng: g.lng }; }),
-             direction: p.direction || "course", closed: p.closed !== false, radius_m: p.radius_m || 40,
+             ptype: ch ? "chemin" : "piste", travel: p.travel || "pedestrian", follow: p.follow || "trace",
+             direction: p.direction || "course", closed: p.closed === undefined ? !ch : !!p.closed, radius_m: p.radius_m || (ch ? 25 : 40),
              active: p.active !== false, track: p.track || null, seq: 0 };
     $("pt-pt-listpane").hidden = true;
     $("pt-pc-editor").hidden = false;
@@ -501,7 +531,13 @@
     $("pt-pc-radius").value = S.pc.radius_m;
     $("pt-pc-aliases").value = (p.aliases || []).join(", ");
     $("pt-pc-instruction").value = p.instruction || "";
-    document.querySelectorAll('input[name="pt-pc-dir"]').forEach(function (r) { r.checked = r.value === S.pc.direction; });
+    radioSet("pt-pc-dir", S.pc.direction);
+    radioSet("pt-pc-type", S.pc.ptype);
+    radioSet("pt-pc-travel", S.pc.travel);
+    radioSet("pt-pc-follow", S.pc.follow);
+    // Un parcours enregistre garde son type (scenarios et patrouilles en cours)
+    document.querySelectorAll('input[name="pt-pc-type"]').forEach(function (r) { r.disabled = !!S.pc.id; });
+    syncParcoursType();
     $("pt-pc-toggle").hidden = !S.pc.id;
     $("pt-pc-toggle").textContent = S.pc.active ? "Desactiver" : "Reactiver";
     renderParcours();
@@ -521,8 +557,22 @@
     S.pc.name = $("pt-pc-name").value;
     S.pc.closed = $("pt-pc-closed").checked;
     S.pc.radius_m = Number($("pt-pc-radius").value) || 40;
-    var r = document.querySelector('input[name="pt-pc-dir"]:checked');
-    S.pc.direction = r ? r.value : "course";
+    S.pc.direction = radioGet("pt-pc-dir", "course");
+    var t = radioGet("pt-pc-type", "piste");
+    if (t !== S.pc.ptype) {         // nouveau parcours : reglages par defaut du type
+      S.pc.ptype = t;
+      S.pc.closed = t !== "chemin";
+      $("pt-pc-closed").checked = S.pc.closed;
+      S.pc.radius_m = t === "chemin" ? 25 : 40;
+      $("pt-pc-radius").value = S.pc.radius_m;
+      syncParcoursType();
+    }
+    S.pc.travel = radioGet("pt-pc-travel", "pedestrian");
+    S.pc.follow = radioGet("pt-pc-follow", "trace");
+  }
+  function parcoursBody() {
+    return { name: S.pc.name, gates: S.pc.gates, ptype: S.pc.ptype, direction: S.pc.direction, closed: S.pc.closed,
+             travel: S.pc.travel, follow: S.pc.follow, radius_m: S.pc.radius_m };
   }
 
   function parcoursChanged() {
@@ -535,10 +585,10 @@
   }
 
   function previewParcours() {
-    if (!S.pc || S.pc.gates.length < 3) { renderParcours(); return; }
+    if (!S.pc || S.pc.gates.length < pcMinGates()) { renderParcours(); return; }
     var seq = ++S.pc.seq;
-    $("pt-pc-track").textContent = "Calcul du trace sur la piste...";
-    apiPost("/api/patrols/parcours/preview", { gates: S.pc.gates, direction: S.pc.direction, closed: S.pc.closed })
+    $("pt-pc-track").textContent = S.pc.ptype === "chemin" ? "Calcul du trace..." : "Calcul du trace sur la piste...";
+    apiPost("/api/patrols/parcours/preview", parcoursBody())
       .then(function (r) {
         if (!S.pc || seq !== S.pc.seq) return;
         S.pc.track = r.track;
@@ -548,13 +598,16 @@
   }
 
   function renderParcours() {
-    var box = $("pt-pc-track"), tr = S.pc.track, n = S.pc.gates.length;
+    var box = $("pt-pc-track"), tr = S.pc.track, n = S.pc.gates.length, ch = S.pc.ptype === "chemin";
     clear(box);
     box.classList.remove("pt-warn-box");
-    if (n < 3) box.textContent = n + " passage" + (n > 1 ? "s" : "") + " : cliquez sur la carte (3 au moins).";
+    if (n < pcMinGates()) box.textContent = n + (ch ? " point" : " passage") + (n > 1 ? "s" : "") + " : cliquez sur la carte (" + pcMinGates() + " au moins).";
     else if (!tr) box.textContent = "Calcul du trace...";
     else if (tr.error) { box.textContent = "Trace impossible : " + errLabel({ message: tr.error }); box.classList.add("pt-warn-box"); }
-    else {
+    else if (ch) {
+      box.textContent = "Cheminement : " + fmtKm(tr.distance_m) + " - " + fmtMin(tr.duration_s) + (S.pc.travel === "vehicle" ? " en vehicule" : " a pied") +
+        (tr.checks ? ", " + tr.checks + " jalons (80 % a franchir)" : "") + (S.pc.follow === "trace" ? " - trace dessine" : " - par les routes");
+    } else {
       box.textContent = "Tour : " + fmtKm(tr.distance_m) + " - " + fmtMin(tr.duration_s) + " (" + PC_DIR_LABELS[S.pc.direction] + ")";
       if (!tr.uses_raceway) {
         box.appendChild(el("div", "pt-warn-line", "Le trace n'emprunte pas la piste : resserrez les passages sur la piste, ou la piste est fermee dans le scenario du moteur."));
@@ -566,14 +619,14 @@
     S.pc.gates.forEach(function (g, i) {
       var li = el("li", "pt-step");
       li.appendChild(el("span", "pt-step-num", String(i + 1)));
-      li.appendChild(el("span", "pt-step-name", i === 0 ? "Depart" : "Passage " + (i + 1)));
+      li.appendChild(el("span", "pt-step-name", i === 0 ? "Depart" : (S.pc.ptype === "chemin" && !S.pc.closed && i === n - 1 ? "Arrivee" : (S.pc.ptype === "chemin" ? "Point " : "Passage ") + (i + 1))));
       li.appendChild(el("span", "pt-step-leg", g.lat.toFixed(5) + ", " + g.lng.toFixed(5)));
       var rm = el("button", "pt-step-rm"); rm.type = "button"; rm.title = "Retirer"; rm.appendChild(icon("close"));
       rm.addEventListener("click", function () { S.pc.gates.splice(i, 1); parcoursChanged(); });
       li.appendChild(rm);
       ol.appendChild(li);
     });
-    if (S.pc.closed && n > 1) ol.appendChild(el("li", "pt-hint", "Puis retour au depart (tour complet)."));
+    if (S.pc.closed && n > 1) ol.appendChild(el("li", "pt-hint", S.pc.ptype === "chemin" ? "Puis retour au depart (boucle)." : "Puis retour au depart (tour complet)."));
   }
 
   function drawParcoursEditor() {
@@ -584,7 +637,8 @@
       L.polyline(pc.closed ? ll.concat([ll[0]]) : ll, { color: "#7c3aed", weight: 2, dashArray: "6 6", interactive: false }).addTo(S.layers.points);
     }
     pc.gates.forEach(function (g, i) {
-      L.circle([g.lat, g.lng], { radius: pc.radius_m, color: "#7c3aed", weight: 1, fillOpacity: 0.06, interactive: false }).addTo(S.layers.points);
+      // Cheminement : controle par les jalons du trace, pas par les points cliques
+      if (pc.ptype !== "chemin") L.circle([g.lat, g.lng], { radius: pc.radius_m, color: "#7c3aed", weight: 1, fillOpacity: 0.06, interactive: false }).addTo(S.layers.points);
       var m = L.marker([g.lat, g.lng], { draggable: true, icon: numberIcon(i === 0 ? "D" : i + 1, "#7c3aed") }).addTo(S.layers.points);
       m.on("dragend", function (e) { var p = e.target.getLatLng(); pc.gates[i] = { lat: p.lat, lng: p.lng }; parcoursChanged(); });
     });
@@ -592,13 +646,12 @@
 
   function saveParcours() {
     readParcoursForm();
-    var body = { name: S.pc.name, gates: S.pc.gates, direction: S.pc.direction, closed: S.pc.closed,
-                 radius_m: S.pc.radius_m, aliases: $("pt-pc-aliases").value, instruction: $("pt-pc-instruction").value };
+    var body = Object.assign(parcoursBody(), { aliases: $("pt-pc-aliases").value, instruction: $("pt-pc-instruction").value });
     var req = S.pc.id ? apiPut("/api/patrols/parcours/" + S.pc.id, body) : apiPost("/api/patrols/parcours", body);
     req.then(function (r) {
-      var tr = r.point.track || {};
-      toast(tr.uses_raceway === false ? "warning" : "success",
-            "Parcours enregistre" + (tr.uses_raceway === false ? " (le trace n'emprunte pas la piste)" : ""));
+      var tr = r.point.track || {}, off = r.point.ptype !== "chemin" && tr.uses_raceway === false;
+      toast(off ? "warning" : "success",
+            (r.point.ptype === "chemin" ? "Cheminement enregistre" : "Parcours enregistre") + (off ? " (le trace n'emprunte pas la piste)" : ""));
       var i = S.data.points.findIndex(function (p) { return p.id === r.point.id; });
       if (i >= 0) S.data.points[i] = r.point; else S.data.points.push(r.point);
       S.data.points.sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -1125,9 +1178,11 @@
   function openScenario(s) {
     S.sc = s ? { id: s.id, name: s.name, travel: s.travel, loop: s.loop, color: s.color, note: s.note,
                  dominante: s.dominante || "generale", points: s.points.slice(), archived: s.archived, estimate: s.estimate,
-                 max_speed_kmh: s.max_speed_kmh || null }
+                 max_speed_kmh: s.max_speed_kmh || null, foot: (s.foot || []).slice(),
+                 vias: (s.vias || []).map(function (v) { return { after: v.after, lat: v.lat, lng: v.lng }; }) }
              : { id: null, name: "", travel: "vehicle", loop: false, color: "#2563eb", note: "", dominante: "generale",
-                 points: [], estimate: null, max_speed_kmh: null };
+                 points: [], estimate: null, max_speed_kmh: null, foot: [], vias: [] };
+    S.viaAfter = null;
     $("pt-sc-editor").hidden = false;
     $("pt-sc-listpane").hidden = true;
     // Nouveau scenario : les points a ajouter sont montres ; scenario existant :
@@ -1151,6 +1206,7 @@
 
   function closeScenario() {
     S.sc = null;
+    S.viaAfter = null;
     $("pt-sc-editor").hidden = true;
     $("pt-sc-listpane").hidden = false;
     render();
@@ -1208,10 +1264,27 @@
       var name = el("span", "pt-step-name", p.name);
       if (p.active === false) name.appendChild(el("em", "pt-muted", " (desactive)"));
       if (p.kind === "parcours") {
-        name.insertBefore(icon("sports_score"), name.firstChild);
-        name.appendChild(el("em", "pt-muted", " tour de piste" + (p.track && p.track.distance_m ? " " + fmtKm(p.track.distance_m) + " - " + fmtMin(p.track.duration_s) : "")));
+        name.insertBefore(icon(p.ptype === "chemin" ? "conversion_path" : "sports_score"), name.firstChild);
+        name.appendChild(el("em", "pt-muted", " " + pcLabel(p) + (p.track && p.track.distance_m ? " " + fmtKm(p.track.distance_m) + " - " + fmtMin(p.track.duration_s) : "")));
       }
+      var walk = S.sc.travel === "vehicle" && (S.sc.foot.indexOf(id) >= 0 || (p.ptype === "chemin" && p.travel !== "vehicle"));
+      if (walk) li.classList.add("foot");
       li.appendChild(name);
+      // Scenario en vehicule : point fait a pied, vehicule laisse au point precedent
+      if (S.sc.travel === "vehicle" && p.kind !== "parcours" && p.id) {
+        var on = S.sc.foot.indexOf(id) >= 0;
+        var fb = el("button", "pt-step-foot" + (on ? " on" : ""));
+        fb.type = "button";
+        fb.title = on ? "Fait a pied (vehicule laisse au point precedent). Cliquer : en vehicule"
+                      : "Faire ce point a pied : le vehicule reste au point precedent, l'agent y revient ensuite";
+        fb.setAttribute("aria-pressed", on ? "true" : "false");
+        fb.appendChild(icon("directions_walk"));
+        fb.addEventListener("click", function () {
+          if (on) S.sc.foot = S.sc.foot.filter(function (x) { return x !== id; }); else S.sc.foot.push(id);
+          renderScenarioPoints(); render(); preview();
+        });
+        li.appendChild(fb);
+      } else if (walk) li.appendChild(el("span", "pt-step-foot on static", "")).appendChild(icon("directions_walk"));
       if (i > 0 && legs[i - 1]) li.appendChild(el("span", "pt-step-leg", fmtKm(legs[i - 1].distance_m) + " - " + fmtMin(legs[i - 1].duration_s)));
       [["arrow_upward", "Monter", i === 0, function () { movePoint(i, i - 1); }],
        ["arrow_downward", "Descendre", i === n - 1, function () { movePoint(i, i + 2); }]].forEach(function (b) {
@@ -1221,7 +1294,15 @@
         li.appendChild(bt);
       });
       var rm = el("button", "pt-step-rm"); rm.type = "button"; rm.title = "Retirer"; rm.appendChild(icon("close"));
-      rm.addEventListener("click", function () { S.sc.points.splice(i, 1); renderScenarioPoints(); render(); preview(); });
+      rm.addEventListener("click", function () {
+        S.sc.points.splice(i, 1);
+        if (S.sc.points.indexOf(id) < 0) {      // ses reglages partent avec lui
+          S.sc.foot = S.sc.foot.filter(function (x) { return x !== id; });
+          S.sc.vias = S.sc.vias.filter(function (v) { return v.after !== id; });
+          if (S.viaAfter === id) S.viaAfter = null;
+        }
+        renderScenarioPoints(); render(); preview();
+      });
       li.appendChild(rm);
       li.addEventListener("dragstart", function (e) {
         dragFrom = i; li.classList.add("dragging");
@@ -1245,9 +1326,67 @@
         movePoint(from, dropAt);
       });
       ol.appendChild(li);
+      // Troncon vers le point suivant (ou retour au depart) : points de passage
+      if (i < n - 1 || (S.sc.loop && n > 1)) ol.appendChild(viaRow(id, i === n - 1));
     });
     if (!n) ol.appendChild(el("li", "pt-empty", "Aucun point : Ajouter des points, ou cliquez-les sur la carte (Montrer les autres points)."));
     renderZoneHint();
+  }
+
+  // Points de passage d'un troncon : le trajet y passe sans arret. Bouton
+  // "+ Point de passage" puis clics sur la carte (dans l'ordre), "Terminer"
+  // ou Echap pour finir ; reperes deplacables, clic sur un repere = retire.
+  function viaRow(afterId, closing) {
+    var vs = S.sc.vias.filter(function (v) { return v.after === afterId; });
+    var active = S.viaAfter === afterId;
+    var row = el("li", "pt-via-row" + (active ? " on" : "") + (vs.length ? " set" : ""));
+    row.appendChild(icon("alt_route"));
+    row.appendChild(el("span", "pt-via-txt", active ? "Cliquez sur la carte ou passer, dans l'ordre"
+      : vs.length ? vs.length + " point" + (vs.length > 1 ? "s" : "") + " de passage" + (closing ? " (retour au depart)" : "")
+      : (closing ? "Retour au depart" : "Chemin le plus court")));
+    var add = el("button", "pt-link", active ? "Terminer" : "+ Point de passage");
+    add.type = "button";
+    add.title = "Imposer le chemin vers le point suivant : la patrouille passe par ces points, sans s'y arreter";
+    add.addEventListener("click", function () {
+      S.viaAfter = active ? null : afterId;
+      renderScenarioPoints(); render();
+    });
+    row.appendChild(add);
+    if (vs.length && !active) {
+      var rm = el("button", "pt-link", "Effacer");
+      rm.type = "button";
+      rm.addEventListener("click", function () {
+        S.sc.vias = S.sc.vias.filter(function (v) { return v.after !== afterId; });
+        renderScenarioPoints(); render(); preview();
+      });
+      row.appendChild(rm);
+    }
+    return row;
+  }
+  function addVia(latlng) {
+    if (S.sc.vias.length >= 30) { toast("warning", "30 points de passage au plus par scenario"); return; }
+    // Apres ceux du meme troncon (ordre de clic), avant ceux des troncons suivants
+    var last = -1;
+    S.sc.vias.forEach(function (v, k) { if (v.after === S.viaAfter) last = k; });
+    var v = { after: S.viaAfter, lat: latlng.lat, lng: latlng.lng };
+    if (last >= 0) S.sc.vias.splice(last + 1, 0, v); else S.sc.vias.push(v);
+    renderScenarioPoints(); render(); preview();
+  }
+  function drawVias() {
+    S.sc.vias.forEach(function (v) {
+      var from = pointById(v.after);
+      var m = L.marker([v.lat, v.lng], { draggable: true, zIndexOffset: 1100,
+        icon: L.divIcon({ className: "pt-via-icon" + (S.viaAfter === v.after ? " on" : ""), html: "<span></span>", iconSize: [16, 16], iconAnchor: [8, 8] }) });
+      m.bindTooltip("Point de passage apres " + esc(from ? from.name : "?") + " : glisser pour deplacer, cliquer pour retirer", { direction: "top", offset: [0, -8] });
+      m.on("dragend", function (e) { var ll = e.target.getLatLng(); v.lat = ll.lat; v.lng = ll.lng; preview(); });
+      m.on("click", function (e) {
+        L.DomEvent.stopPropagation(e);
+        S.sc.vias = S.sc.vias.filter(function (x) { return x !== v; });
+        toast("info", "Point de passage retire");
+        renderScenarioPoints(); render(); preview();
+      });
+      m.addTo(S.layers.scenario);
+    });
   }
 
   // ---------- Selecteur de points (recherche, plusieurs a la fois) ----------
@@ -1283,7 +1422,7 @@
       var t = el("span", "pt-pick-name", p.name);
       lab.appendChild(t);
       var sub = [];
-      if (p.kind === "parcours") sub.push("tour de piste");
+      if (p.kind === "parcours") sub.push(pcLabel(p));
       if (p.zones && p.zones.length) sub.push(p.zones.slice(0, 2).join(", "));
       if (p.photo_required) sub.push("photo");
       if (p.source && p.source !== "manual") sub.push(p.source.replace("layer:", ""));
@@ -1369,9 +1508,11 @@
     S.sc.points.forEach(function (id, i) {
       var p = pointById(id);
       if (!p) return;
-      L.marker([p.lat, p.lng], { icon: numberIcon(i + 1, color), zIndexOffset: 1000 })
-        .bindTooltip(esc(p.name), { direction: "top", offset: [0, -12] }).addTo(S.layers.scenario);
+      var walk = S.sc.travel === "vehicle" && (S.sc.foot.indexOf(id) >= 0 || (p.ptype === "chemin" && p.travel !== "vehicle"));
+      L.marker([p.lat, p.lng], { icon: numberIcon(i + 1, color, walk ? "foot" : ""), zIndexOffset: 1000 })
+        .bindTooltip(esc(p.name) + (walk ? " (a pied)" : ""), { direction: "top", offset: [0, -12] }).addTo(S.layers.scenario);
     });
+    drawVias();
     var est = S.sc.estimate;
     if (est && est.polyline) {
       L.polyline(decode6(est.polyline), { color: color, weight: 5, opacity: 0.85 }).addTo(S.layers.scenario);
@@ -1396,7 +1537,8 @@
     clearTimeout(S.previewTimer);
     var seq = ++S.previewSeq;
     S.previewTimer = setTimeout(function () {
-      apiPost("/api/patrols/preview", { name: S.sc.name || "apercu", travel: S.sc.travel, loop: S.sc.loop, points: S.sc.points })
+      apiPost("/api/patrols/preview", { name: S.sc.name || "apercu", travel: S.sc.travel, loop: S.sc.loop, points: S.sc.points,
+                                        foot: S.sc.foot, vias: S.sc.vias })
         .then(function (r) {
           if (seq !== S.previewSeq || !S.sc) return;
           S.sc.estimate = r.estimate;
@@ -1434,7 +1576,8 @@
   function saveScenario() {
     readScenarioForm();
     var body = { name: S.sc.name, travel: S.sc.travel, loop: S.sc.loop, color: S.sc.color, note: S.sc.note,
-                 dominante: S.sc.dominante, points: S.sc.points, max_speed_kmh: S.sc.max_speed_kmh };
+                 dominante: S.sc.dominante, points: S.sc.points, max_speed_kmh: S.sc.max_speed_kmh,
+                 foot: S.sc.foot, vias: S.sc.vias };
     var req = S.sc.id ? apiPut("/api/patrols/scenarios/" + S.sc.id, body) : apiPost("/api/patrols/scenarios", body);
     req.then(function (r) {
       toast("success", "Scenario enregistre (v" + r.scenario.version + ")");
@@ -2172,6 +2315,10 @@
     $("pt-pt-toggle").addEventListener("click", togglePoint);
     $("pt-pt-merge-open").addEventListener("click", openMerge);
     $("pt-pc-new").addEventListener("click", function () { openParcours(null); });
+    $("pt-ch-new").addEventListener("click", function () { openParcours({ ptype: "chemin" }); });
+    document.querySelectorAll('input[name="pt-pc-type"], input[name="pt-pc-travel"], input[name="pt-pc-follow"]').forEach(function (r) {
+      r.addEventListener("change", parcoursChanged);
+    });
     $("pt-pc-cancel").addEventListener("click", closeParcours);
     $("pt-pc-save").addEventListener("click", saveParcours);
     $("pt-pc-toggle").addEventListener("click", toggleParcours);
@@ -2180,6 +2327,13 @@
     document.querySelectorAll('input[name="pt-pc-dir"]').forEach(function (r) { r.addEventListener("change", parcoursChanged); });
     $("pt-pc-reverse").addEventListener("click", function () {
       if (!S.pc || S.pc.gates.length < 2) return;
+      if (S.pc.ptype === "chemin") {
+        // Cheminement : dans l'autre sens (boucle : meme depart)
+        S.pc.gates = S.pc.closed ? [S.pc.gates[0]].concat(S.pc.gates.slice(1).reverse()) : S.pc.gates.slice().reverse();
+        parcoursChanged();
+        toast("info", "Ordre inverse : le cheminement se fait dans l'autre sens");
+        return;
+      }
       // Le depart reste le premier passage ; le tour se fait dans l'autre sens
       S.pc.gates = [S.pc.gates[0]].concat(S.pc.gates.slice(1).reverse());
       var r = document.querySelector('input[name="pt-pc-dir"][value="' + (S.pc.direction === "course" ? "inverse" : "course") + '"]');
@@ -2214,7 +2368,7 @@
     ["pt-plan-name", "pt-plan-sc", "pt-plan-group", "pt-plan-device", "pt-plan-every", "pt-plan-from", "pt-plan-until",
      "pt-plan-enabled", "pt-plan-note"].forEach(function (id) { $(id).addEventListener("change", planDirty); });
     document.querySelectorAll('input[name="pt-plan-kind"], input[name="pt-plan-rule"]').forEach(function (r) { r.addEventListener("change", planDirty); });
-    $("pt-sc-loop").addEventListener("change", preview);
+    $("pt-sc-loop").addEventListener("change", function () { preview(); renderScenarioPoints(); render(); });
     $("pt-sc-color").addEventListener("change", function () { readScenarioForm(); renderSwatches(); render(); });
     // Choisir une dominante propose sa couleur si la couleur n'a pas ete
     // choisie a la main (encore une des couleurs proposees)
@@ -2225,7 +2379,10 @@
       if (c && isPreset) { $("pt-sc-color").value = c; renderSwatches(); }
       readScenarioForm(); render();
     });
-    document.querySelectorAll('input[name="pt-sc-travel"]').forEach(function (r) { r.addEventListener("change", preview); });
+    // A pied / vehicule et boucle changent les boutons "a pied" et les troncons
+    document.querySelectorAll('input[name="pt-sc-travel"]').forEach(function (r) {
+      r.addEventListener("change", function () { preview(); renderScenarioPoints(); render(); });
+    });
     $("pt-send-close").addEventListener("click", function () { $("pt-send-modal").hidden = true; if (S.tab === "suivi") loadLive(); });
     $("pt-send-go").addEventListener("click", doSend);
     $("pt-imp-open").addEventListener("click", openImport);
@@ -2249,6 +2406,7 @@
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
       ["pt-zone-modal", "pt-send-modal", "pt-pick-modal", "pt-fiche-modal"].forEach(function (id) { $(id).hidden = true; });
+      if (S.viaAfter) { S.viaAfter = null; if (S.sc) { renderScenarioPoints(); render(); } }
     });
     $("pt-hist-days").addEventListener("change", loadHistory);
     $("pt-hist-sc").addEventListener("change", loadHistory);

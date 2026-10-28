@@ -3434,6 +3434,16 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
 .patrol-speed.over { color: #fff; background: #dc2626; font-weight: 700; padding: 6px 8px; border-radius: 8px;
   animation: patrol-speed-blink 1s steps(2, start) infinite; }
 @keyframes patrol-speed-blink { 50% { background: #991b1b; } }
+/* Passage a pied / retour au vehicule ; chemin impose par des points de passage */
+.patrol-mode { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; color: #bbf7d0;
+  background: rgba(22,163,74,.18); border-radius: 8px; padding: 6px 8px; }
+.patrol-vias { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #fed7aa;
+  background: rgba(245,158,11,.15); border-radius: 8px; padding: 6px 8px; }
+.patrol-vias.ok { color: #bbf7d0; background: rgba(22,163,74,.15); }
+.patrol-mode .material-symbols-outlined, .patrol-vias .material-symbols-outlined { font-size: 18px; }
+.patrol-via-marker span { display: block; width: 12px; height: 12px; margin: 3px; background: #f59e0b; border: 2px solid #fff;
+  transform: rotate(45deg); box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.patrol-via-marker.ok span { background: #16a34a; }
 .patrol-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .patrol-actions button {
   flex: 1; min-width: 90px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;

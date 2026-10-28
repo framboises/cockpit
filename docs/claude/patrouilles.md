@@ -530,6 +530,38 @@ troncons ; arret injoignable dans le mode (no_route) retire.
   `localStorage` (rechargement de l'app). Mode test : « Passage suivant ».
 - Limite : les passages sont declares par la tablette (pas de verification serveur sur les positions).
 
+### Cheminement, points de passage, passage a pied (28/10/2026)
+
+- **Cheminement** = parcours `ptype: "chemin"` (le tour de piste est `ptype` absent ou `"piste"`) :
+  longer une cloture, suivre un chemin en entier. 2 a 80 points cliques, `travel` pedestrian (defaut) |
+  vehicle, `follow` trace (defaut : la ligne cliquee telle quelle, aucun calcul, chemin absent des
+  cartes ; duree a 4,3 km/h a pied, 20 km/h en vehicule) | routes (moteur en mode normal, points
+  `through`), `closed` faux par defaut (boucle possible), rayon 25 m. Jamais la piste : pas de filtre
+  `route_piste` sur les tablettes. `track.checks` = jalons tous les 50 m le long du trace
+  (`track_checks`, 120 au plus, plus espaces au-dela de 6 km) : c'est eux que la tablette franchit
+  (12 regardes plus loin, fin d'une boucle apres la moitie), 80 % exiges, entrees « Cheminement
+  incomplet » / « cheminement X, n/N jalons (GPS) ». Un cheminement a pied entre dans un scenario a pied ;
+  en vehicule non (`parcours_en_vehicule`). Le type d'un parcours enregistre ne change plus.
+- **Points de passage** d'un scenario : `vias [{after: point_id, lat, lng}]` (30 au plus) : imposent le
+  chemin du troncon qui part de `after` (apres le dernier point : seulement en boucle, sinon ignores),
+  sans arret. `route_through(..., kinds=)` : `through` pour eux, une jambe par transition (coupure a 20
+  points recousue). Editeur : « + Point de passage » sous un point puis clics sur la carte (Terminer ou
+  Echap), losanges orange deplacables, clic = retire ; ils suivent une fusion de points. Instantane :
+  `points[].vias [{i, lat, lng}]` du troncon qui mene au point. Tablette : reperes orange, franchis a
+  40 m (+ precision / 2, 15 m max) en `localStorage` `field_vias`, itineraire recalcule par les restants
+  (`vias` envoye a `/field/patrol/<run>/route`), indices envoyes avec la validation du point
+  (`vias`, aussi en multipart « 0,2 »). Serveur : `steps.vias {passed, total}`, ligne « Chemin impose :
+  n/N points de passage (non respecte) » dans l'entree du point, bilan « chemin impose non suivi sur n
+  troncon(s) ». **Jamais bloquant** (trou GPS).
+- **Passage a pied dans un scenario en vehicule** : `foot [point_id]` (points simples), plus tout
+  cheminement a pied. Le vehicule reste au point precedent (premier point : on y arrive en vehicule),
+  trajet a pied par les points a pied consecutifs puis retour au vehicule, la route reprend de la.
+  `estimate` : retour a pied compte dans la jambe suivante. Instantane : `on_foot` + `parking {name,
+  lat, lng}`, puis `back_to_vehicle` sur le premier point repris en vehicule. Tablette : bandeau vert
+  « A pied : vehicule laisse a X » / « Retournez au vehicule », itineraire a pied, ou marche jusqu'au
+  vehicule (plus de 60 m) puis route. Fiche d'acceptation : « (a pied) » apres le nom. Scenario a pied :
+  `foot` vide.
+
 ### Vitesse maximale d'une patrouille (28/10/2026)
 
 - Scenario : `max_speed_kmh` (3-130, vide = pas de limite), copie dans l'instantane du run ; affichee

@@ -34,11 +34,16 @@ def db(monkeypatch):
     d = client[name]
     monkeypatch.setattr(field, "send_push_to_device", lambda *a, **k: None)
     monkeypatch.setattr(P, "_zones", lambda db: [{"id": "z1", "label": "Zone 1", "geometry": SQUARE}])
-    def fake_route(coords, travel, mode="normal", through=False):
+    def fake_route(coords, travel, mode="normal", through=False, kinds=None):
+        # 1 km par troncon, 2 min en vehicule, 10 min a pied ; une jambe entre deux arrets
         import routing
-        return ({"distance_m": 1000 * (len(coords) - 1), "duration_s": 120 * (len(coords) - 1),
+        n = len(coords) - 1
+        per = 600 if travel == "pedestrian" else 120
+        breaks = sum(1 for i, k in enumerate(kinds or []) if k == "break" or i in (0, n)) if kinds else len(coords)
+        legs = [{"distance_m": 1000 * n // max(1, breaks - 1), "duration_s": per * n // max(1, breaks - 1)}] * (breaks - 1)
+        return ({"distance_m": 1000 * n, "duration_s": per * n,
                  "polyline": routing._encode_polyline6(coords), "uses_raceway": mode.endswith("_piste"),
-                 "legs": [{"distance_m": 1000, "duration_s": 120}] * (len(coords) - 1), "mode": mode}, None)
+                 "legs": legs, "mode": mode}, None)
     monkeypatch.setattr(P, "route_through", fake_route)
     monkeypatch.setattr(field.EC, "current_event", lambda db, now=None: ("SAISON", 2026))
     d["anoloc_config"].insert_one({"_id": "global", "beacon_groups": [
@@ -226,6 +231,86 @@ class TestParcours:
         ok, code, r = P.step(db, run["_id"], dev, pid, "done", gates=[0, 1, 2, 4, 9])
         assert code == "ok" and r["state"] == "done"
         assert any("tour Tour Bugatti, 4/5 passages (GPS)" in t for t in _texts(db, run["fiche_id"]))
+
+
+class TestCheminEtPassages:
+    def _pts(self, db, n):
+        out = []
+        for i in range(n):
+            p, _ = P.save_point(db, {"name": "Q%d" % (i + 1), "lat": LAT + 0.001 * i, "lng": LNG}, "t")
+            out.append(str(p["_id"]))
+        return out
+
+    def test_cheminement_trace_dessine_et_jalons(self, db):
+        line = [{"lat": LAT, "lng": LNG}, {"lat": LAT + 0.009, "lng": LNG}]     # 1 km tout droit
+        p, err = P.save_parcours(db, {"name": "Cloture Nord", "ptype": "chemin", "follow": "trace", "gates": line}, "t")
+        assert not err, err
+        assert p["ptype"] == "chemin" and p["closed"] is False and p["travel"] == "pedestrian" and p["radius_m"] == 25
+        tr = p["track"]
+        assert tr["mode"] == "trace" and 990 < tr["distance_m"] < 1010 and 800 < tr["duration_s"] < 860
+        assert len(tr["checks"]) == 21                    # un jalon tous les 50 m, depart et arrivee
+        assert P.gates_total(dict(p, checks=tr["checks"])) == 21
+        # Par les routes : passages du moteur, mode normal (jamais la piste)
+        q, _ = P.save_parcours(db, {"name": "Chemin", "ptype": "chemin", "gates": line, "travel": "vehicle"}, "t")
+        assert q["track"]["mode"] == "normal" and q["track"]["uses_raceway"] is False
+        assert P.save_parcours(db, {"name": "x", "ptype": "chemin", "gates": line[:1]}, "t")[1] == "deux_passages_minimum"
+        # Cheminement a pied admis dans un scenario a pied, en vehicule non
+        a = self._pts(db, 1)[0]
+        assert not P.save_scenario(db, {"name": "S", "travel": "pedestrian", "points": [a, str(p["_id"])]}, "t")[1]
+        assert P.save_scenario(db, {"name": "S", "travel": "pedestrian", "points": [a, str(q["_id"])]},
+                               "t")[1] == "parcours_en_vehicule"
+
+    def test_cheminement_sans_acces_piste_et_validation(self, db):
+        line = [{"lat": LAT, "lng": LNG}, {"lat": LAT + 0.009, "lng": LNG}]
+        p, _ = P.save_parcours(db, {"name": "Cloture", "ptype": "chemin", "follow": "trace", "gates": line}, "t")
+        a = self._pts(db, 1)[0]
+        sc, _ = P.save_scenario(db, {"name": "S", "travel": "pedestrian", "points": [a, str(p["_id"])]}, "t")
+        dev = _dev(db, "A")           # groupe sans acces piste : admis pour un cheminement
+        run, code, _ = P.create_run(db, str(sc["_id"]), {"kind": "device", "device_id": str(dev["_id"])}, "op")
+        assert code == "proposed"
+        P.accept(db, run["_id"], dev)
+        run = _run(db, run["_id"])
+        pid = str(p["_id"])
+        assert P.step(db, run["_id"], dev, pid, "done", gates=list(range(10)))[1] == "tour_incomplet"
+        assert any("Cheminement incomplet : Cloture, 10/21 jalons" in t for t in _texts(db, run["fiche_id"]))
+        assert P.step(db, run["_id"], dev, pid, "done", gates=list(range(18)))[1] == "ok"
+        assert any("cheminement Cloture, 18/21 jalons (GPS)" in t for t in _texts(db, run["fiche_id"]))
+
+    def test_points_de_passage(self, db):
+        a, b, c = self._pts(db, 3)
+        vias = [{"after": a, "lat": LAT + 0.0005, "lng": LNG + 0.001}, {"after": a, "lat": LAT + 0.0007, "lng": LNG + 0.001},
+                {"after": c, "lat": LAT, "lng": LNG + 0.002}]          # apres le dernier, sans boucle : ignore
+        sc, err = P.save_scenario(db, {"name": "S", "travel": "vehicle", "points": [a, b, c], "vias": vias}, "t")
+        assert not err and len(sc["vias"]) == 2
+        # a -> 2 passages -> b -> c : 4 km, toujours une jambe par transition
+        assert sc["estimate"]["distance_m"] == 4000 and len(sc["estimate"]["legs"]) == 2
+        dev = _dev(db, "A")
+        run, _, _ = P.create_run(db, str(sc["_id"]), {"kind": "device", "device_id": str(dev["_id"])}, "op")
+        P.accept(db, run["_id"], dev)
+        run = _run(db, run["_id"])
+        steps = P._pub_steps(run)
+        assert [v["i"] for v in steps[1]["vias"]] == [0, 1] and not steps[0]["vias"]
+        P.step(db, run["_id"], dev, a, "done")
+        P.step(db, run["_id"], dev, b, "done", vias=[1, 7])
+        assert any("Point 2/3 fait : Q2" in t and "Chemin impose : 1/2 points de passage (non respecte)" in t
+                   for t in _texts(db, run["fiche_id"]))
+        P.step(db, run["_id"], dev, c, "done")
+        assert any("chemin impose non suivi sur 1 troncon" in t for t in _texts(db, run["fiche_id"]))
+
+    def test_passage_a_pied_dans_un_scenario_vehicule(self, db):
+        a, b, c, d = self._pts(db, 4)
+        sc, err = P.save_scenario(db, {"name": "Hybride", "travel": "vehicle", "points": [a, b, c, d], "foot": [b, c, "x"]}, "t")
+        assert not err and sc["foot"] == [b, c]
+        est = sc["estimate"]
+        # a (vehicule laisse) -> b -> c a pied -> retour a a pied -> d en vehicule
+        assert est["distance_m"] == 4000 and est["duration_s"] == 3 * 600 + 120
+        assert len(est["legs"]) == 3 and est["legs"][2]["duration_s"] == 600 + 120
+        assert P.save_scenario(db, {"name": "P", "travel": "pedestrian", "points": [a, b], "foot": [b]}, "t")[0]["foot"] == []
+        snap = P._snapshot(db, db["patrol_scenarios"].find_one({"_id": sc["_id"]}))
+        s = {p["name"]: p for p in snap["points"]}
+        assert s["Q2"]["on_foot"] and s["Q2"]["parking"]["name"] == "Q1" and s["Q3"]["on_foot"]
+        assert s["Q4"]["back_to_vehicle"]["name"] == "Q1" and not s["Q4"].get("on_foot")
+        assert not s["Q1"].get("on_foot")
 
 
 class TestExecution:

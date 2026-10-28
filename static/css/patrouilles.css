@@ -135,6 +135,25 @@
 .pt-step-leg { font-size: 11px; color: #64748b; white-space: nowrap; }
 .pt-step-rm { border: 0; background: none; color: #94a3b8; cursor: pointer; padding: 0; display: inline-flex; }
 .pt-step-rm:hover { color: #dc2626; }
+/* Point fait a pied dans un scenario en vehicule */
+.pt-step.foot { background: #f0fdf4; border-color: #bbf7d0; }
+.pt-step-foot { border: 1px solid #e2e8f0; background: #fff; color: #94a3b8; cursor: pointer; padding: 1px 3px; border-radius: 6px; display: inline-flex; }
+.pt-step-foot:hover { color: #15803d; border-color: #86efac; }
+.pt-step-foot.on { background: #16a34a; border-color: #16a34a; color: #fff; }
+.pt-step-foot.static { cursor: default; }
+.pt-step-foot .material-symbols-outlined { font-size: 16px; }
+/* Troncon entre deux points : points de passage imposes */
+.pt-via-row { display: flex; align-items: center; gap: 6px; margin-left: 18px; padding: 1px 8px; border-left: 2px dashed #cbd5e1;
+  font-size: 12px; color: #64748b; }
+.pt-via-row .material-symbols-outlined { font-size: 16px; }
+.pt-via-row .pt-via-txt { flex: 1; min-width: 0; }
+.pt-via-row.set { border-left-color: #f59e0b; color: #92400e; }
+.pt-via-row.on { border-left: 2px solid #f59e0b; background: #fffbeb; border-radius: 0 6px 6px 0; color: #92400e; font-weight: 600; }
+.pt-via-icon span { display: block; width: 12px; height: 12px; margin: 2px; background: #f59e0b; border: 2px solid #fff;
+  transform: rotate(45deg); box-shadow: 0 0 0 1px #b45309; }
+.pt-via-icon.on span { background: #fbbf24; }
+.pt-num-icon.foot span { box-shadow: 0 0 0 3px #16a34a; }
+.pt-inline-icon { font-size: 15px; vertical-align: -3px; }
 .pt-estimate { font-weight: 700; color: #1e3a8a; font-size: 15px; padding: 8px 10px; background: #eff6ff; border-radius: 8px; }
 
 /* ---------- Suivi ---------- */

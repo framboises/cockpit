@@ -4170,6 +4170,7 @@
       _patrol.run = null;
       _patrol.sent = {};
       _patrol.near = null;
+      _patrol.vias = null;        // field_vias garde la cle de la patrouille : sans effet sur la suivante
       renderPatrol();
       return;
     }
@@ -4219,16 +4220,26 @@
         interactive: false, zIndexOffset: isNext ? 900 : 800,
       }).addTo(layer);
       if (isNext && s.radius_m && s.kind !== "parcours") L.circle([s.lat, s.lng], { radius: s.radius_m, color: "#22c55e", weight: 2, fillOpacity: 0.1, interactive: false }).addTo(layer);
-      // Tour de piste a faire : trace a suivre et passages (verts = franchis)
+      // Points de passage imposes vers ce point (orange, verts = franchis)
+      if (isNext && s.vias && s.vias.length) {
+        var vp = viaPassed(s);
+        s.vias.forEach(function (v) {
+          var ok = vp.indexOf(v.i) >= 0;
+          L.marker([v.lat, v.lng], { interactive: false, zIndexOffset: 850,
+            icon: L.divIcon({ className: "patrol-via-marker" + (ok ? " ok" : ""), html: "<span></span>", iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(layer);
+        });
+      }
+      // Tour de piste ou cheminement a faire : trace a suivre et passages
+      // (verts = franchis) ; cheminement : jalons plus petits
       if (isNext && s.kind === "parcours") {
         if (s.track && s.track.polyline) {
           L.polyline(_decodePolyline6(s.track.polyline), { color: "#a855f7", weight: 6, opacity: 0.85, interactive: false }).addTo(layer);
         }
-        var tt = tourState(s), gg = tourGates(s);
+        var tt = tourState(s), gg = tourGates(s), small = !!(s.checks && s.checks.length);
         gg.forEach(function (ll, k) {
-          if (s.closed && k === gg.length - 1) return;      // = le depart
+          if (!small && s.closed && k === gg.length - 1) return;      // = le depart
           var passed = tt.passed.indexOf(k) >= 0, nextG = k === tt.next;
-          L.circleMarker(ll, { radius: nextG ? 9 : 6, color: "#fff", weight: 2,
+          L.circleMarker(ll, { radius: nextG ? (small ? 7 : 9) : (small ? 4 : 6), color: "#fff", weight: small ? 1 : 2,
                                fillColor: passed ? "#16a34a" : (nextG ? "#a855f7" : "#64748b"), fillOpacity: 1, interactive: false }).addTo(layer);
         });
       }
@@ -4282,16 +4293,37 @@
       var sm = document.createElement("small");
       var dist = state.meMarker ? Math.round(haversine([state.meMarker.getLatLng().lat, state.meMarker.getLatLng().lng], [nx.step.lat, nx.step.lng])) : null;
       if (nx.step.kind === "parcours") {
-        var tst = tourState(nx.step), tot = tourGates(nx.step).length;
-        nEl.textContent = "Tour de piste " + (nx.index + 1) + " : " + nx.step.name;
-        sm.textContent = (tst.passed.length ? "Passages : " + tst.passed.length + "/" + tot + " - suivez le trace violet"
+        var tst = tourState(nx.step), tot = tourGates(nx.step).length, chm = nx.step.ptype === "chemin";
+        nEl.textContent = (chm ? "Cheminement " : "Tour de piste ") + (nx.index + 1) + " : " + nx.step.name;
+        sm.textContent = (tst.passed.length ? (chm ? "Jalons : " : "Passages : ") + tst.passed.length + "/" + tot + " - suivez le trace violet"
                                             : (dist != null ? "Depart a " + _fmtDistance(dist) + " - " : "") + "rejoignez le depart puis suivez le trace violet") +
-          " (" + (nx.step.direction === "inverse" ? "sens inverse" : "sens de course") + ", 80 % des passages exiges)";
+          (chm ? " (" + (nx.step.travel === "vehicle" ? "en vehicule" : "a pied") + ", 80 % des jalons exiges)"
+               : " (" + (nx.step.direction === "inverse" ? "sens inverse" : "sens de course") + ", 80 % des passages exiges)");
       } else
       sm.textContent = (dist != null ? "a " + _fmtDistance(dist) : "") + (nx.step.photo_required ? " - photo exigee" : "") +
         " - valide automatiquement a moins de " + nx.step.radius_m + " m";
       nEl.appendChild(sm);
       card.appendChild(nEl);
+      // Passage a pied (vehicule laisse au point precedent), retour au
+      // vehicule, chemin impose par des points de passage
+      var mode = null;
+      if (nx.step.on_foot && nx.step.parking) mode = ["directions_walk", "A pied : vehicule laisse a " + (nx.step.parking.name || "au point precedent")];
+      else if (nx.step.back_to_vehicle) mode = ["directions_car", "Retournez au vehicule (" + (nx.step.back_to_vehicle.name || "point precedent") + ") puis reprenez la route"];
+      if (mode) {
+        var md = document.createElement("div");
+        md.className = "patrol-mode";
+        md.appendChild(_mkIcon(mode[0]));
+        md.appendChild(document.createTextNode(" " + mode[1]));
+        card.appendChild(md);
+      }
+      if (nx.step.vias && nx.step.vias.length) {
+        var vd = document.createElement("div");
+        var nvp = viaPassed(nx.step).length;
+        vd.className = "patrol-vias" + (nvp === nx.step.vias.length ? " ok" : "");
+        vd.appendChild(_mkIcon("alt_route"));
+        vd.appendChild(document.createTextNode(" Chemin impose : passez par les reperes orange (" + nvp + "/" + nx.step.vias.length + ")"));
+        card.appendChild(vd);
+      }
       if (nx.step.instruction) {
         var ins = document.createElement("div");
         ins.className = "patrol-instr";
@@ -4326,13 +4358,15 @@
     }
     if (nx && run.state === "running" && nx.step.kind === "parcours") {
       var tsb = tourState(nx.step);
-      btn("patrol-done", "sports_score", "Tour termine", function () { finishTour(nx.step); }, !tsb.passed.length);
+      btn("patrol-done", nx.step.ptype === "chemin" ? "conversion_path" : "sports_score", nx.step.ptype === "chemin" ? "Cheminement termine" : "Tour termine",
+          function () { finishTour(nx.step); }, !tsb.passed.length);
       btn("", "directions", "Itineraire au depart", function () { _patrol.routeFor = null; routeToPatrolPoint(nx.step, true); });
       btn("", "skip_next", "Passer", function () { patrolSkip(nx.step); });
       if (state.testMode) {
         btn("", "pin_drop", "Passage suivant", function () {
           var g = tourGates(nx.step)[Math.min(tsb.next, tourGates(nx.step).length - 1)];
-          if (tsb.next === tourGates(nx.step).length - 1 && nx.step.closed && tsb.passed.length < 2) return;
+          var tg = tourGates(nx.step).length;
+          if (tsb.next === tg - 1 && nx.step.closed && tsb.passed.length < tourMinBeforeClose(nx.step, tg)) return;
           setSimPosition(g);
         });
       }
@@ -4346,6 +4380,9 @@
         btn("", "near_me", "Approcher 300 m", function () { simNear(nx.step, 300); });
         btn("", "pin_drop", "Aller au point", function () { setSimPosition([nx.step.lat, nx.step.lng]); });
       }
+    }
+    if (nx && run.state === "running" && state.testMode && viaLeft(nx.step).length) {
+      btn("", "alt_route", "Aller au point de passage", function () { var v = viaLeft(nx.step)[0]; if (v) setSimPosition([v.lat, v.lng]); });
     }
     btn("", "flag", nx ? "Terminer" : "Fermer", function () { patrolFinish(); });
     card.appendChild(acts);
@@ -4382,7 +4419,8 @@
     var me = state.meMarker.getLatLng();
     fetchWithTimeout("/field/patrol/" + encodeURIComponent(_patrol.run.run_id) + "/route", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: [me.lat, me.lng], point_id: step.point_id }),
+      body: JSON.stringify({ from: [me.lat, me.lng], point_id: step.point_id,
+                             vias: viaLeft(step).map(function (v) { return v.i; }) }),
     }, 12000).then(function (r) { return r.json(); }).then(function (d) {
       tlog("itineraire", "vers " + step.name + " : " + (d && d.ok ? _fmtDistance(d.distance_m) + ", " + Math.round(d.duration_s / 60) + " min (" + d.travel + ")"
                                                                   : "echec " + ((d && d.error) || "?") + ", trait direct"));
@@ -4398,7 +4436,7 @@
     _patrol.sent[step.point_id] = true;
     renderPatrol();
     return queuedJsonPost("/field/patrol/" + encodeURIComponent(run.run_id) + "/step",
-      Object.assign({ point_id: step.point_id, at: Date.now() }, body), label).then(function (res) {
+      Object.assign({ point_id: step.point_id, at: Date.now(), vias: viaPassed(step) }, body), label).then(function (res) {
       tlog("point", step.name + " " + body.action + (body.method ? " (" + body.method + ")" : "") + " -> " +
         (res && res.queued ? "mis en file" : res && res.ok === false ? "refus " + (res.error || res._status) : "ok " + ((res && res.code) || "")));
       if (res && res.queued) toast(label + " : enregistre, envoi au retour du reseau", "warn");
@@ -4443,7 +4481,8 @@
         var run = _patrol.run;
         if (!run) return;
         var url = "/field/patrol/" + encodeURIComponent(run.run_id) + "/step";
-        var fields = { point_id: step.point_id, action: "done", method: method || "manual", at: String(Date.now()) };
+        var fields = { point_id: step.point_id, action: "done", method: method || "manual", at: String(Date.now()),
+                       vias: viaPassed(step).join(",") };
         _patrol.sent[step.point_id] = true;
         renderPatrol();
         function enqueue() {
@@ -5127,6 +5166,7 @@
     var nx = patrolNextStep();
     if (!nx) return;
     var s = nx.step;
+    checkVias(s, latlng, accuracy);
     if (s.kind === "parcours") { checkTourGates(s, latlng, accuracy); return; }
     var d = haversine(latlng, [s.lat, s.lng]);
     var tol = (s.radius_m || 25) + Math.min(15, Math.max(0, (accuracy || 0) / 2));
@@ -5231,11 +5271,18 @@
   // on regarde jusqu'a 4 passages plus loin. Le retour au depart (tour
   // complet) ne compte qu'apres 2 passages. Fin du tour (dernier passage ou
   // bouton) : envoi des passages, le serveur exige 80 % (sinon tour_incomplet).
-  var TOUR_LOOKAHEAD = 4;
+  // Cheminement : jalons tous les 50 m le long du trace (retour compris s'il
+  // boucle), regardes jusqu'a 12 plus loin ; la fin d'une boucle ne compte
+  // qu'apres la moitie des jalons.
+  var TOUR_LOOKAHEAD = 4, CHECKS_LOOKAHEAD = 12;
   function tourGates(s) {
+    if (s.checks && s.checks.length) return s.checks.map(function (x) { return [x.lat, x.lng]; });
     var g = (s.gates || []).map(function (x) { return [x.lat, x.lng]; });
     if (s.closed && g.length > 1) g.push(g[0]);
     return g;
+  }
+  function tourMinBeforeClose(s, total) {
+    return s.checks && s.checks.length ? Math.ceil(total / 2) : 2;
   }
   function tourState(s) {
     var key = _patrol.run.run_id + "|" + s.point_id;
@@ -5252,13 +5299,14 @@
   function checkTourGates(s, latlng, accuracy) {
     var t = tourState(s), g = tourGates(s), total = g.length;
     var tol = (s.radius_m || 40) + Math.min(15, Math.max(0, (accuracy || 0) / 2));
-    for (var k = t.next; k < Math.min(total, t.next + TOUR_LOOKAHEAD); k++) {
-      if (s.closed && k === total - 1 && t.passed.length < 2) break;
+    var ahead = s.checks && s.checks.length ? CHECKS_LOOKAHEAD : TOUR_LOOKAHEAD;
+    for (var k = t.next; k < Math.min(total, t.next + ahead); k++) {
+      if (s.closed && k === total - 1 && t.passed.length < tourMinBeforeClose(s, total)) break;
       if (haversine(latlng, g[k]) > tol) continue;
       t.passed.push(k);
       t.next = k + 1;
       saveTour();
-      tlog("tour", s.name + " : passage " + (k + 1) + "/" + total + " (" + t.passed.length + " franchis)");
+      tlog("tour", s.name + " : " + (s.checks ? "jalon " : "passage ") + (k + 1) + "/" + total + " (" + t.passed.length + " franchis)");
       try { if (navigator.vibrate) navigator.vibrate(120); } catch (e) {}
       if (t.passed.length === 1 && _patrol.routeFor) { clearRoute(); _patrol.routeFor = null; }
       if (t.next >= total) finishTour(s);
@@ -5271,9 +5319,54 @@
     var passed = t.passed.slice();
     _patrol.tour = null;
     try { localStorage.removeItem("field_tour"); } catch (e) { /* noop */ }
-    var ok = passed.length >= (s.min_ratio || 0.8) * total;
-    toast((ok ? "Tour fait : " : "Tour incomplet : ") + passed.length + "/" + total + " passages", ok ? "ok" : "warn");
-    patrolPost(s, { action: "done", method: "gps", gates: passed }, "Tour " + s.name);
+    var ok = passed.length >= (s.min_ratio || 0.8) * total, ch = !!(s.checks && s.checks.length);
+    toast((ok ? (ch ? "Cheminement fait : " : "Tour fait : ") : (ch ? "Cheminement incomplet : " : "Tour incomplet : ")) +
+          passed.length + "/" + total + (ch ? " jalons" : " passages"), ok ? "ok" : "warn");
+    patrolPost(s, { action: "done", method: "gps", gates: passed }, (ch ? "Cheminement " : "Tour ") + s.name);
+  }
+
+  // Points de passage imposes du troncon vers le prochain point (sans arret) :
+  // franchis a moins de 40 m (precision comptee jusqu'a 15 m), gardes en
+  // localStorage, envoyes avec la validation du point ; l'itineraire est
+  // recalcule par les points restants.
+  var VIA_RADIUS_M = 40;
+  function viaState() {
+    var key = _patrol.run.run_id;
+    if (!_patrol.vias || _patrol.vias.key !== key) {
+      var saved = null;
+      try { saved = JSON.parse(localStorage.getItem("field_vias") || "null"); } catch (e) { saved = null; }
+      _patrol.vias = saved && saved.key === key ? saved : { key: key, passed: [] };
+    }
+    return _patrol.vias;
+  }
+  function viaPassed(step) {
+    if (!_patrol.run || !step.vias || !step.vias.length) return [];
+    var st = viaState();
+    return step.vias.filter(function (v) { return st.passed.indexOf(v.i) >= 0; }).map(function (v) { return v.i; });
+  }
+  function viaLeft(step) {
+    if (!_patrol.run || !step.vias || !step.vias.length) return [];
+    var st = viaState();
+    return step.vias.filter(function (v) { return st.passed.indexOf(v.i) < 0; });
+  }
+  function checkVias(step, latlng, accuracy) {
+    var left = viaLeft(step);
+    if (!left.length) return;
+    var tol = VIA_RADIUS_M + Math.min(15, Math.max(0, (accuracy || 0) / 2));
+    // Le premier restant, ou un plus loin (le precedent rate : trou GPS)
+    for (var k = 0; k < left.length; k++) {
+      if (haversine(latlng, [left[k].lat, left[k].lng]) > tol) continue;
+      var st = viaState();
+      st.passed.push(left[k].i);
+      try { localStorage.setItem("field_vias", JSON.stringify(st)); } catch (e) { /* noop */ }
+      tlog("passage", step.name + " : point de passage " + (left[k].i + 1) + " franchi");
+      try { if (navigator.vibrate) navigator.vibrate(120); } catch (e) {}
+      toast("Point de passage franchi (" + viaPassed(step).length + "/" + step.vias.length + ")", "ok");
+      // Itineraire recalcule par les points restants
+      if (_patrol.routeFor === step.point_id) { _patrol.routeFor = null; routeToPatrolPoint(step); }
+      renderPatrol();
+      return;
+    }
   }
 
   // Duree de trajet estimee par le moteur d'itineraire (meme route et meme

@@ -240,8 +240,9 @@ def patrols_parcours_preview():
     if err:
         return _err(err)
     tr = P.parcours_track(clean)
-    return jsonify({"ok": True, "track": {k: tr.get(k) for k in
-                                          ("distance_m", "duration_s", "polyline", "uses_raceway", "error", "mode")}})
+    out = {k: tr.get(k) for k in ("distance_m", "duration_s", "polyline", "uses_raceway", "error", "mode")}
+    out["checks"] = len(tr.get("checks") or [])
+    return jsonify({"ok": True, "track": out})
 
 
 @patrols_bp.route("/api/patrols/points/<point_id>/merge", methods=["POST"])
@@ -685,9 +686,13 @@ def field_patrol_step(run_id):
             photo = {"photo": url, "thumb": thumb}
     method = data.get("method") if data.get("method") in ("gps", "manual") else "manual"
     gates = data.get("gates") if isinstance(data.get("gates"), list) else None
+    vias = data.get("vias")
+    if isinstance(vias, str):           # multipart (point a photo) : "0,2"
+        vias = [x for x in vias.split(",") if x.strip()]
     ok, code, run = P.step(db, run_id, device, data.get("point_id"), data.get("action") or "done",
                            method=method, comment=data.get("comment"), photo=photo,
-                           at=_at_from_ms(data.get("at")), gates=gates)
+                           at=_at_from_ms(data.get("at")), gates=gates,
+                           vias=vias if isinstance(vias, list) else None)
     if not ok:
         return _err(code, 403 if code == "not_assigned" else 409)
     return jsonify({"ok": True, "code": code, "state": (run or {}).get("state")})
@@ -981,7 +986,31 @@ def field_patrol_route(run_id):
         return _err("aucun_point")
     travel = (run.get("scenario") or {}).get("travel") or "vehicle"
     mode = "normal_piste" if (travel == "vehicle" and F._device_route_piste(db, device)) else "normal"
-    out, err = P.route_through([src, (pt["lat"], pt["lng"])], travel, mode=mode)
+    # Points de passage du troncon pas encore franchis (liste de la tablette)
+    left = data.get("vias")
+    vias = [(v["lat"], v["lng"]) for v in pt.get("vias") or []
+            if not isinstance(left, list) or v.get("i") in left]
+    target = (pt["lat"], pt["lng"])
+    back = pt.get("back_to_vehicle")
+    if pt.get("on_foot"):
+        out, err = P.route_through([src] + vias + [target], "pedestrian",
+                                   kinds=["break"] + ["through"] * len(vias) + ["break"])
+        travel = "pedestrian"
+    elif back and travel == "vehicle" and P.haversine_m(src[0], src[1], back["lat"], back["lng"]) > 60:
+        # Fin d'un passage a pied : retour au vehicule, puis en route
+        walk, err = P.route_through([src, (back["lat"], back["lng"])], "pedestrian")
+        drive, err2 = (P.route_through([(back["lat"], back["lng"])] + vias + [target], travel, mode=mode,
+                                       kinds=["break"] + ["through"] * len(vias) + ["break"])
+                       if not err else (None, None))
+        err = err or err2
+        if not err:
+            import routing
+            line = routing._decode_polyline6(walk["polyline"]) + routing._decode_polyline6(drive["polyline"])[1:]
+            out = {"distance_m": walk["distance_m"] + drive["distance_m"],
+                   "duration_s": walk["duration_s"] + drive["duration_s"], "polyline": routing._encode_polyline6(line)}
+    else:
+        out, err = P.route_through([src] + vias + [target], travel, mode=mode,
+                                   kinds=["break"] + ["through"] * len(vias) + ["break"])
     if err:
         return _err(err, 502)
     return jsonify({"ok": True, "point_id": pid, "travel": travel, "distance_m": out["distance_m"],

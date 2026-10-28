@@ -73,6 +73,22 @@ PARCOURS_DIRECTIONS = {"course": "normal_piste", "inverse": "god_piste"}
 PARCOURS_MIN_RATIO = 0.8
 PARCOURS_MAX_GATES = 30
 PARCOURS_GATE_RADIUS = 40
+# Cheminement (`ptype: chemin`) : parcours libre hors piste (cloture, chemin
+# de ronde...), a pied ou en vehicule. Trace qui suit les routes (les passages
+# sont des points de passage du moteur) ou exactement la ligne dessinee (pas
+# de calcul : chemin absent des cartes). Controle par jalons poses tous les
+# 50 m environ le long du trace, 80 % exiges dans l'ordre.
+PARCOURS_TYPES = ("piste", "chemin")
+CHEMIN_FOLLOW = ("routes", "trace")
+CHEMIN_MAX_GATES = 80
+CHEMIN_GATE_RADIUS = 25
+CHECK_SPACING_M = 50
+MAX_CHECKS = 120
+CHEMIN_SPEED_MS = {"pedestrian": 1.2, "vehicle": 5.5}   # trace dessine : 4,3 km/h a pied, 20 km/h en vehicule
+# Points de passage d'un scenario : imposent le chemin entre deux points, sans
+# arret ; franchis notes au compte rendu (jamais bloquant, trou GPS possible)
+MAX_VIAS = 30
+VIA_RADIUS_M = 40
 # Vitesse maximale d'un scenario : bornes de saisie, et depassements gardes
 MIN_SPEED_KMH, MAX_SPEED_KMH = 3, 130
 MAX_SPEEDINGS = 200
@@ -471,9 +487,13 @@ def merge_points(db, keep_id, drop_id, by):
             if i not in ids:
                 ids.append(i)
         sc["points"] = ids
+        # Marque "a pied" et points de passage suivent le point garde
+        sc["foot"] = list(dict.fromkeys(k if i == d else i for i in sc.get("foot") or []))
+        sc["vias"] = [dict(v, after=k if v.get("after") == d else v.get("after")) for v in sc.get("vias") or []]
         est = estimate(db, sc) if len(ids) >= 2 else None
         db["patrol_scenarios"].update_one({"_id": sc["_id"]}, {
-            "$set": {"points": ids, "estimate": est, "updated_at": now, "updated_by": by}, "$inc": {"version": 1}})
+            "$set": {"points": ids, "foot": sc["foot"], "vias": sc["vias"], "estimate": est,
+                     "updated_at": now, "updated_by": by}, "$inc": {"version": 1}})
         n += 1
     logger.info("Patrouilles : point %s (%s) fusionne dans %s (%s) par %s, %d scenario(s)",
                 d, drop.get("name"), k, keep.get("name"), by, n)
@@ -502,10 +522,59 @@ def parcours_end(p):
     return g["lat"], g["lng"]
 
 
+def track_checks(line):
+    """Jalons de controle d'un cheminement : un point tous les 50 m le long du
+    trace (plus espaces au-dela de 6 km), depart et arrivee compris."""
+    if not line:
+        return []
+    seg = [haversine_m(a[0], a[1], b[0], b[1]) for a, b in zip(line, line[1:])]
+    total = sum(seg)
+    step = max(CHECK_SPACING_M, total / (MAX_CHECKS - 1)) if total else CHECK_SPACING_M
+    out = [{"lat": line[0][0], "lng": line[0][1]}]
+    done, nxt = 0.0, step
+    for (a, b), d in zip(zip(line, line[1:]), seg):
+        while d and nxt <= done + d and len(out) < MAX_CHECKS - 1:
+            f = (nxt - done) / d
+            out.append({"lat": a[0] + (b[0] - a[0]) * f, "lng": a[1] + (b[1] - a[1]) * f})
+            nxt += step
+        done += d
+    end = {"lat": line[-1][0], "lng": line[-1][1]}
+    if haversine_m(out[-1]["lat"], out[-1]["lng"], end["lat"], end["lng"]) > step / 3 or len(out) == 1:
+        out.append(end)
+    else:
+        out[-1] = end
+    return out
+
+
+def chemin_track(p):
+    """Trace d'un cheminement : par les routes (points de passage du moteur,
+    mode normal) ou la ligne dessinee telle quelle, et ses jalons."""
+    import routing
+    travel = p.get("travel") if p.get("travel") in TRAVELS else "pedestrian"
+    coords = parcours_coords(p)
+    if p.get("follow") == "trace":
+        dist = sum(haversine_m(a[0], a[1], b[0], b[1]) for a, b in zip(coords, coords[1:]))
+        out = {"distance_m": int(dist), "duration_s": int(dist / CHEMIN_SPEED_MS[travel]),
+               "polyline": routing._encode_polyline6(coords)}
+        mode = "trace"
+    else:
+        out, err = route_through(coords, travel, mode="normal", through=True)
+        mode = "normal"
+        if err:
+            return {"error": err, "mode": mode, "travel": travel, "computed_at": _now()}
+    line = routing._decode_polyline6(out["polyline"])
+    return {"distance_m": out["distance_m"], "duration_s": out["duration_s"], "polyline": out["polyline"],
+            "uses_raceway": False, "mode": mode, "travel": travel, "checks": track_checks(line),
+            "error": None, "computed_at": _now()}
+
+
 def parcours_track(p):
     """Trace du parcours en mode piste force (sens de course ou inverse).
     `uses_raceway` faux = le moteur n'a pas emprunte la piste (passages a
-    resserrer, ou piste fermee dans le scenario charge)."""
+    resserrer, ou piste fermee dans le scenario charge). Cheminement :
+    chemin_track."""
+    if p.get("ptype") == "chemin":
+        return chemin_track(p)
     mode = PARCOURS_DIRECTIONS.get(p.get("direction")) or PARCOURS_DIRECTIONS["course"]
     out, err = route_through(parcours_coords(p), "vehicle", mode=mode, through=True)
     if err:
@@ -527,20 +596,27 @@ def _clean_parcours(data, settings):
         if not (-90 <= lat <= 90 and -180 <= lng <= 180):
             return None, "position_invalide"
         gates.append({"lat": lat, "lng": lng})
-    if len(gates) < 3:
-        return None, "trois_passages_minimum"
-    if len(gates) > PARCOURS_MAX_GATES:
+    chemin = data.get("ptype") == "chemin"
+    if len(gates) < (2 if chemin else 3):
+        return None, "deux_passages_minimum" if chemin else "trois_passages_minimum"
+    if len(gates) > (CHEMIN_MAX_GATES if chemin else PARCOURS_MAX_GATES):
         return None, "trop_de_passages"
+    default_radius = CHEMIN_GATE_RADIUS if chemin else PARCOURS_GATE_RADIUS
     try:
-        radius = max(15, min(150, int(data.get("radius_m") or PARCOURS_GATE_RADIUS)))
+        radius = max(15, min(150, int(data.get("radius_m") or default_radius)))
     except (TypeError, ValueError):
-        radius = PARCOURS_GATE_RADIUS
+        radius = default_radius
     base, err = _clean_point(dict(data, lat=gates[0]["lat"], lng=gates[0]["lng"], radius_m=radius), settings)
     if err:
         return None, err
-    base.update(kind="parcours", gates=gates, closed=bool(data.get("closed", True)),
-                direction=data.get("direction") if data.get("direction") in PARCOURS_DIRECTIONS else "course",
-                photo_required=False, dwell_s=0)
+    base.update(kind="parcours", ptype="chemin" if chemin else "piste", gates=gates,
+                closed=bool(data.get("closed", not chemin)), photo_required=False, dwell_s=0)
+    if chemin:
+        base.update(direction=None,
+                    follow=data.get("follow") if data.get("follow") in CHEMIN_FOLLOW else "routes",
+                    travel=data.get("travel") if data.get("travel") in TRAVELS else "pedestrian")
+    else:
+        base["direction"] = data.get("direction") if data.get("direction") in PARCOURS_DIRECTIONS else "course"
     return base, None
 
 
@@ -590,11 +666,13 @@ def pub_point(p, zone_labels=None):
     }
     if p.get("kind") == "parcours":
         tr = p.get("track") or {}
-        out.update(kind="parcours", gates=p.get("gates") or [], closed=bool(p.get("closed")),
-                   direction=p.get("direction") or "course",
+        out.update(kind="parcours", ptype=p.get("ptype") or "piste", gates=p.get("gates") or [],
+                   closed=bool(p.get("closed")), direction=p.get("direction") or "course",
+                   follow=p.get("follow"), travel=p.get("travel"),
                    track={"distance_m": tr.get("distance_m"), "duration_s": tr.get("duration_s"),
                           "polyline": tr.get("polyline"), "uses_raceway": tr.get("uses_raceway"),
-                          "error": tr.get("error"), "mode": tr.get("mode")})
+                          "error": tr.get("error"), "mode": tr.get("mode"),
+                          "checks": len(tr.get("checks") or [])})
     return out
 
 
@@ -629,14 +707,20 @@ def _valhalla(path, payload, timeout=20):
 VALHALLA_MAX_LOCATIONS = 20
 
 
-def route_through(coords, travel, mode="normal", through=False):
+def route_through(coords, travel, mode="normal", through=False, kinds=None):
     """Itineraire passant par `coords` [(lat, lng)...] dans l'ordre. Chaque
     point est un arret ("break") : une jambe par troncon. `through` : points
-    intermediaires de passage sans demi-tour (trace d'un parcours). Retourne
+    intermediaires de passage sans demi-tour (trace d'un parcours). `kinds` :
+    type de chaque point ("break" | "through", points de passage d'un
+    scenario), les extremites restent des arrets. Retourne
     ({distance_m, duration_s, polyline, legs:[{distance_m, duration_s}]}, err)."""
     import routing
     if len(coords) < 2:
         return {"distance_m": 0, "duration_s": 0, "polyline": routing._encode_polyline6(coords), "legs": []}, None
+    last = len(coords) - 1
+    if kinds is None:
+        kinds = ["through" if through and 0 < i < last else "break" for i in range(len(coords))]
+    kinds = ["break" if i in (0, last) else ("through" if k == "through" else "break") for i, k in enumerate(kinds)]
     # Valhalla refuse plus de 20 points par trajet ("Exceeded max locations") :
     # troncons de 20 points au plus, chaque troncon repartant du dernier point
     if len(coords) > VALHALLA_MAX_LOCATIONS:
@@ -645,12 +729,18 @@ def route_through(coords, travel, mode="normal", through=False):
         i = 0
         while i < len(coords) - 1:
             chunk = coords[i:i + VALHALLA_MAX_LOCATIONS]
-            part, err = route_through(chunk, travel, mode, through)
+            part, err = route_through(chunk, travel, mode, kinds=kinds[i:i + VALHALLA_MAX_LOCATIONS])
             if err:
                 return None, err
             total["distance_m"] += part["distance_m"]
             total["duration_s"] += part["duration_s"]
-            total["legs"].extend(part["legs"])
+            legs = list(part["legs"])
+            # Coupure sur un point de passage : les deux morceaux font une jambe
+            if i and kinds[i] == "through" and total["legs"] and legs:
+                total["legs"][-1] = {"distance_m": total["legs"][-1]["distance_m"] + legs[0]["distance_m"],
+                                     "duration_s": total["legs"][-1]["duration_s"] + legs[0]["duration_s"]}
+                legs = legs[1:]
+            total["legs"].extend(legs)
             total["uses_raceway"] = total["uses_raceway"] or part.get("uses_raceway")
             seg = routing._decode_polyline6(part["polyline"])
             if pts and seg and pts[-1] == seg[0]:
@@ -659,9 +749,7 @@ def route_through(coords, travel, mode="normal", through=False):
             i += VALHALLA_MAX_LOCATIONS - 1
         total["polyline"] = routing._encode_polyline6(pts)
         return total, None
-    last = len(coords) - 1
-    payload = {"locations": [{"lat": a, "lon": b, "type": "through" if through and 0 < i < last else "break"}
-                             for i, (a, b) in enumerate(coords)],
+    payload = {"locations": [{"lat": a, "lon": b, "type": kinds[i]} for i, (a, b) in enumerate(coords)],
                "directions_options": {"units": "kilometers"}, "id": "cockpit-patrol"}
     payload.update(_costing(travel, mode))
     resp, err = _valhalla("/route", payload)
@@ -793,9 +881,33 @@ def _clean_scenario(db, data):
     if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):     # injectee dans du HTML (carte)
         color = "#2563eb"
     dominante = data.get("dominante") if data.get("dominante") in DOMINANTES else "generale"
-    # Tour de piste : en vehicule seulement (la piste est une option du moteur vehicule)
-    if travel == "pedestrian" and any(p.get("kind") == "parcours" for p in by_id.values()):
+    # Tour de piste et cheminement en vehicule : pas dans un scenario a pied
+    # (la piste est une option du moteur vehicule)
+    if travel == "pedestrian" and any(p.get("kind") == "parcours" and not _chemin_a_pied(p) for p in by_id.values()):
         return None, "parcours_en_vehicule"
+    # Points faits a pied dans un scenario en vehicule : le vehicule reste au
+    # point precedent, l'agent y revient avant de repartir
+    foot = []
+    if travel == "vehicle":
+        for x in data.get("foot") or []:
+            x = str(x)
+            if x in by_id and by_id[x].get("kind") != "parcours" and x not in foot:
+                foot.append(x)
+    # Points de passage (sans arret) imposant le chemin apres un point
+    vias = []
+    for v in data.get("vias") or []:
+        after = str((v or {}).get("after") or "") if isinstance(v, dict) else ""
+        if after not in ids or (after == ids[-1] and not data.get("loop")):
+            continue
+        try:
+            lat, lng = float(v.get("lat")), float(v.get("lng"))
+        except (TypeError, ValueError):
+            return None, "position_invalide"
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return None, "position_invalide"
+        vias.append({"after": after, "lat": lat, "lng": lng})
+    if len(vias) > MAX_VIAS:
+        return None, "trop_de_passages"
     # Vitesse maximale autorisee (patrouille lente ou rapide) : alerte sur la
     # tablette et depassements notes au compte rendu. Vide = pas de limite.
     vmax = None
@@ -808,62 +920,118 @@ def _clean_scenario(db, data):
             return None, "vitesse_invalide"
     return {"name": name, "travel": travel, "loop": bool(data.get("loop")), "points": ids,
             "color": color, "dominante": dominante, "note": str(data.get("note") or "").strip()[:500],
-            "max_speed_kmh": vmax}, None
+            "max_speed_kmh": vmax, "foot": foot, "vias": vias}, None
+
+
+def _chemin_a_pied(p):
+    return p.get("kind") == "parcours" and p.get("ptype") == "chemin" and (p.get("travel") or "pedestrian") == "pedestrian"
+
+
+def _is_foot(sc, p):
+    """Etape faite a pied dans un scenario en vehicule : point marque "a pied"
+    ou cheminement a pied."""
+    if (sc.get("travel") or "vehicle") != "vehicle":
+        return False
+    if p.get("kind") == "parcours":
+        return _chemin_a_pied(p)
+    return str(p["_id"]) in (sc.get("foot") or [])
+
+
+def _vias_by_after(sc):
+    """Points de passage du scenario par point de depart du troncon, avec leur
+    numero `i` (ordre du scenario)."""
+    out = {}
+    for i, v in enumerate(sc.get("vias") or []):
+        out.setdefault(v.get("after"), []).append(dict(v, i=i))
+    return out
 
 
 def estimate(db, sc):
-    """Trajet du scenario. Un parcours compte son trace (calcule a son
-    enregistrement) : on route jusqu'a son depart, on ajoute le tour, on
-    repart de sa fin. `legs` reste une jambe par transition entre points."""
+    """Trajet du scenario. Points de passage : le moteur y passe sans arret.
+    Un parcours compte son trace (calcule a son enregistrement) : on route
+    jusqu'a son depart, on ajoute le tour, on repart de sa fin. Passage a pied
+    dans un scenario en vehicule : le vehicule reste au point precedent, trajet
+    a pied par les points a pied puis retour au vehicule. `legs` reste une
+    jambe par transition entre points (le retour au vehicule compte dans la
+    jambe suivante)."""
+    import routing
     pts = scenario_points(db, sc)
-    travel = sc.get("travel") or "vehicle"
+    how = "pedestrian" if (sc.get("travel") or "vehicle") == "pedestrian" else "vehicle"
+    vias = _vias_by_after(sc)
     stops = [(p, False) for p in pts]
     if sc.get("loop") and len(stops) > 1:
         stops.append((pts[0], True))        # retour au depart : on y arrive, sans refaire le tour
-    if not any(p.get("kind") == "parcours" for p in pts):
-        out, err = route_through([(p["lat"], p["lng"]) for p, _ in stops], travel)
-        if err:
-            return {"error": err, "computed_at": _now()}
-        out.update(computed_at=_now(), engine="valhalla")
-        return out
-    import routing
     total = {"distance_m": 0, "duration_s": 0, "legs": [], "uses_raceway": False}
-    line, chain = [], []
+    line = []
+    carry = []                              # retour a pied au vehicule, ajoute a la jambe suivante
 
     def add_line(seg):
         if line and seg and line[-1] == seg[0]:
             seg = seg[1:]
         line.extend(seg)
 
-    def flush():
+    def run(chain, travel):
         if len(chain) < 2:
             return None
-        part, err = route_through(chain, travel)
+        part, err = route_through([(a, b) for a, b, _ in chain], travel, kinds=[k for _, _, k in chain])
         if err:
             return err
         total["distance_m"] += part["distance_m"]
         total["duration_s"] += part["duration_s"]
-        total["legs"].extend(part["legs"])
+        legs = [dict(l) for l in part["legs"]]
+        if carry and legs:
+            back = carry.pop()
+            legs[0] = {"distance_m": legs[0]["distance_m"] + back["distance_m"],
+                       "duration_s": legs[0]["duration_s"] + back["duration_s"]}
+        total["legs"].extend(legs)
         total["uses_raceway"] = total["uses_raceway"] or bool(part.get("uses_raceway"))
         add_line(routing._decode_polyline6(part["polyline"]))
         return None
 
+    def fail(err):
+        return {"error": err, "computed_at": _now()}
+
+    chain, parking, prev = [], None, None   # parking : ou le vehicule attend pendant un passage a pied
     for p, closing in stops:
-        chain.append((p["lat"], p["lng"]))
+        foot = not closing and _is_foot(sc, p)
+        if foot and parking is None:
+            # Vehicule laisse au point precedent (premier point : on y arrive en vehicule)
+            parking = chain[-1][:2] if chain else (p["lat"], p["lng"])
+            err = run(chain, how)
+            if err:
+                return fail(err)
+            chain = [(parking[0], parking[1], "break")] if chain else []
+        elif not foot and parking is not None:
+            chain.append((parking[0], parking[1], "break"))
+            err = run(chain, "pedestrian")
+            if err:
+                return fail(err)
+            if total["legs"]:
+                carry.append(total["legs"].pop())
+            chain = [(parking[0], parking[1], "break")]
+            parking = None
+        if prev is not None:
+            chain.extend((v["lat"], v["lng"], "through") for v in vias.get(prev, []))
+        chain.append((p["lat"], p["lng"], "break"))
+        prev = str(p["_id"])
         if p.get("kind") != "parcours" or closing:
             continue
-        err = flush()
+        err = run(chain, "pedestrian" if parking is not None else how)
         tr = p.get("track") or {}
         if err or tr.get("error") or not tr.get("polyline"):
-            return {"error": err or tr.get("error") or "parcours_sans_trace", "computed_at": _now()}
+            return fail(err or tr.get("error") or "parcours_sans_trace")
         total["distance_m"] += int(tr.get("distance_m") or 0)
         total["duration_s"] += int(tr.get("duration_s") or 0)
         total["uses_raceway"] = total["uses_raceway"] or bool(tr.get("uses_raceway"))
         add_line(routing._decode_polyline6(tr["polyline"]))
-        chain = [parcours_end(p)]
-    err = flush()
+        end = parcours_end(p)
+        chain = [(end[0], end[1], "break")]
+    if parking is not None:                 # fin a pied : retour au vehicule
+        chain.append((parking[0], parking[1], "break"))
+    err = run(chain, "pedestrian" if parking is not None else how)
     if err:
-        return {"error": err, "computed_at": _now()}
+        return fail(err)
+    total["legs"].extend(carry)
     total.update(polyline=routing._encode_polyline6(line), computed_at=_now(), engine="valhalla")
     return total
 
@@ -920,7 +1088,9 @@ def pub_scenario(db, sc, with_points=False, zone_labels=None):
         "id": str(sc["_id"]), "name": sc.get("name"), "travel": sc.get("travel") or "vehicle",
         "loop": bool(sc.get("loop")), "color": sc.get("color") or "#2563eb", "note": sc.get("note") or "",
         "dominante": sc.get("dominante") or "generale", "max_speed_kmh": sc.get("max_speed_kmh"),
-        "points": sc.get("points") or [], "archived": bool(sc.get("archived")),
+        "points": sc.get("points") or [], "foot": sc.get("foot") or [],
+        "vias": [{"after": v.get("after"), "lat": v.get("lat"), "lng": v.get("lng")} for v in sc.get("vias") or []],
+        "archived": bool(sc.get("archived")),
         "version": sc.get("version") or 1, "updated_at": _iso(sc.get("updated_at")),
         "updated_by": sc.get("updated_by"),
         "estimate": {"distance_m": est.get("distance_m"), "duration_s": est.get("duration_s"),
@@ -978,7 +1148,7 @@ def candidates(db, run, now=None, exclude_ids=()):
     pts = (run.get("scenario") or {}).get("points") or []
     first = pts[0] if pts else None
     # Tour de piste : tablette dont le groupe a l'acces piste des itineraires
-    piste = any(p.get("kind") == "parcours" for p in pts)
+    piste = any(p.get("kind") == "parcours" and (p.get("ptype") or "piste") == "piste" for p in pts)
     exclude = {str(x) for x in exclude_ids}
     ok, skipped = [], []
     for d in db["field_devices"].find(q):
@@ -1027,25 +1197,51 @@ def _snap_point(p):
            "info": p.get("info") or ""}
     if p.get("kind") == "parcours":
         tr = p.get("track") or {}
-        out.update(kind="parcours", gates=p.get("gates") or [], closed=bool(p.get("closed")),
-                   direction=p.get("direction") or "course", min_ratio=PARCOURS_MIN_RATIO,
+        out.update(kind="parcours", ptype=p.get("ptype") or "piste", gates=p.get("gates") or [],
+                   closed=bool(p.get("closed")), direction=p.get("direction") or "course",
+                   min_ratio=PARCOURS_MIN_RATIO, checks=tr.get("checks") or None,
+                   follow=p.get("follow"), travel=p.get("travel"),
                    track={k: tr.get(k) for k in ("distance_m", "duration_s", "polyline", "mode")})
     return out
 
 
 def _snapshot(db, sc):
+    """Instantane du scenario pour une patrouille. Par point : points de
+    passage du troncon qui y mene (`vias`), passage a pied (`on_foot`, vehicule
+    laisse a `parking`), retour au vehicule avant de repartir (`back_to_vehicle`)."""
     pts = scenario_points(db, sc)
+    vias = _vias_by_after(sc)
+    snaps, parking, prev = [], None, None
+    for p in pts:
+        s = _snap_point(p)
+        if prev is not None and vias.get(str(prev["_id"])):
+            s["vias"] = [{"i": v["i"], "lat": v["lat"], "lng": v["lng"]} for v in vias[str(prev["_id"])]]
+        if _is_foot(sc, p):
+            if parking is None:
+                at = prev if prev is not None else p
+                lat, lng = parcours_end(at) if (at is prev and at.get("kind") == "parcours") else (at["lat"], at["lng"])
+                parking = {"name": at.get("name"), "lat": lat, "lng": lng}
+            # Premier point du scenario : on y arrive en vehicule
+            s.update(on_foot=prev is not None, parking=parking)
+        elif parking is not None:
+            s["back_to_vehicle"] = parking
+            parking = None
+        snaps.append(s)
+        prev = p
     return {
         "id": str(sc["_id"]), "name": sc.get("name"), "travel": sc.get("travel") or "vehicle",
         "loop": bool(sc.get("loop")), "color": sc.get("color"), "version": sc.get("version") or 1,
         "dominante": sc.get("dominante") or "generale", "max_speed_kmh": sc.get("max_speed_kmh"),
-        "points": [_snap_point(p) for p in pts],
+        "points": snaps,
         "estimate": {k: (sc.get("estimate") or {}).get(k) for k in ("distance_m", "duration_s", "polyline")},
     }
 
 
 def gates_total(pt):
-    """Nombre de passages a valider d'un parcours (retour au depart compris)."""
+    """Nombre de passages a valider d'un parcours (retour au depart compris) ;
+    cheminement : ses jalons."""
+    if pt.get("checks"):
+        return len(pt["checks"])
     n = len(pt.get("gates") or [])
     return n + (1 if pt.get("closed") and n > 1 else 0)
 
@@ -1303,7 +1499,8 @@ def _open_fiche(db, run, device, now):
         parts.append("%.1f km" % (est["distance_m"] / 1000.0))
     if est.get("duration_s"):
         parts.append("%d min estimees" % round(est["duration_s"] / 60))
-    pts_txt = " > ".join(p.get("name") or "?" for p in sc.get("points") or [])
+    pts_txt = " > ".join((p.get("name") or "?") + (" (a pied)" if p.get("on_foot") else "")
+                         for p in sc.get("points") or [])
     PH.append_entry(db["pcorg"], fid, PH.make_entry(
         "field:" + name, "Patrouille acceptee%s\nParcours : %s%s" % (
             (" (" + ", ".join(parts) + ")") if parts else "", pts_txt,
@@ -1364,11 +1561,13 @@ def _counts(steps):
 
 
 def step(db, run_id, device, point_id, action, method="manual", comment=None, photo=None,
-         at=None, now=None, gates=None):
+         at=None, now=None, gates=None, vias=None):
     """Point fait (`done`, GPS ou bouton) ou passe (`skipped`, motif).
     Parcours : `done` exige `gates`, les passages franchis dans l'ordre
     (indices), au moins 80 % du total ; sinon `tour_incomplet` (l'agent
     refait le tour ou passe l'etape avec un motif, entree en main courante).
+    `vias` : numeros des points de passage franchis sur le troncon qui mene
+    au point, notes au compte rendu (jamais bloquant).
     Idempotent par (patrouille, point) : un renvoi de la file hors ligne ne
     change rien. Retourne (ok, code, run)."""
     now = now or _now()
@@ -1399,25 +1598,38 @@ def step(db, run_id, device, point_id, action, method="manual", comment=None, ph
         passed = sorted({int(g) for g in (gates or []) if str(g).lstrip("-").isdigit() and 0 <= int(g) < n_tot})
         tour = {"passed": passed, "total": n_tot}
         if not n_tot or len(passed) < PARCOURS_MIN_RATIO * n_tot:
-            _fiche_entry(db, run, "Tour incomplet : %s, %d/%d passages" % (pt.get("name"), len(passed), n_tot), now)
+            _fiche_entry(db, run, "%s incomplet : %s, %d/%d %s" % (
+                "Cheminement" if pt.get("checks") else "Tour", pt.get("name"), len(passed), n_tot,
+                "jalons" if pt.get("checks") else "passages"), now)
             return False, "tour_incomplet", None
         method = "gps"
+    via_res = None
+    if action == "done" and pt.get("vias"):
+        known = {v["i"] for v in pt["vias"]}
+        got = sorted({int(x) for x in (vias or []) if str(x).isdigit() and int(x) in known})
+        via_res = {"passed": got, "total": len(known)}
     r = db["patrol_runs"].update_one(
         {"_id": run_id, "steps": {"$elemMatch": {"point_id": str(point_id), "state": "pending"}}},
         {"$set": {"steps.$.state": action, "steps.$.at": when, "steps.$.method": method,
-                  "steps.$.comment": comment, "steps.$.photo": photo, "steps.$.tour": tour}})
+                  "steps.$.comment": comment, "steps.$.photo": photo, "steps.$.tour": tour,
+                  "steps.$.vias": via_res}})
     if not r.modified_count:
         return True, "deja_fait", db["patrol_runs"].find_one({"_id": run_id})
     idx = next(i for i, s in enumerate(run["steps"]) if s.get("point_id") == str(point_id))
     total = len(run["steps"])
     if tour:
-        text = "Point %d/%d fait : tour %s, %d/%d passages (GPS)" % (
-            idx + 1, total, pt.get("name") or st.get("name"), len(tour["passed"]), tour["total"])
+        text = "Point %d/%d fait : %s %s, %d/%d %s (GPS)" % (
+            idx + 1, total, "cheminement" if pt.get("checks") else "tour", pt.get("name") or st.get("name"),
+            len(tour["passed"]), tour["total"], "jalons" if pt.get("checks") else "passages")
     elif action == "done":
         how = {"gps": "passage GPS", "manual": "bouton"}.get(method, method)
         text = "Point %d/%d fait : %s (%s)" % (idx + 1, total, pt.get("name") or st.get("name"), how)
     else:
         text = "Point %d/%d passe : %s\nMotif : %s" % (idx + 1, total, pt.get("name") or st.get("name"), comment)
+    if via_res:
+        text += "\nChemin impose : %d/%d point%s de passage" % (
+            len(via_res["passed"]), via_res["total"], "s" if via_res["total"] > 1 else "") + (
+            "" if len(via_res["passed"]) == via_res["total"] else " (non respecte)")
     if action == "done" and comment:
         text += "\n" + comment
     # Photo {photo, thumb} : meme forme que les commentaires photo de la tablette
@@ -1491,6 +1703,10 @@ def _bilan(run, now):
         parts.append("%d non fait%s" % (c["missed"], "s" if c["missed"] > 1 else ""))
     if dur is not None:
         parts.append("duree %d min" % dur + (" dont %d min de pause" % round(paused_s / 60) if paused_s >= 60 else ""))
+    off = sum(1 for s in run.get("steps") or []
+              if s.get("vias") and len(s["vias"].get("passed") or []) < s["vias"].get("total", 0))
+    if off:
+        parts.append("chemin impose non suivi sur %d troncon%s" % (off, "s" if off > 1 else ""))
     sp = run.get("speedings") or []
     limit = (run.get("scenario") or {}).get("max_speed_kmh")
     if limit:
@@ -1884,9 +2100,12 @@ def _pub_steps(run):
              "at": _iso(s.get("at")), "method": s.get("method"), "comment": s.get("comment"),
              "photo": s.get("photo"), "lat": p.get("lat"), "lng": p.get("lng"),
              "radius_m": p.get("radius_m"), "instruction": p.get("instruction") or "",
-             "photo_required": bool(p.get("photo_required")), "info": p.get("info") or ""}
+             "photo_required": bool(p.get("photo_required")), "info": p.get("info") or "",
+             "vias": p.get("vias") or [], "via_result": s.get("vias"), "on_foot": bool(p.get("on_foot")),
+             "parking": p.get("parking"), "back_to_vehicle": p.get("back_to_vehicle")}
         if p.get("kind") == "parcours":
-            o.update(kind="parcours", gates=p.get("gates") or [], closed=bool(p.get("closed")),
+            o.update(kind="parcours", ptype=p.get("ptype") or "piste", gates=p.get("gates") or [],
+                     closed=bool(p.get("closed")), checks=p.get("checks"), travel=p.get("travel"),
                      direction=p.get("direction"), min_ratio=p.get("min_ratio") or PARCOURS_MIN_RATIO,
                      gates_total=gates_total(p), track=p.get("track") or {}, tour=s.get("tour"))
         out.append(o)
