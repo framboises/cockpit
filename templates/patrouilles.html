@@ -160,6 +160,7 @@
                             <div class="pt-view-head">
                                 <div class="pt-callout"><span class="material-symbols-outlined">add_location_alt</span> Cliquez sur la carte pour creer un point, ou importez-les d'une couche.</div>
                                 <button type="button" class="btn btn-primary" id="pt-imp-open"><span class="material-symbols-outlined">layers</span> Importer depuis une couche (sanitaires, tribunes, portails...)</button>
+                                <button type="button" class="btn" id="pt-pc-new"><span class="material-symbols-outlined">sports_score</span> Nouveau parcours impose (tour de piste)</button>
                                 <div class="pt-row">
                                     <input type="search" id="pt-pt-search" class="pt-input" placeholder="Rechercher un point">
                                     <label class="pt-check"><input type="checkbox" id="pt-pt-inactive"> Desactives</label>
@@ -226,6 +227,38 @@
                                 <button type="button" class="btn" id="pt-pt-merge-open" title="Deux points pour le meme lieu : n'en garder qu'un"><span class="material-symbols-outlined">merge</span> Fusionner</button>
                                 <span class="pt-spacer"></span>
                                 <button type="button" class="btn btn-primary" id="pt-pt-save"><span class="material-symbols-outlined">save</span> Enregistrer</button>
+                            </div>
+                        </div>
+                        <!-- Parcours impose (tour de piste) : passages dans l'ordre de roulage -->
+                        <div class="pt-pane" id="pt-pc-editor" hidden>
+                            <div class="pt-view-head">
+                                <button type="button" class="pt-back" id="pt-pc-cancel"><span class="material-symbols-outlined">arrow_back</span> Points</button>
+                                <input type="text" id="pt-pc-name" class="pt-input" placeholder="Nom du parcours (ex. Tour piste Bugatti)" maxlength="80">
+                            </div>
+                            <div class="pt-scroll pt-editor-body">
+                                <div class="pt-callout"><span class="material-symbols-outlined">sports_score</span> Cliquez sur la carte les points de passage, dans l'ordre de roulage (3 au moins). Glissez-les pour ajuster. Le trace emprunte la piste : la tablette doit etre d'un groupe avec acces piste.</div>
+                                <div class="pt-seg" role="radiogroup" aria-label="Sens">
+                                    <label><input type="radio" name="pt-pc-dir" value="course" checked><span class="material-symbols-outlined">east</span> Sens de course</label>
+                                    <label><input type="radio" name="pt-pc-dir" value="inverse"><span class="material-symbols-outlined">west</span> Sens inverse</label>
+                                </div>
+                                <div class="pt-row">
+                                    <label class="pt-check"><input type="checkbox" id="pt-pc-closed" checked> Tour complet (retour au premier passage)</label>
+                                    <span class="pt-spacer"></span>
+                                    <button type="button" class="pt-link" id="pt-pc-reverse">Inverser l'ordre</button>
+                                </div>
+                                <div id="pt-pc-track" class="pt-estimate">-</div>
+                                <ol id="pt-pc-gates" class="pt-steps"></ol>
+                                <div class="pt-grid2">
+                                    <label class="pt-field">Rayon d'un passage (m)<input type="number" id="pt-pc-radius" class="pt-input" min="15" max="150" value="40"></label>
+                                    <div class="pt-hint pt-pc-rule">Etape faite a 80 % des passages franchis dans l'ordre.</div>
+                                </div>
+                                <label class="pt-field">Autres noms (separes par des virgules)<input type="text" id="pt-pc-aliases" class="pt-input" maxlength="400" placeholder="Ex. piste Bugatti, circuit Bugatti"></label>
+                                <label class="pt-field">Consigne affichee a l'agent<textarea id="pt-pc-instruction" class="pt-input" rows="2" maxlength="500" placeholder="Ex. vitesse limitee, feux de piste a verifier"></textarea></label>
+                            </div>
+                            <div class="pt-foot pt-row">
+                                <button type="button" class="btn pt-danger" id="pt-pc-toggle">Desactiver</button>
+                                <span class="pt-spacer"></span>
+                                <button type="button" class="btn btn-primary" id="pt-pc-save"><span class="material-symbols-outlined">save</span> Enregistrer</button>
                             </div>
                         </div>
                     </div>

@@ -100,6 +100,10 @@
 .pt-editor-head input[type=color]::-moz-color-swatch { border: 0; border-radius: 6px; }
 .pt-merge { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #fcd34d; background: #fffbeb; border-radius: 10px; }
 .pt-merge[hidden], .pt-mg-keep[hidden] { display: none; }
+.pt-estimate.pt-warn-box { color: #92400e; background: #fffbeb; border: 1px solid #fcd34d; }
+.pt-warn-line { font-weight: 500; font-size: 13px; margin-top: 4px; }
+.pt-pc-rule { align-self: end; padding-bottom: 8px; }
+.pt-item-title .material-symbols-outlined, .pt-step-name .material-symbols-outlined { font-size: 17px; vertical-align: -3px; margin-right: 4px; color: #7c3aed; }
 .pt-merge-title { display: flex; align-items: center; gap: 6px; font-weight: 700; color: #92400e; }
 .pt-merge select[size] { padding: 4px; }
 .pt-mg-keep { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }

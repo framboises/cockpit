@@ -217,6 +217,33 @@ def patrols_points_import():
     return jsonify({"ok": True, "ids": ids, "points": [P.pub_point(pts[i], labels) for i in ids if i in pts]})
 
 
+@patrols_bp.route("/api/patrols/parcours", methods=["POST"])
+@patrols_bp.route("/api/patrols/parcours/<point_id>", methods=["PUT"])
+@admin_required
+def patrols_parcours_save(point_id=None):
+    """Parcours impose (tour de piste) : passages dans l'ordre de roulage,
+    sens, tour complet ; trace recalcule en mode piste force."""
+    db = _db()
+    p, err = P.save_parcours(db, request.get_json(silent=True) or {}, _who(), point_id=point_id)
+    if err:
+        return _err(err, 404 if err == "not_found" else 400)
+    scenarios = [P.pub_scenario(db, s) for s in db["patrol_scenarios"].find().sort("name", 1)]
+    return jsonify({"ok": True, "point": P.pub_point(p, _zone_labels(P._zones(db))), "scenarios": scenarios})
+
+
+@patrols_bp.route("/api/patrols/parcours/preview", methods=["POST"])
+@admin_required
+def patrols_parcours_preview():
+    """Trace d'un parcours en cours de saisie (rien n'est enregistre)."""
+    data = request.get_json(silent=True) or {}
+    clean, err = P._clean_parcours(dict(data, name=data.get("name") or "apercu"), P.get_settings(_db()))
+    if err:
+        return _err(err)
+    tr = P.parcours_track(clean)
+    return jsonify({"ok": True, "track": {k: tr.get(k) for k in
+                                          ("distance_m", "duration_s", "polyline", "uses_raceway", "error", "mode")}})
+
+
 @patrols_bp.route("/api/patrols/points/<point_id>/merge", methods=["POST"])
 @admin_required
 def patrols_point_merge(point_id):
@@ -321,6 +348,7 @@ REASONS = {
     "epreuve_terminee": "epreuve terminee", "pas_vue_recemment": "pas vue recemment",
     "proposition_en_cours": "proposition en cours", "patrouille_en_cours": "patrouille en cours",
     "hors_zone": "zone de competence ne couvrant pas tous les points",
+    "sans_acces_piste": "groupe sans acces piste (le scenario contient un tour de piste)",
 }
 
 
@@ -656,9 +684,10 @@ def field_patrol_step(run_id):
                 return _err(e.code, e.status)
             photo = {"photo": url, "thumb": thumb}
     method = data.get("method") if data.get("method") in ("gps", "manual") else "manual"
+    gates = data.get("gates") if isinstance(data.get("gates"), list) else None
     ok, code, run = P.step(db, run_id, device, data.get("point_id"), data.get("action") or "done",
                            method=method, comment=data.get("comment"), photo=photo,
-                           at=_at_from_ms(data.get("at")))
+                           at=_at_from_ms(data.get("at")), gates=gates)
     if not ok:
         return _err(code, 403 if code == "not_assigned" else 409)
     return jsonify({"ok": True, "code": code, "state": (run or {}).get("state")})

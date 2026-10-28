@@ -602,7 +602,8 @@ def create_from_proposal(db, data, by):
         except (KeyError, TypeError, ValueError):
             continue
         near = None
-        for p in db["patrol_points"].find({"active": {"$ne": False}, "lat": {"$gt": lat - 0.0005, "$lt": lat + 0.0005}},
+        for p in db["patrol_points"].find({"active": {"$ne": False}, "kind": {"$ne": "parcours"},
+                                           "lat": {"$gt": lat - 0.0005, "$lt": lat + 0.0005}},
                                           {"lat": 1, "lng": 1}):
             if P.haversine_m(lat, lng, p["lat"], p["lng"]) <= 25:
                 near = p

@@ -47,7 +47,10 @@
     trop_de_points: "Trop de points (40 au plus)", no_route: "Aucun chemin entre ces points",
     valhalla_unreachable: "Moteur d'itineraire injoignable", scenario_vide: "Scenario sans point",
     cible_invalide: "Choisissez une tablette ou un groupe", not_found: "Introuvable",
-    meme_point: "Choisissez un autre point",
+    meme_point: "Choisissez un autre point", types_differents: "Un parcours ne se fusionne qu'avec un parcours",
+    trois_passages_minimum: "3 passages au moins", trop_de_passages: "30 passages au plus",
+    parcours_en_vehicule: "Un tour de piste se fait en vehicule", parcours_sans_trace: "Parcours sans trace (a recalculer)",
+    est_un_parcours: "C'est un parcours : ouvrez-le depuis la liste",
   };
   function errLabel(e) { var c = (e && e.message) || String(e); return ERRORS[c] || c; }
 
@@ -149,6 +152,12 @@
   function onMapClick(e) {
     if (S.tab === "proposer" && PR.placing) { placeAt(e.latlng); return; }
     if (S.tab !== "points" || S.merge) return;
+    if (S.pc) {         // parcours : chaque clic ajoute un passage
+      if (S.pc.gates.length >= 30) { toast("warning", "30 passages au plus"); return; }
+      S.pc.gates.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+      parcoursChanged();
+      return;
+    }
     if (IMP.on) {       // import depuis une couche : la carte sert au lasso
       if (IMP.lasso) { IMP.lasso.push([e.latlng.lng, e.latlng.lat]); drawImport(); }
       return;
@@ -232,7 +241,7 @@
     S.layers.points.clearLayers();
     S.layers.scenario.clearLayers();
     S.layers.live.clearLayers();
-    if (S.tab === "points") { renderPoints(); if (IMP.on) drawImport(); else drawAllPoints(true); }
+    if (S.tab === "points") { renderPoints(); if (IMP.on) drawImport(); else if (S.pc) drawParcoursEditor(); else drawAllPoints(true); }
     else if (S.tab === "scenarios") { renderScenarios(); if (S.sc) drawScenarioEditor(); else drawScenarioRoutes(); }
     else if (S.tab === "tablettes") renderDevices();
     else if (S.tab === "suivi") renderLive();
@@ -252,15 +261,23 @@
       if (inSc[p.id]) return;
       var editing = S.pt && S.pt.id === p.id;
       if (editing) return;
+      // Parcours : son trace, cliquable comme le point (ouvre son editeur)
+      if (p.kind === "parcours" && !faint && p.track && p.track.polyline) {
+        var tl = L.polyline(decode6(p.track.polyline), { color: p.active ? "#7c3aed" : "#94a3b8", weight: 4, opacity: 0.7 })
+          .bindTooltip(esc(p.name) + " (tour de piste)", { sticky: true });
+        tl.on("click", function (e) { L.DomEvent.stopPropagation(e); if (S.merge) pickMerge(p.id); else openParcours(p); });
+        tl.addTo(S.layers.points);
+      }
       var m = faint
         ? L.circleMarker([p.lat, p.lng], { radius: 5, color: "#64748b", weight: 1, fillColor: "#cbd5e1", fillOpacity: 0.9 })
-        : L.marker([p.lat, p.lng], { icon: dotIcon(p.active ? "#2563eb" : "#94a3b8", p.name) });
-      m.bindTooltip(esc(p.name) + (faint ? " - cliquer pour ajouter" : ""), { direction: "top", offset: [0, -6] });
-      if (!faint) L.circle([p.lat, p.lng], { radius: p.radius_m, color: "#2563eb", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(S.layers.points);
+        : L.marker([p.lat, p.lng], { icon: dotIcon(p.active ? (p.kind === "parcours" ? "#7c3aed" : "#2563eb") : "#94a3b8", p.name) });
+      m.bindTooltip(esc(p.name) + (p.kind === "parcours" ? " (depart du tour de piste)" : "") + (faint ? " - cliquer pour ajouter" : ""), { direction: "top", offset: [0, -6] });
+      if (!faint && p.kind !== "parcours") L.circle([p.lat, p.lng], { radius: p.radius_m, color: "#2563eb", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(S.layers.points);
       if (editable && S.merge && S.merge.other === p.id) m.setIcon(dotIcon("#f59e0b", p.name));
       m.on("click", function (e) {
         L.DomEvent.stopPropagation(e);
         if (editable && S.merge) pickMerge(p.id);
+        else if (editable && p.kind === "parcours") openParcours(p);
         else if (editable) openPointEditor(p);
         else if (S.sc) addPointToScenario(p.id);
       });
@@ -291,7 +308,13 @@
       var main = el("div", "pt-item-main");
       main.appendChild(el("div", "pt-item-title", p.name));
       var sub = [];
-      sub.push(p.radius_m + " m");
+      if (p.kind === "parcours") {
+        main.firstChild.insertBefore(icon("sports_score"), main.firstChild.firstChild);
+        sub.push("tour de piste, " + (p.gates || []).length + " passages, " + PC_DIR_LABELS[p.direction || "course"]);
+        if (p.track && p.track.distance_m) sub.push(fmtKm(p.track.distance_m) + " - " + fmtMin(p.track.duration_s));
+        if (p.track && p.track.error) sub.push("TRACE IMPOSSIBLE");
+        else if (p.track && p.track.uses_raceway === false) sub.push("hors piste !");
+      } else sub.push(p.radius_m + " m");
       if (p.photo_required) sub.push("photo exigee");
       if (p.instruction) sub.push("consigne");
       sub.push((uses[p.id] || 0) + " scenario(s)");
@@ -299,7 +322,10 @@
       if (p.zones && p.zones.length) sub.push(p.zones.join(", "));
       main.appendChild(el("div", "pt-item-sub", sub.join(" - ")));
       row.appendChild(main);
-      row.addEventListener("click", function () { openPointEditor(p); S.map.setView([p.lat, p.lng], Math.max(S.map.getZoom(), 17)); });
+      row.addEventListener("click", function () {
+        if (p.kind === "parcours") { openParcours(p); return; }
+        openPointEditor(p); S.map.setView([p.lat, p.lng], Math.max(S.map.getZoom(), 17));
+      });
       list.appendChild(row);
     });
   }
@@ -455,6 +481,138 @@
       toast("success", active ? "Point reactive" : "Point desactive (les scenarios qui l'utilisent le gardent)");
       fillSelects();
       closePointEditor();
+    }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
+  // ---------- Parcours impose (tour de piste) ----------
+  // S.pc = {id, name, gates:[{lat,lng}], direction, closed, radius_m, track} ;
+  // trace calcule par le serveur en mode piste force (patrols.parcours_track).
+  var PC_DIR_LABELS = { course: "sens de course", inverse: "sens inverse" };
+  function openParcours(p) {
+    p = p || {};
+    S.pc = { id: p.id || null, name: p.name || "", gates: (p.gates || []).map(function (g) { return { lat: g.lat, lng: g.lng }; }),
+             direction: p.direction || "course", closed: p.closed !== false, radius_m: p.radius_m || 40,
+             active: p.active !== false, track: p.track || null, seq: 0 };
+    $("pt-pt-listpane").hidden = true;
+    $("pt-pc-editor").hidden = false;
+    $("pt-pc-name").value = S.pc.name;
+    $("pt-pc-closed").checked = S.pc.closed;
+    $("pt-pc-radius").value = S.pc.radius_m;
+    $("pt-pc-aliases").value = (p.aliases || []).join(", ");
+    $("pt-pc-instruction").value = p.instruction || "";
+    document.querySelectorAll('input[name="pt-pc-dir"]').forEach(function (r) { r.checked = r.value === S.pc.direction; });
+    $("pt-pc-toggle").hidden = !S.pc.id;
+    $("pt-pc-toggle").textContent = S.pc.active ? "Desactiver" : "Reactiver";
+    renderParcours();
+    render();
+    if (S.pc.gates.length) S.map.fitBounds(L.latLngBounds(S.pc.gates.map(function (g) { return [g.lat, g.lng]; })), { padding: [40, 40] });
+    $("pt-pc-name").focus();
+  }
+
+  function closeParcours() {
+    S.pc = null;
+    $("pt-pc-editor").hidden = true;
+    $("pt-pt-listpane").hidden = false;
+    render();
+  }
+
+  function readParcoursForm() {
+    S.pc.name = $("pt-pc-name").value;
+    S.pc.closed = $("pt-pc-closed").checked;
+    S.pc.radius_m = Number($("pt-pc-radius").value) || 40;
+    var r = document.querySelector('input[name="pt-pc-dir"]:checked');
+    S.pc.direction = r ? r.value : "course";
+  }
+
+  function parcoursChanged() {
+    readParcoursForm();
+    S.pc.track = null;
+    renderParcours();
+    render();
+    clearTimeout(S.pcTimer);
+    S.pcTimer = setTimeout(previewParcours, 400);
+  }
+
+  function previewParcours() {
+    if (!S.pc || S.pc.gates.length < 3) { renderParcours(); return; }
+    var seq = ++S.pc.seq;
+    $("pt-pc-track").textContent = "Calcul du trace sur la piste...";
+    apiPost("/api/patrols/parcours/preview", { gates: S.pc.gates, direction: S.pc.direction, closed: S.pc.closed })
+      .then(function (r) {
+        if (!S.pc || seq !== S.pc.seq) return;
+        S.pc.track = r.track;
+        renderParcours();
+        render();
+      }).catch(function (e) { if (S.pc && seq === S.pc.seq) $("pt-pc-track").textContent = "Trace impossible : " + errLabel(e); });
+  }
+
+  function renderParcours() {
+    var box = $("pt-pc-track"), tr = S.pc.track, n = S.pc.gates.length;
+    clear(box);
+    box.classList.remove("pt-warn-box");
+    if (n < 3) box.textContent = n + " passage" + (n > 1 ? "s" : "") + " : cliquez sur la carte (3 au moins).";
+    else if (!tr) box.textContent = "Calcul du trace...";
+    else if (tr.error) { box.textContent = "Trace impossible : " + errLabel({ message: tr.error }); box.classList.add("pt-warn-box"); }
+    else {
+      box.textContent = "Tour : " + fmtKm(tr.distance_m) + " - " + fmtMin(tr.duration_s) + " (" + PC_DIR_LABELS[S.pc.direction] + ")";
+      if (!tr.uses_raceway) {
+        box.appendChild(el("div", "pt-warn-line", "Le trace n'emprunte pas la piste : resserrez les passages sur la piste, ou la piste est fermee dans le scenario du moteur."));
+        box.classList.add("pt-warn-box");
+      }
+    }
+    var ol = $("pt-pc-gates");
+    clear(ol);
+    S.pc.gates.forEach(function (g, i) {
+      var li = el("li", "pt-step");
+      li.appendChild(el("span", "pt-step-num", String(i + 1)));
+      li.appendChild(el("span", "pt-step-name", i === 0 ? "Depart" : "Passage " + (i + 1)));
+      li.appendChild(el("span", "pt-step-leg", g.lat.toFixed(5) + ", " + g.lng.toFixed(5)));
+      var rm = el("button", "pt-step-rm"); rm.type = "button"; rm.title = "Retirer"; rm.appendChild(icon("close"));
+      rm.addEventListener("click", function () { S.pc.gates.splice(i, 1); parcoursChanged(); });
+      li.appendChild(rm);
+      ol.appendChild(li);
+    });
+    if (S.pc.closed && n > 1) ol.appendChild(el("li", "pt-hint", "Puis retour au depart (tour complet)."));
+  }
+
+  function drawParcoursEditor() {
+    var pc = S.pc, ll = pc.gates.map(function (g) { return [g.lat, g.lng]; });
+    if (pc.track && pc.track.polyline) {
+      L.polyline(decode6(pc.track.polyline), { color: "#7c3aed", weight: 5, opacity: 0.8, interactive: false }).addTo(S.layers.points);
+    } else if (ll.length > 1) {
+      L.polyline(pc.closed ? ll.concat([ll[0]]) : ll, { color: "#7c3aed", weight: 2, dashArray: "6 6", interactive: false }).addTo(S.layers.points);
+    }
+    pc.gates.forEach(function (g, i) {
+      L.circle([g.lat, g.lng], { radius: pc.radius_m, color: "#7c3aed", weight: 1, fillOpacity: 0.06, interactive: false }).addTo(S.layers.points);
+      var m = L.marker([g.lat, g.lng], { draggable: true, icon: numberIcon(i === 0 ? "D" : i + 1, "#7c3aed") }).addTo(S.layers.points);
+      m.on("dragend", function (e) { var p = e.target.getLatLng(); pc.gates[i] = { lat: p.lat, lng: p.lng }; parcoursChanged(); });
+    });
+  }
+
+  function saveParcours() {
+    readParcoursForm();
+    var body = { name: S.pc.name, gates: S.pc.gates, direction: S.pc.direction, closed: S.pc.closed,
+                 radius_m: S.pc.radius_m, aliases: $("pt-pc-aliases").value, instruction: $("pt-pc-instruction").value };
+    var req = S.pc.id ? apiPut("/api/patrols/parcours/" + S.pc.id, body) : apiPost("/api/patrols/parcours", body);
+    req.then(function (r) {
+      var tr = r.point.track || {};
+      toast(tr.uses_raceway === false ? "warning" : "success",
+            "Parcours enregistre" + (tr.uses_raceway === false ? " (le trace n'emprunte pas la piste)" : ""));
+      var i = S.data.points.findIndex(function (p) { return p.id === r.point.id; });
+      if (i >= 0) S.data.points[i] = r.point; else S.data.points.push(r.point);
+      S.data.points.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      S.data.scenarios = r.scenarios;
+      fillSelects();
+      closeParcours();
+    }).catch(function (e) { toast("error", errLabel(e)); });
+  }
+
+  function toggleParcours() {
+    var active = !S.pc.active;
+    apiPost("/api/patrols/points/" + S.pc.id + "/active", { active: active }).then(function () {
+      var p = pointById(S.pc.id); if (p) p.active = active;
+      toast("success", active ? "Parcours reactive" : "Parcours desactive (les scenarios qui l'utilisent le gardent)");
+      closeParcours();
     }).catch(function (e) { toast("error", errLabel(e)); });
   }
 
@@ -1045,6 +1203,10 @@
       li.appendChild(el("span", "pt-step-num", String(i + 1)));
       var name = el("span", "pt-step-name", p.name);
       if (p.active === false) name.appendChild(el("em", "pt-muted", " (desactive)"));
+      if (p.kind === "parcours") {
+        name.insertBefore(icon("sports_score"), name.firstChild);
+        name.appendChild(el("em", "pt-muted", " tour de piste" + (p.track && p.track.distance_m ? " " + fmtKm(p.track.distance_m) + " - " + fmtMin(p.track.duration_s) : "")));
+      }
       li.appendChild(name);
       if (i > 0 && legs[i - 1]) li.appendChild(el("span", "pt-step-leg", fmtKm(legs[i - 1].distance_m) + " - " + fmtMin(legs[i - 1].duration_s)));
       [["arrow_upward", "Monter", i === 0, function () { movePoint(i, i - 1); }],
@@ -1117,6 +1279,7 @@
       var t = el("span", "pt-pick-name", p.name);
       lab.appendChild(t);
       var sub = [];
+      if (p.kind === "parcours") sub.push("tour de piste");
       if (p.zones && p.zones.length) sub.push(p.zones.slice(0, 2).join(", "));
       if (p.photo_required) sub.push("photo");
       if (p.source && p.source !== "manual") sub.push(p.source.replace("layer:", ""));
@@ -1990,6 +2153,22 @@
     $("pt-pt-cancel").addEventListener("click", closePointEditor);
     $("pt-pt-toggle").addEventListener("click", togglePoint);
     $("pt-pt-merge-open").addEventListener("click", openMerge);
+    $("pt-pc-new").addEventListener("click", function () { openParcours(null); });
+    $("pt-pc-cancel").addEventListener("click", closeParcours);
+    $("pt-pc-save").addEventListener("click", saveParcours);
+    $("pt-pc-toggle").addEventListener("click", toggleParcours);
+    $("pt-pc-closed").addEventListener("change", parcoursChanged);
+    $("pt-pc-radius").addEventListener("change", parcoursChanged);
+    document.querySelectorAll('input[name="pt-pc-dir"]').forEach(function (r) { r.addEventListener("change", parcoursChanged); });
+    $("pt-pc-reverse").addEventListener("click", function () {
+      if (!S.pc || S.pc.gates.length < 2) return;
+      // Le depart reste le premier passage ; le tour se fait dans l'autre sens
+      S.pc.gates = [S.pc.gates[0]].concat(S.pc.gates.slice(1).reverse());
+      var r = document.querySelector('input[name="pt-pc-dir"][value="' + (S.pc.direction === "course" ? "inverse" : "course") + '"]');
+      if (r) r.checked = true;
+      parcoursChanged();
+      toast("info", "Ordre inverse et sens bascule en " + PC_DIR_LABELS[S.pc.direction] + " : verifiez-le");
+    });
     $("pt-mg-cancel").addEventListener("click", closeMerge);
     $("pt-mg-go").addEventListener("click", runMerge);
     $("pt-mg-search").addEventListener("input", fillMergeList);

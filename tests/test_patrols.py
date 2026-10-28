@@ -34,9 +34,12 @@ def db(monkeypatch):
     d = client[name]
     monkeypatch.setattr(field, "send_push_to_device", lambda *a, **k: None)
     monkeypatch.setattr(P, "_zones", lambda db: [{"id": "z1", "label": "Zone 1", "geometry": SQUARE}])
-    monkeypatch.setattr(P, "route_through", lambda coords, travel, mode="normal": (
-        {"distance_m": 1000 * (len(coords) - 1), "duration_s": 120 * (len(coords) - 1), "polyline": "", "legs": []},
-        None))
+    def fake_route(coords, travel, mode="normal", through=False):
+        import routing
+        return ({"distance_m": 1000 * (len(coords) - 1), "duration_s": 120 * (len(coords) - 1),
+                 "polyline": routing._encode_polyline6(coords), "uses_raceway": mode.endswith("_piste"),
+                 "legs": [{"distance_m": 1000, "duration_s": 120}] * (len(coords) - 1), "mode": mode}, None)
+    monkeypatch.setattr(P, "route_through", fake_route)
     monkeypatch.setattr(field.EC, "current_event", lambda db, now=None: ("SAISON", 2026))
     d["anoloc_config"].insert_one({"_id": "global", "beacon_groups": [
         {"id": "g1", "label": "Secu", "pco_category": "PCO.Securite"},
@@ -165,6 +168,64 @@ class TestProposition:
         run, code, skipped = P.create_run(db, str(_scenario(db)["_id"]), {"kind": "device", "device_id": str(a["_id"])}, "op")
         assert code == "no_device" and run["state"] == "refused"
         assert skipped[0]["reason"] == "statut_intervention"
+
+
+class TestParcours:
+    GATES = [{"lat": LAT + 0.002 * i, "lng": LNG + 0.001} for i in range(4)]
+
+    def _parcours(self, db, **kw):
+        p, err = P.save_parcours(db, dict({"name": "Tour Bugatti", "gates": self.GATES}, **kw), "t")
+        assert not err, err
+        return p
+
+    def test_trace_force_en_mode_piste(self, db):
+        p = self._parcours(db)
+        assert p["kind"] == "parcours" and p["closed"] is True and p["direction"] == "course"
+        # Tour complet : 4 passages + retour au depart, sens de course = normal_piste
+        assert p["track"]["mode"] == "normal_piste" and p["track"]["distance_m"] == 4000
+        assert (p["lat"], p["lng"]) == (self.GATES[0]["lat"], self.GATES[0]["lng"]) and p["radius_m"] == 40
+        q = self._parcours(db, direction="inverse", closed=False)
+        assert q["track"]["mode"] == "god_piste" and q["track"]["distance_m"] == 3000
+        assert P.save_parcours(db, {"name": "x", "gates": self.GATES[:2]}, "t")[1] == "trois_passages_minimum"
+        # Un parcours ne se modifie pas comme un point
+        assert P.save_point(db, {"name": "x", "lat": LAT, "lng": LNG}, "t", point_id=str(p["_id"]))[1] == "est_un_parcours"
+
+    def test_estimation_du_scenario(self, db):
+        p = self._parcours(db)
+        a, _ = P.save_point(db, {"name": "Avant", "lat": LAT, "lng": LNG}, "t")
+        b, _ = P.save_point(db, {"name": "Apres", "lat": LAT + 0.01, "lng": LNG}, "t")
+        sc, err = P.save_scenario(db, {"name": "S", "travel": "vehicle",
+                                       "points": [str(a["_id"]), str(p["_id"]), str(b["_id"])]}, "t")
+        assert not err
+        # Avant -> depart du tour (1 km) + tour (4 km) + fin du tour -> Apres (1 km)
+        est = sc["estimate"]
+        assert est["distance_m"] == 6000 and len(est["legs"]) == 2 and est["uses_raceway"] is True
+        assert P.save_scenario(db, {"name": "S", "travel": "pedestrian", "points": [str(p["_id"]), str(a["_id"])]},
+                               "t")[1] == "parcours_en_vehicule"
+
+    def test_tablette_sans_acces_piste_puis_tour(self, db):
+        p = self._parcours(db)
+        a, _ = P.save_point(db, {"name": "Avant", "lat": LAT, "lng": LNG}, "t")
+        sc, _ = P.save_scenario(db, {"name": "S", "travel": "vehicle", "points": [str(a["_id"]), str(p["_id"])]}, "t")
+        dev = _dev(db, "A")
+        run, code, skipped = P.create_run(db, str(sc["_id"]), {"kind": "device", "device_id": str(dev["_id"])}, "op")
+        assert code != "proposed" and skipped[0]["reason"] == "sans_acces_piste"
+        db["anoloc_config"].update_one({"_id": "global", "beacon_groups.id": "g1"},
+                                       {"$set": {"beacon_groups.$.route_piste": True}})
+        run, code, _ = P.create_run(db, str(sc["_id"]), {"kind": "device", "device_id": str(dev["_id"])}, "op")
+        assert code == "proposed"
+        assert P.accept(db, run["_id"], dev)[0]
+        run = _run(db, run["_id"])
+        pid = str(p["_id"])
+        step = next(s for s in P._pub_steps(_run(db, run["_id"])) if s["point_id"] == pid)
+        assert step["kind"] == "parcours" and step["gates_total"] == 5 and step["track"]["polyline"]
+        P.step(db, run["_id"], dev, str(a["_id"]), "done", method="gps")
+        # 3 passages sur 5 (60 %) : refuse, entree en main courante
+        assert P.step(db, run["_id"], dev, pid, "done", gates=[0, 1, 4])[1] == "tour_incomplet"
+        assert any("Tour incomplet : Tour Bugatti, 3/5 passages" in t for t in _texts(db, run["fiche_id"]))
+        ok, code, r = P.step(db, run["_id"], dev, pid, "done", gates=[0, 1, 2, 4, 9])
+        assert code == "ok" and r["state"] == "done"
+        assert any("tour Tour Bugatti, 4/5 passages (GPS)" in t for t in _texts(db, run["fiche_id"]))
 
 
 class TestExecution:

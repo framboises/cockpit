@@ -484,6 +484,41 @@ troncons ; arret injoignable dans le mode (no_route) retire.
   gardee). Re-import = mise a jour du meme point, jamais de doublon. Nom : champ de recherche de la
   couche (+ NOM s'il differe) ; numero seul = prefixe « Tribune 01 » ; objet sans nom = nature + acces.
 
+### Fusion de deux points (28/10/2026)
+
+- Editeur d'un point > « Fusionner » : autre point (liste par distance, recherche, ou clic sur la carte),
+  choix du point qui reste affiche. `patrols.merge_points` : le point garde conserve nom, position et
+  reglages ; le nom et les autres noms de l'autre deviennent ses `aliases` (les propositions placent
+  encore les fiches qui les citent) ; consigne reprise si vide, photo exigee si l'un l'exigeait.
+- Tous les scenarios passent sur le point garde (doublon retire, trajet recalcule, `version` +1).
+  Le point fusionne : `active False`, `merged_into`, absent de la page ; un re-import Looker de son
+  objet rend le point garde. Patrouilles passees : instantane inchange. Parcours avec parcours seulement.
+
+### Parcours impose : tour de piste (28/10/2026)
+
+- Un « point » de la bibliotheque `kind: "parcours"` : `gates [{lat, lng}]` (3 a 30, dans l'ordre de
+  roulage), `direction` course | inverse, `closed` (tour complet = retour au premier passage),
+  `radius_m` (rayon d'un passage, 40 m par defaut), `track {polyline, distance_m, duration_s,
+  uses_raceway, mode}`. `lat/lng` = premier passage (depart). Zones = union des zones des passages.
+- **La piste est une option du moteur : forcee.** Sens de course = `normal_piste`, sens inverse =
+  `god_piste` (piste dans les deux sens). Passages intermediaires `through` (pas de demi-tour).
+  `uses_raceway` faux = le moteur n'a pas pris la piste (passages trop espaces, ou piste fermee dans
+  le scenario charge) : avertissement dans l'editeur et la liste.
+- Page : Points > « Nouveau parcours impose », clic = passage, reperes deplacables, « Inverser l'ordre »
+  (depart garde, sens bascule), trace recalcule a chaque changement (`/api/patrols/parcours/preview`).
+  Enregistrer recalcule aussi les scenarios qui l'utilisent.
+- Scenario : en vehicule seulement (`parcours_en_vehicule`). `estimate` route jusqu'au depart, ajoute
+  le tour, repart de la fin ; `legs` reste une jambe par transition. Tablettes candidates : groupe avec
+  `route_piste` (sinon `sans_acces_piste`, affiche a l'operateur).
+- Tablette : itineraire jusqu'au depart, puis trace violet et passages. Passage franchi a moins du
+  rayon (+ precision GPS / 2, 15 m max), dans l'ordre, jusqu'a 4 passages plus loin (trou GPS) ; le
+  retour au depart ne compte qu'apres 2 passages. Fin (dernier passage ou « Tour termine ») : envoi des
+  indices franchis (`gates`). Serveur : 80 % du total (`PARCOURS_MIN_RATIO`) sinon `tour_incomplet` +
+  entree « Tour incomplet » en main courante, l'agent refait le tour ou passe l'etape (motif). Etape
+  faite : `steps.tour {passed, total}`, entree « tour X, n/N passages (GPS) ». Progression gardee en
+  `localStorage` (rechargement de l'app). Mode test : « Passage suivant ».
+- Limite : les passages sont declares par la tablette (pas de verification serveur sur les positions).
+
 ### Livraison 2 : planifications (27/10/2026)
 
 - `patrol_plans {name, scenario_id, target, enabled, launch {rule: span_start | every, every_min},
