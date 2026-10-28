@@ -1465,6 +1465,8 @@
             ep.zones.forEach(function (z) { var zc = el("span", "dt-zone-chip"); var i = el("i"); i.style.background = z.color; zc.appendChild(i); zc.appendChild(document.createTextNode(z.name)); zr.appendChild(zc); });
             if (ep.regions.length) zr.appendChild(el("span", "", "Zone camera " + ep.regions.join(", ")));
             where.appendChild(zr);
+            if (ep.target_pos) where.appendChild(el("div", "dt-help", "Cible estimee (point rouge sur la carte) : a " + ep.target_pos.dist_m +
+                " m de la camera, a " + ep.target_pos.err_m + " m pres"));
             body.appendChild(where);
             body.appendChild(fieldDispatchPanel(ep));
 
@@ -1505,9 +1507,18 @@
                 acts.appendChild(b);
             });
             foot.appendChild(acts);
-            // Centrer la carte sur la camera
+            // Centrer la carte sur la camera, ou sur la cible si le canal est cale
             var ch = chanByKey(chanKey(ep));
-            if (ch && ch.map) map.panTo([ch.map.lat, ch.map.lng]);
+            if (!layers.target) layers.target = L.layerGroup().addTo(map);
+            layers.target.clearLayers();
+            var tp = ep.target_pos;
+            if (tp) {
+                if (ch && ch.map) L.polyline([[ch.map.lat, ch.map.lng], [tp.lat, tp.lng]], { color: "#dc2626", weight: 2, dashArray: "5 5", interactive: false }).addTo(layers.target);
+                L.circle([tp.lat, tp.lng], { radius: tp.err_m, color: "#dc2626", weight: 1, fillOpacity: 0.12, interactive: false }).addTo(layers.target);
+                L.circleMarker([tp.lat, tp.lng], { radius: 7, color: "#fff", weight: 2, fillColor: "#dc2626", fillOpacity: 1 })
+                    .bindTooltip("Cible estimee : a " + tp.dist_m + " m de la camera (+/- " + tp.err_m + " m)").addTo(layers.target);
+                map.panTo([tp.lat, tp.lng]);
+            } else if (ch && ch.map) map.panTo([ch.map.lat, ch.map.lng]);
         }).catch(function (e) {
             body.textContent = "";
             body.appendChild(el("p", "dt-help", "Fiche indisponible (" + e.message + ")."));
@@ -1517,6 +1528,7 @@
         var bk = back;
         back = null;
         $("dt-detail").hidden = true; S.openId = null; gallery = null; syncSheet(); renderList();
+        if (layers.target) layers.target.clearLayers();
         if (bk && !stay && bk.onBack) bk.onBack();
     }
     function closeLightbox() { $("dt-lightbox").hidden = true; syncSheet(); }
@@ -1625,6 +1637,19 @@
                 }).catch(function (e) { toast("error", e.message); });
             });
             it.appendChild(tm);
+            // Calage image -> sol : position estimee des cibles (detection_calib)
+            if (ch.map) {
+                var nc = ch.channels.filter(function (x) { return x.calibrated; }).length;
+                var cb = el("button", "dt-icon-btn" + (nc ? " is-on" : "")); cb.type = "button";
+                cb.title = "Position des cibles : caler la photo sur la carte" + (nc ? " (" + nc + "/" + ch.channels.length + " canal(aux) cale(s))" : " (non cale)");
+                cb.appendChild(icon("pin_drop"));
+                cb.addEventListener("click", function () {
+                    var first = Math.max(0, ch.channels.findIndex(function (x) { return !x.calibrated; }));
+                    openCalib(ch, nc === ch.channels.length ? 0 : first);
+                });
+                it.appendChild(cb);
+                if (nc) g.appendChild(el("span", "sub", "Cibles placees par calage : " + nc + "/" + ch.channels.length + " canal(aux)"));
+            }
             // Sur place, devant la camera : position GPS du telephone
             if (navigator.geolocation && window.isSecureContext) {
                 var gps = el("button", "dt-icon-btn"); gps.type = "button"; gps.title = "Placer a ma position (GPS)";
@@ -1703,6 +1728,205 @@
             s2.appendChild(add);
         }
         body.appendChild(s2);
+    }
+
+    /* ---------------- Calage image -> sol (detection_calib.py) ----------------
+       Reperes AU SOL cliques sur une photo du canal puis au meme endroit sur
+       la carte (4 au moins, 5 ou plus pour mesurer l'erreur). La hauteur,
+       l'inclinaison et l'objectif de la camera sont contenus dans le calage :
+       rien a saisir. Le point au sol d'une cible = milieu du bas de son cadre. */
+    var CAL = null;
+    function calProject(fit, u, v) {
+        if (!fit || !fit.H) return null;
+        var H = fit.H, w = H[2][0] * u + H[2][1] * v + H[2][2];
+        if (!w || (w > 0) !== ((fit.w_sign || 1) > 0)) return null;
+        var x = (H[0][0] * u + H[0][1] * v + H[0][2]) / w, y = (H[1][0] * u + H[1][1] * v + H[1][2]) / w;
+        var d = Math.sqrt(x * x + y * y);
+        if (d > (CAL && CAL.maxDist || 500)) return null;
+        var k = 111320 * Math.cos(fit.origin.lat * Math.PI / 180);
+        return { lat: fit.origin.lat + y / 111320, lng: fit.origin.lng + x / k, dist: Math.round(d) };
+    }
+    function openCalib(dv, idx) {
+        var ch = dv.channels[idx || 0];
+        send("GET", "/api/detection/calib/" + ch.camera_id + "/" + ch.channel).then(function (r) {
+            var c = r.calib || {};
+            CAL = { dv: dv, idx: idx || 0, ch: ch, camera: r.camera, photos: r.photos || [], recent: r.recent || [],
+                    maxDist: r.max_dist_m, points: (c.points || []).map(function (p) { return { img: p.img, map: p.map }; }),
+                    photo: c.photo || (r.photos[0] && r.photos[0].rel) || null, fit: c.H ? c : null, saved: !!c.H,
+                    pending: null, test: null, dirty: false };
+            buildCalib();
+        }).catch(function (e) { toast("error", e.message); });
+    }
+    function buildCalib() {
+        var old = $("dt-cal"); if (old) { if (CAL.mapObj) CAL.mapObj.remove(); old.remove(); }
+        var dlg = el("dialog", "dt-cal"); dlg.id = "dt-cal";
+        var head = el("div", "dt-cal-head");
+        head.appendChild(el("b", "", "Position des cibles : " + CAL.dv.name));
+        if (CAL.dv.channels.length > 1) {
+            var sel = document.createElement("select");
+            CAL.dv.channels.forEach(function (x, i) { var o = new Option(x.channel_name, String(i)); o.selected = i === CAL.idx; sel.appendChild(o); });
+            sel.addEventListener("change", function () { closeCalib(); openCalib(CAL_DV, +sel.value); });
+            var CAL_DV = CAL.dv;
+            head.appendChild(sel);
+        } else head.appendChild(el("span", "dt-help", CAL.ch.channel_name));
+        var x = el("button", "dt-icon-btn"); x.type = "button"; x.title = "Fermer"; x.appendChild(icon("close"));
+        x.addEventListener("click", closeCalib);
+        head.appendChild(x);
+        dlg.appendChild(head);
+        dlg.appendChild(el("p", "dt-help", "Cliquez un repere AU SOL sur la photo (pied de poteau, angle bas d'un batiment, marquage, bord de route), puis le meme endroit sur la carte. " +
+            "4 reperes au moins, 5 ou plus pour mesurer l'erreur, repartis du premier plan au fond et de gauche a droite. " +
+            "Jamais le haut d'un poteau ni un toit : la hauteur de la camera est deduite des reperes au sol."));
+        if (CAL.photos.length > 1) {
+            var strip = el("div", "dt-cal-strip");
+            CAL.photos.forEach(function (p) {
+                var t = el("button", "dt-cal-thumb" + (p.rel === CAL.photo ? " is-on" : "")); t.type = "button";
+                t.title = p.at ? "Photo du " + fmtDay(p.at) + " " + fmtTime(p.at) : "Photo du calage";
+                var im = document.createElement("img"); im.src = p.url; im.alt = ""; t.appendChild(im);
+                t.addEventListener("click", function () { CAL.photo = p.rel; buildCalib(); });
+                strip.appendChild(t);
+            });
+            dlg.appendChild(strip);
+        }
+        var grid = el("div", "dt-cal-grid");
+        var pic = el("div", "dt-cal-img");
+        var ph = CAL.photos.filter(function (p) { return p.rel === CAL.photo; })[0];
+        if (ph) {
+            var img = document.createElement("img"); img.src = ph.url; img.alt = "Photo du canal"; img.draggable = false;
+            pic.appendChild(img);
+            pic.addEventListener("click", function (e) {
+                var r = img.getBoundingClientRect();
+                var u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
+                if (u < 0 || u > 1 || v < 0 || v > 1) return;
+                calImageClick({ x: Math.round(u * 10000) / 10000, y: Math.round(v * 10000) / 10000 });
+            });
+        } else pic.appendChild(el("p", "dt-help", "Aucune photo de ce canal pour l'instant : le calage se fait sur une photo d'intrusion."));
+        grid.appendChild(pic);
+        var mdiv = el("div", "dt-cal-map");
+        grid.appendChild(mdiv);
+        dlg.appendChild(grid);
+        var status = el("div", "dt-cal-status"); status.id = "dt-cal-status";
+        dlg.appendChild(status);
+        var list = el("ol", "dt-cal-list"); list.id = "dt-cal-list";
+        dlg.appendChild(list);
+        var foot = el("div", "dt-actions");
+        var tb = el("button", "dt-btn", "Tester un point"); tb.type = "button"; tb.id = "dt-cal-test";
+        tb.title = "Puis cliquez la photo : le point s'affiche sur la carte avec sa distance";
+        tb.addEventListener("click", function () { CAL.testing = !CAL.testing; CAL.pending = null; calRender(); });
+        foot.appendChild(tb);
+        if (CAL.saved) {
+            var del = el("button", "dt-btn", "Effacer le calage"); del.type = "button";
+            del.addEventListener("click", function () {
+                send("DELETE", "/api/detection/calib/" + CAL.ch.camera_id + "/" + CAL.ch.channel).then(function () {
+                    toast("success", "Calage efface : les fiches gardent la position de la camera");
+                    closeCalib(); loadConfig().then(function () { if (S.edit) renderConfig(); });
+                }).catch(function (e) { toast("error", e.message); });
+            });
+            foot.appendChild(del);
+        }
+        var sp = el("span"); sp.style.flex = "1"; foot.appendChild(sp);
+        var save = el("button", "dt-btn dt-btn-primary", "Enregistrer"); save.type = "button"; save.id = "dt-cal-save";
+        save.addEventListener("click", function () { calFit(true); });
+        foot.appendChild(save);
+        dlg.appendChild(foot);
+        document.body.appendChild(dlg);
+        dlg.addEventListener("close", function () { if (CAL && CAL.mapObj) { CAL.mapObj.remove(); CAL.mapObj = null; } dlg.remove(); });
+        dlg.showModal();
+        var center = CAL.camera ? [CAL.camera.lat, CAL.camera.lng] : CENTER;
+        var m = L.map(mdiv, { center: center, zoom: 19, maxZoom: 22 });
+        L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+            { attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 22 }).addTo(m);
+        CAL.mapObj = m;
+        CAL.mapLayer = L.layerGroup().addTo(m);
+        m.on("click", function (e) { calMapClick({ lat: e.latlng.lat, lng: e.latlng.lng }); });
+        setTimeout(function () { m.invalidateSize(); if (CAL.points.length) m.fitBounds(L.latLngBounds(CAL.points.map(function (p) { return [p.map.lat, p.map.lng]; }).concat([center])).pad(0.2), { maxZoom: 20 }); }, 60);
+        calRender();
+    }
+    function closeCalib() { var d = $("dt-cal"); if (d) d.close(); }
+    function calImageClick(pt) {
+        if (CAL.testing) { CAL.test = { img: pt, pos: calProject(CAL.fit, pt.x, pt.y) }; calRender(); return; }
+        if (CAL.points.length >= 12) { toast("warning", "12 reperes au plus"); return; }
+        if (CAL.pending && CAL.pending.map) { CAL.points.push({ img: pt, map: CAL.pending.map }); CAL.pending = null; calChanged(); }
+        else { CAL.pending = { img: pt }; calRender(); }
+    }
+    function calMapClick(ll) {
+        if (CAL.testing) return;
+        if (CAL.points.length >= 12) { toast("warning", "12 reperes au plus"); return; }
+        if (CAL.pending && CAL.pending.img) { CAL.points.push({ img: CAL.pending.img, map: ll }); CAL.pending = null; calChanged(); }
+        else { CAL.pending = { map: ll }; calRender(); }
+    }
+    function calChanged() {
+        CAL.dirty = true;
+        if (CAL.points.length >= 4) calFit(false); else { CAL.fit = null; calRender(); }
+    }
+    function calFit(save) {
+        if (CAL.points.length < 4) { toast("warning", "4 reperes au moins"); return; }
+        send("POST", "/api/detection/calib/" + CAL.ch.camera_id + "/" + CAL.ch.channel,
+             { points: CAL.points, photo: CAL.photo, save: !!save }).then(function (r) {
+            CAL.fit = r;
+            CAL.fitError = null;
+            if (save) {
+                CAL.saved = true; CAL.dirty = false;
+                toast("success", "Calage enregistre : les prochaines fiches d'intrusion de ce canal auront la position estimee de la cible");
+                loadConfig().then(function () { if (S.edit) renderConfig(); });
+            }
+            calRender();
+        }).catch(function (e) { CAL.fit = null; CAL.fitError = e.message; calRender(); if (save) toast("error", e.message); });
+    }
+    function calRender() {
+        if (!CAL || !$("dt-cal")) return;
+        var pic = document.querySelector("#dt-cal .dt-cal-img");
+        Array.prototype.forEach.call(pic.querySelectorAll(".dt-cal-pin, .dt-cal-dot"), function (n) { n.remove(); });
+        function pin(pt, txt, cls) {
+            var p = el("span", cls || "dt-cal-pin", txt);
+            p.style.left = (pt.x * 100) + "%"; p.style.top = (pt.y * 100) + "%";
+            pic.appendChild(p);
+        }
+        var errs = (CAL.fit && CAL.fit.errors) || [];
+        CAL.points.forEach(function (p, i) { pin(p.img, String(i + 1), "dt-cal-pin" + (errs[i] > 5 ? " is-bad" : "")); });
+        if (CAL.pending && CAL.pending.img) pin(CAL.pending.img, "?", "dt-cal-pin is-pending");
+        if (CAL.test) pin(CAL.test.img, "", "dt-cal-dot");
+        var lg = CAL.mapLayer;
+        lg.clearLayers();
+        if (CAL.camera) L.circleMarker([CAL.camera.lat, CAL.camera.lng], { radius: 7, color: "#fff", weight: 2, fillColor: "#2563eb", fillOpacity: 1 })
+            .bindTooltip("Camera").addTo(lg);
+        CAL.points.forEach(function (p, i) {
+            var mk = L.marker([p.map.lat, p.map.lng], { draggable: true, icon: L.divIcon({ className: "dt-cal-mapnum" + (errs[i] > 5 ? " is-bad" : ""),
+                html: "<span>" + (i + 1) + "</span>", iconSize: [24, 24], iconAnchor: [12, 12] }) }).addTo(lg);
+            mk.on("dragend", function (e) { var ll = e.target.getLatLng(); p.map = { lat: ll.lat, lng: ll.lng }; calChanged(); });
+        });
+        if (CAL.pending && CAL.pending.map) L.circleMarker([CAL.pending.map.lat, CAL.pending.map.lng], { radius: 9, color: "#f59e0b", weight: 3, fillOpacity: 0 }).addTo(lg);
+        // Controle : points au sol des dernieres intrusions du canal (doivent tomber la ou passent les gens)
+        if (CAL.fit && CAL.fit.H) {
+            CAL.recent.forEach(function (r) {
+                var pos = calProject(CAL.fit, r.u, r.v);
+                if (pos) L.circleMarker([pos.lat, pos.lng], { radius: 4, color: "#b45309", weight: 1, fillColor: "#f59e0b", fillOpacity: 0.8, interactive: false }).addTo(lg);
+            });
+        }
+        if (CAL.test && CAL.test.pos) {
+            L.circleMarker([CAL.test.pos.lat, CAL.test.pos.lng], { radius: 8, color: "#fff", weight: 2, fillColor: "#dc2626", fillOpacity: 1 })
+                .bindTooltip("A " + CAL.test.pos.dist + " m de la camera", { permanent: true }).addTo(lg);
+        }
+        var st = $("dt-cal-status");
+        var n = CAL.points.length;
+        st.className = "dt-cal-status" + (CAL.fitError ? " is-bad" : "");
+        st.textContent = CAL.testing ? (CAL.fit ? "Test : cliquez la photo, le point rouge montre ou il tombe sur la carte" + (CAL.test && !CAL.test.pos ? " (au-dessus de l'horizon ou trop loin)" : "") : "Test impossible : calez d'abord 4 reperes")
+            : CAL.fitError ? CAL.fitError
+            : CAL.pending ? (CAL.pending.img ? "Repere " + (n + 1) + " : cliquez maintenant le meme endroit sur la carte" : "Repere " + (n + 1) + " : cliquez maintenant le meme endroit sur la photo")
+            : n < 4 ? n + " repere(s) sur 4 minimum"
+            : CAL.fit && CAL.fit.err_m != null ? "Erreur moyenne aux reperes : " + CAL.fit.err_m + " m (chaque repere controle sans lui-meme). Points orange : dernieres intrusions du canal."
+            : "Cale avec 4 reperes : ajoutez-en un 5e pour mesurer l'erreur. Points orange : dernieres intrusions du canal.";
+        var tb = $("dt-cal-test"); if (tb) tb.classList.toggle("dt-btn-primary", !!CAL.testing);
+        var sv = $("dt-cal-save"); if (sv) sv.disabled = n < 4 || !CAL.fit;
+        var list = $("dt-cal-list");
+        list.textContent = "";
+        CAL.points.forEach(function (p, i) {
+            var li = el("li", errs[i] > 5 ? "is-bad" : "");
+            li.appendChild(el("span", "", "Repere " + (i + 1) + (errs[i] != null ? " : ecart " + errs[i] + " m" + (errs[i] > 5 ? " (a verifier : bien au sol, meme endroit ?)" : "") : "")));
+            var rm = el("button", "dt-link-btn", "Retirer"); rm.type = "button";
+            rm.addEventListener("click", function () { CAL.points.splice(i, 1); calChanged(); });
+            li.appendChild(rm);
+            list.appendChild(li);
+        });
     }
 
     function startPlacing(dv) {

@@ -531,6 +531,38 @@ button.chip.dt-truth.is-on { background: #16a34a; border-color: #16a34a; color: 
 .dt-field-inline { flex-direction: row; align-items: center; gap: 10px; }
 .dt-field input[type="color"] { width: 44px; height: 28px; border: none; padding: 0; background: none; }
 .dt-plan-side .dt-link-row { font-size: .82rem; }
+/* Calage image -> sol (position estimee des cibles) */
+.dt-cal { width: min(1280px, 96vw); max-height: 94vh; padding: 14px; border: 0; border-radius: 12px;
+  background: #fff; color: #0f172a; box-shadow: 0 20px 60px rgba(0,0,0,.35); overflow: auto; }
+.dt-cal::backdrop { background: rgba(15,23,42,.55); }
+.dt-cal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.dt-cal-head b { font-size: 1rem; }
+.dt-cal-head .dt-icon-btn { margin-left: auto; }
+.dt-cal-strip { display: flex; gap: 6px; overflow-x: auto; margin: 6px 0; }
+.dt-cal-thumb { flex: none; padding: 0; border: 2px solid transparent; border-radius: 6px; background: none; cursor: pointer; }
+.dt-cal-thumb.is-on { border-color: #2563eb; }
+.dt-cal-thumb img { display: block; height: 54px; border-radius: 4px; }
+.dt-cal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 900px) { .dt-cal-grid { grid-template-columns: 1fr; } }
+.dt-cal-img { position: relative; align-self: start; cursor: crosshair; background: #000; border-radius: 8px; overflow: hidden; }
+.dt-cal-img img { display: block; width: 100%; height: auto; user-select: none; }
+.dt-cal-map { min-height: 420px; border-radius: 8px; }
+.dt-cal-pin { position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%;
+  background: #2563eb; color: #fff; border: 2px solid #fff; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.dt-cal-pin.is-bad { background: #dc2626; }
+.dt-cal-pin.is-pending { background: #f59e0b; }
+.dt-cal-dot { position: absolute; transform: translate(-50%, -50%); width: 14px; height: 14px; border-radius: 50%;
+  background: #dc2626; border: 2px solid #fff; pointer-events: none; }
+.dt-cal-mapnum span { display: flex; width: 24px; height: 24px; border-radius: 50%; background: #2563eb; color: #fff;
+  border: 2px solid #fff; font-size: 11px; font-weight: 700; align-items: center; justify-content: center; box-sizing: border-box; }
+.dt-cal-mapnum.is-bad span { background: #dc2626; }
+.dt-cal-status { margin: 8px 0 4px; padding: 6px 10px; border-radius: 8px; background: #eff6ff; color: #1e3a8a; font-size: .85rem; font-weight: 600; }
+.dt-cal-status.is-bad { background: #fef2f2; color: #991b1b; }
+.dt-cal-list { margin: 0 0 8px; padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .8rem; }
+.dt-cal-list li { display: flex; gap: 6px; align-items: center; }
+.dt-cal-list li.is-bad { color: #b91c1c; font-weight: 600; }
+.dt-icon-btn.is-on { color: #16a34a; }
 /* Envoi des intrusions aux tablettes (reglage du groupe, fiche d'intrusion) */
 .dt-fd-opts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .dt-fd-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

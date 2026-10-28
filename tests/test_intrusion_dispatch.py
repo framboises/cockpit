@@ -144,6 +144,22 @@ def test_mode_operateur(db):
     assert ID.on_operator_truth(db, ep["_id"], "vehicule", "Ludo") is None
 
 
+def test_position_estimee_si_canal_cale(db):
+    import detection_calib as C
+    _dev(db, "A")
+    _group(db)
+    # Calage simple : u -> 100 m d'est en ouest, v -> 100 m vers le nord
+    db["detection_calib"].insert_one({"_id": "%s:1" % CAM, "origin": {"lat": LAT, "lng": LNG}, "w_sign": 1,
+                                      "H": [[100, 0, -50], [0, 100, 0], [0, 0, 1]], "err_m": 2})
+    _ep(db, cover={"photo": "intrusions/x.jpg", "rect": {"x": 0.55, "y": 0.3, "w": 0.1, "h": 0.2}})
+    ID.tick(db, now=NOW)
+    f = db["pcorg"].find_one()
+    x, y = C._enu({"lat": LAT, "lng": LNG}, f["gps"]["coordinates"][1], f["gps"]["coordinates"][0])
+    assert round(x) == 10 and round(y) == 50
+    assert f["content_category"]["intrusion_position"] == {"source": "estimee", "dist_m": 51, "err_m": 5}
+    assert any("a 51 m de la camera (+/- 5 m)" in e["text"] for e in f["comment_history"])
+
+
 def test_acceptation_met_la_patrouille_en_pause(db):
     dev = _dev(db, "A")
     _group(db)

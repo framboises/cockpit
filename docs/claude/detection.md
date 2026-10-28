@@ -56,6 +56,29 @@ ayant la page "Detection". Les canaux visibles sont ceux qui ont l'usage
   son canal est lie (et, si `regions` est renseigne, si l'une de ses zones
   camera y figure). Le lien est logique : le polygone sert a l'affichage.
 
+### Position estimee de la cible : calage image -> sol (28/10/2026)
+
+- `detection_calib.py` (sans Flask), collection `detection_calib` (_id `<camera_id>:<canal>`) :
+  homographie image (0-1) -> metres est / nord autour de la camera, a partir de 4 a 12 reperes
+  **au sol** cliques sur une photo du canal puis sur la carte. **Rien a saisir** sur la camera :
+  hauteur, inclinaison et focale sont contenues dans le calage (un repere en hauteur, haut de
+  poteau ou toit, le fausse). `w_sign` = cote de l'horizon des reperes ; `errors` = ecart de chaque
+  repere avec un calage fait SANS lui (des 5 reperes), `err_m` leur moyenne (4 reperes : pas de
+  controle).
+- Cible = milieu du BAS du cadre de la camera (pieds, roues) sur la photo qui a decide (`ai.photo`,
+  sinon `cover.rect`). Refus : au-dessus de l'horizon, au-dela de 500 m. Incertitude affichee =
+  `err_m` (5 m par defaut) + 5 % de la distance. Limites : sol plat suppose, pieds caches (haie,
+  cloture pleine) = point trop loin, camera motorisee / zoom / camera deplacee = calage a refaire.
+- Page : mode configuration, bouton `pin_drop` d'une camera placee (vert = cale) : photo a gauche
+  (choix parmi les 8 dernieres), carte IGN a droite, reperes numerotes (rouges au-dela de 5 m
+  d'ecart, deplacables sur la carte), « Tester un point », et points orange = pieds des 40
+  dernieres intrusions du canal projetes (controle visuel : doivent tomber la ou passent les gens).
+  Routes `GET|POST|DELETE /api/detection/calib/<camera_id>/<canal>` (POST `save` faux = calcul seul).
+- Fiche d'une intrusion : `target_pos {lat, lng, dist_m, err_m}`, point rouge + cercle d'incertitude
+  sur la carte. Envoi aux tablettes (`intrusion_dispatch`) : GPS de la fiche = cible estimee,
+  entree « Position estimee de la cible : a N m de la camera (+/- M m) »,
+  `content_category.intrusion_position {source estimee | camera}`.
+
 ## Groupes et planning d'activation
 
 - `detection_groups` : `{name, color, members [{camera_id, channel}], arming:

@@ -222,6 +222,11 @@ def dispatch_episode(db, ep, by=None, now=None, settings=None, group=None):
                             extra_filter={"status_code": {"$ne": 10}})
             return done("grouped", f["_id"], "fiche en cours de la camera")
     pt = _camera_point(db, ep)
+    # Canal cale (detection_calib) : position estimee de la cible plutot que la camera
+    import detection_calib as C
+    est = C.estimate(db, ep) if pt else None
+    if est:
+        pt = (est["lat"], est["lng"])
     photo = _copy_photo((ep.get("ai") or {}).get("photo") or (ep.get("cover") or {}).get("photo"), event, year)
     cam, hm, conf, what = _describe(ep, label)
     text = "Intrusion : %s detecte%s - %s" % (what, "e" if what == "personne" else "", cam)
@@ -245,6 +250,8 @@ def dispatch_episode(db, ep, by=None, now=None, settings=None, group=None):
             "intrusion_camera_name": cam, "intrusion_label": label,
             "intrusion_group": str(group["_id"]) if group else None,
             "intrusion_zone_ids": zone_ids,
+            "intrusion_position": {"source": "estimee", "dist_m": est["dist_m"], "err_m": est["err_m"]} if est
+            else {"source": "camera"},
             "intrusion_photo": photo[0] if photo else None, "intrusion_thumb": photo[1] if photo else None,
         },
         "dispatch": {"timeout_s": TIMEOUT_S},
@@ -256,6 +263,10 @@ def dispatch_episode(db, ep, by=None, now=None, settings=None, group=None):
     except Exception as e:      # deja creee (episode rejoue) : on garde la fiche existante
         logger.debug("fiche intrusion %s : %s", fid, e)
     PH.append_entry(db["pcorg"], fid, _entry_for(ep, label, photo, now, by), inc_bounce=True)
+    if est:
+        PH.append_entry(db["pcorg"], fid, PH.make_entry(
+            BOT, "Position estimee de la cible : a %d m de la camera (+/- %d m)" % (est["dist_m"], est["err_m"]),
+            ts=now, system=True))
     if not pt:
         PH.append_entry(db["pcorg"], fid, PH.make_entry(BOT, "Camera sans position : pas de proposition aux tablettes",
                                                         ts=now, system=True))

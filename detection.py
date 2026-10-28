@@ -480,7 +480,9 @@ def detection_config():
     groups = list(db["detection_groups"].find().sort("name", 1))
     drop_by_key, drop_by_group = _dropped_today(db, groups)
     channels = _detection_channels(db)
+    calibrated = {d["_id"] for d in db["detection_calib"].find({}, {"_id": 1})}
     for ch in channels:
+        ch["calibrated"] = ch["key"] in calibrated
         gs = arming.channel_groups(groups, ch["camera_id"], ch["channel"])
         ch["groups"] = [str(g["_id"]) for g in gs]
         ch["armed"] = (not gs) or any(arming.group_state(g, now, db)[0] for g in gs)
@@ -887,7 +889,10 @@ def episode_detail(eid):
         return jsonify({"error": "Intrusion introuvable"}), 404
     item = _pub_episode(ep, _zones(db), datetime.now(timezone.utc), full=True)
     import intrusion_dispatch as ID
+    import detection_calib as C
     item["field_dispatch"] = ID.pub_dispatch(db, ep)
+    # Position estimee de la cible (canal cale) : {lat, lng, dist_m, err_m}
+    item["target_pos"] = C.estimate(db, ep)
     item["messages"] =[{"at": _iso(e.get("event_dt")), "type": e.get("event_type"),
                          "target": (e.get("regions") or [{}])[0].get("target"),
                          "region": (e.get("regions") or [{}])[0].get("region_id"),
@@ -974,6 +979,73 @@ def set_ai_vote(eid):
         sent = ID.on_operator_truth(db, oid, truth, _who())
     ep = db["hik_intrusions"].find_one({"_id": oid}, {"ai": 1, "ai_vote": 1})
     return jsonify({"ok": True, "ai": _pub_ai(ep), "sent": sent})
+
+
+def _channel_of(db, camera_id, channel):
+    cam = db["cockpit_cameras"].find_one({"_id": _oid(camera_id)}) if _oid(camera_id) else None
+    if not cam or not any(c.get("no") == channel for c in cam.get("channels") or []):
+        return None, None
+    pos, _src, _geo = _device_position(db, cam)
+    return cam, pos
+
+
+@detection_bp.route("/api/detection/calib/<camera_id>/<int:channel>")
+def calib_get(camera_id, channel):
+    """Calage image -> sol d'un canal (detection_calib) : reperes, photos du
+    canal a choisir, points au sol des dernieres intrusions (controle)."""
+    import detection_calib as C
+    db = _ensure_db()
+    cam, pos = _channel_of(db, camera_id, channel)
+    if not cam:
+        return jsonify({"error": "Canal introuvable"}), 404
+    cal = C.get(db, camera_id, channel)
+    photos, recent = [], []
+    q = {"camera_id": cam["_id"], "channel": channel, "cover.photo": {"$exists": True}}
+    for ep in db["hik_intrusions"].find(q, {"photos": 0, "targets": 0}).sort("started_at", DESCENDING).limit(60):
+        rel = (ep.get("cover") or {}).get("photo")
+        if len(photos) < 8 and rel and rel not in [p["rel"] for p in photos]:
+            photos.append({"rel": rel, "url": _img(rel), "at": _iso(ep.get("started_at"))})
+        if len(recent) < 40 and portee(ep) != "ecartee":
+            fp = C.foot_point((ep.get("cover") or {}).get("rect") or {})
+            if fp:
+                recent.append({"u": fp[0], "v": fp[1], "id": str(ep["_id"])})
+    if cal and cal.get("photo") and cal["photo"] not in [p["rel"] for p in photos]:
+        photos.insert(0, {"rel": cal["photo"], "url": _img(cal["photo"]), "at": None})
+    return jsonify({"camera": pos, "photos": photos, "recent": recent, "calib": {
+        "points": cal.get("points") or [], "photo": cal.get("photo"), "photo_url": _img(cal.get("photo")),
+        "H": cal.get("H"), "origin": cal.get("origin"), "w_sign": cal.get("w_sign"), "err_m": cal.get("err_m"),
+        "errors": cal.get("errors") or [], "by": cal.get("by"), "at": _iso(cal.get("at"))} if cal else None,
+        "max_dist_m": C.MAX_DIST_M})
+
+
+@detection_bp.route("/api/detection/calib/<camera_id>/<int:channel>", methods=["POST"])
+def calib_fit(camera_id, channel):
+    """{points: [{img: {x, y}, map: {lat, lng}}], photo, save} : calcule le
+    calage (erreur par repere) ; save = l'enregistre."""
+    import detection_calib as C
+    db = _ensure_db()
+    cam, pos = _channel_of(db, camera_id, channel)
+    if not cam:
+        return jsonify({"error": "Canal introuvable"}), 404
+    data = request.get_json(silent=True) or {}
+    pts, err = C.clean_points(data.get("points"))
+    if err:
+        return jsonify({"error": {"quatre_reperes_minimum": "4 reperes au moins", "trop_de_reperes": "12 reperes au plus",
+                                  "repere_invalide": "Repere invalide"}.get(err, err)}), 400
+    res, err = C.fit(pts, pos)
+    if err:
+        return jsonify({"error": {"reperes_incoherents": "Reperes incoherents : verifiez qu'ils sont tous au sol et dans le bon ordre",
+                                  "calage_impossible": "Calage impossible avec ces reperes"}.get(err, err)}), 400
+    photo = str(data.get("photo") or "")[:300] or None
+    if data.get("save"):
+        C.save(db, cam["_id"], channel, pts, res, photo, _who())
+    return jsonify(dict(res, ok=True, saved=bool(data.get("save"))))
+
+
+@detection_bp.route("/api/detection/calib/<camera_id>/<int:channel>", methods=["DELETE"])
+def calib_delete(camera_id, channel):
+    _ensure_db()["detection_calib"].delete_one({"_id": "%s:%s" % (camera_id, channel)})
+    return jsonify({"ok": True})
 
 
 @detection_bp.route("/api/detection/episodes/<eid>/send-field", methods=["POST"])
