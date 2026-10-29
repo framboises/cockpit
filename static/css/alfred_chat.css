@@ -154,14 +154,23 @@
 .ac-avatar img {
   position: absolute;
   left: 50%;
-  top: 4%;
-  width: 165%;
+  top: 3%;
+  width: 130%;
   max-width: none;
   height: auto;
   transform: translateX(-50%);
   pointer-events: none;
   user-select: none;
+  transition: width 0.25s ease, top 0.25s ease;
 }
+/* Un geste doit rester dans le cercle : cadrage plus large que le visage seul
+   (au survol de la bulle, Alfred recule pour faire coucou) */
+.ac-avatar[data-pose="aurevoir"] img,
+.ac-avatar[data-pose="pouce"] img,
+.ac-avatar[data-pose="montre"] img,
+.ac-avatar[data-pose="salut"] img,
+.ac-avatar[data-pose="ecoute"] img { width: 110%; top: 0; }
+.ac-avatar[data-pose="stop"] img { width: 100%; top: 0; }
 .ac-avatar.is-sm { width: 30px; height: 30px; }
 .ac-avatar.is-xs { width: 22px; height: 22px; }
 .ac-title { flex: 1 1 auto; min-width: 0; overflow: hidden; }

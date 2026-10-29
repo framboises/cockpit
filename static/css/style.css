@@ -16471,9 +16471,14 @@ th span { font-size: 0.88rem; font-weight: 700; }
   background: linear-gradient(160deg, #eaf0ff, #c9d6f5);
 }
 .alfred-face img {
-  position: absolute; left: 50%; top: 4%; width: 165%; max-width: none; height: auto;
+  position: absolute; left: 50%; top: 3%; width: 130%; max-width: none; height: auto;
   transform: translateX(-50%); pointer-events: none;
 }
+/* Gestes (pouce, oreillette, montre...) : cadrage large pour garder la main */
+.alfred-face img[src*="buste-aurevoir"], .alfred-face img[src*="buste-pouce"],
+.alfred-face img[src*="buste-montre"], .alfred-face img[src*="buste-salut"],
+.alfred-face img[src*="buste-ecoute"] { width: 110%; top: 0; }
+.alfred-face img[src*="buste-stop"] { width: 100%; top: 0; }
 .nav-btn .material-symbols-outlined.alfred-face { --af-size: 22px; }
 .alfred-fig {
   float: right; height: 130px; width: auto; margin: -4px 0 6px 16px; shape-outside: margin-box;
