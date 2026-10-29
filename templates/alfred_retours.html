@@ -22,7 +22,7 @@
   <div class="app-main single-col-page">
     <header class="app-header">
       <span class="header-title" style="display:flex; align-items:center; gap:8px;">
-        <span class="alfred-face"><img src="{{ url_for('static', filename='img/alfred/buste-pouce.webp') }}?v=2" alt=""></span>
+        <span class="alfred-face"><img src="{{ url_for('static', filename='img/alfred/buste-pouce.webp') }}?v=3" alt=""></span>
         Retours Alfred
       </span>
       <div class="header-spacer"></div>
@@ -34,7 +34,7 @@
     <div id="main-content">
       <div class="ar-page">
         <p class="ar-intro">
-          <img class="alfred-fig" src="{{ url_for('static', filename='img/alfred/pied-note.webp') }}?v=2" alt="">
+          <img class="alfred-fig" src="{{ url_for('static', filename='img/alfred/pied-note.webp') }}?v=3" alt="">
           Chaque pouce posé par un opérateur dans le chat fige ici l'échange complet : conversation,
           outils appelés et ce que Cockpit leur a répondu. Ces retours ne sont pas purgés à 90 jours.
           Pour un pouce bas : identifier la cause (outil Cockpit, prompt ou modèle côté VM, question hors champ),
@@ -81,6 +81,6 @@
   window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
 </script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
-<script src="{{ url_for('static', filename='js/alfred_retours.js') }}?v=3"></script>
+<script src="{{ url_for('static', filename='js/alfred_retours.js') }}?v=4"></script>
 </body>
 </html>
