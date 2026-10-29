@@ -251,7 +251,7 @@
   function vide(pose, texte) {
     var box = el("div", "ar-empty alfred-empty");
     var img = el("img", "alfred-fig");
-    img.src = "/static/img/alfred/" + pose + ".webp";
+    img.src = "/static/img/alfred/" + pose + ".webp?v=2";
     img.alt = "";
     box.appendChild(img);
     box.appendChild(el("p", null, texte));

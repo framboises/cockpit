@@ -235,7 +235,7 @@
   var IMG_BASE = "/static/img/alfred/";
   function alfredImg(name, cls) {
     var img = el("img", cls);
-    img.src = IMG_BASE + name + ".webp";
+    img.src = IMG_BASE + name + ".webp?v=2";
     img.alt = "";
     img.draggable = false;
     img.decoding = "async";
@@ -250,7 +250,7 @@
   function setPose(a, pose) {
     if (!a || a.getAttribute("data-pose") === pose) return;
     a.setAttribute("data-pose", pose);
-    a.firstChild.src = IMG_BASE + "buste-" + pose + ".webp";
+    a.firstChild.src = IMG_BASE + "buste-" + pose + ".webp?v=2";
   }
 
   function csrf() {
