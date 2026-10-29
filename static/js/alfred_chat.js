@@ -230,6 +230,29 @@
   }
   function icon(name) { return el("span", "material-symbols-outlined", name); }
 
+  // Alfred en personnage (static/img/alfred) : bustes pour les avatars, poses
+  // en pied pour l'accueil et les ecrans vides. La pose suit l'etat du chat.
+  var IMG_BASE = "/static/img/alfred/";
+  function alfredImg(name, cls) {
+    var img = el("img", cls);
+    img.src = IMG_BASE + name + ".webp";
+    img.alt = "";
+    img.draggable = false;
+    img.decoding = "async";
+    return img;
+  }
+  function avatar(pose, cls) {
+    var a = el("div", "ac-avatar" + (cls ? " " + cls : ""));
+    a.setAttribute("data-pose", pose);
+    a.appendChild(alfredImg("buste-" + pose));
+    return a;
+  }
+  function setPose(a, pose) {
+    if (!a || a.getAttribute("data-pose") === pose) return;
+    a.setAttribute("data-pose", pose);
+    a.firstChild.src = IMG_BASE + "buste-" + pose + ".webp";
+  }
+
   function csrf() {
     var m = document.querySelector('meta[name="csrf-token"]');
     return m ? m.getAttribute("content") || "" : "";
@@ -337,7 +360,8 @@
   fab.type = "button";
   fab.setAttribute("aria-label", "Ouvrir le chat Alfred (Alt+A)");
   fab.title = "Alfred, assistant du PC Organisation (Alt+A)";
-  fab.appendChild(icon("forum"));
+  var fabFace = avatar("neutre", "ac-fab-face");
+  fab.appendChild(fabFace);
   var fabDot = el("span", "ac-fab-dot");
   var fabBadge = el("span", "ac-fab-badge");
   fab.appendChild(fabDot);
@@ -351,7 +375,7 @@
   panel.setAttribute("aria-label", "Chat Alfred");
 
   var head = el("div", "ac-head");
-  var avatar = el("div", "ac-avatar", "A");
+  var headAvatar = avatar("neutre");
   var titleBox = el("div", "ac-title");
   titleBox.appendChild(el("strong", null, "Alfred"));
   var status = el("div", "ac-status");
@@ -372,7 +396,7 @@
   headBtn("edit_square", "Nouvelle conversation", function () { newConversation(); });
   var sizeBtn = headBtn("open_in_full", "Agrandir", function () { setLarge(!state.large); }, "ac-size-btn");
   headBtn("remove", "Reduire (Echap)", function () { setOpen(false); });
-  head.appendChild(avatar); head.appendChild(titleBox); head.appendChild(btns);
+  head.appendChild(headAvatar); head.appendChild(titleBox); head.appendChild(btns);
 
   var body = el("div", "ac-body");
   body.setAttribute("aria-live", "polite");
@@ -422,7 +446,18 @@
   function renderBadge() {
     fabBadge.textContent = state.unread > 9 ? "9+" : String(state.unread || "");
     fabBadge.classList.toggle("is-on", state.unread > 0);
+    renderPoses();
   }
+  // Bulle : salue au survol, consulte sa montre pendant une reponse, clin
+  // d'oeil sur une reponse non lue, main levee si le service est injoignable.
+  function renderPoses() {
+    var ko = !!(state.health && !state.health.ok);
+    setPose(fabFace, state.fabHover ? "aurevoir" : state.busy ? "montre"
+      : state.unread > 0 ? "clin" : ko ? "stop" : "neutre");
+    setPose(headAvatar, state.busy ? "ecoute" : ko ? "stop" : "neutre");
+  }
+  fab.addEventListener("mouseenter", function () { state.fabHover = true; renderPoses(); });
+  fab.addEventListener("mouseleave", function () { state.fabHover = false; renderPoses(); });
 
   fab.addEventListener("click", function () { setOpen(true); });
   panel.addEventListener("keydown", function (e) {
@@ -449,6 +484,7 @@
     else if (h.configured === false) statusTxt.textContent = "Non configure sur ce serveur";
     else if (h.ollama === false) statusTxt.textContent = "Modele indisponible";
     else statusTxt.textContent = "Injoignable";
+    renderPoses();
   }
   function checkHealth() {
     api("GET", "/health").then(function (h) { if (h && h._status === 200) applyHealth(h); });
@@ -465,7 +501,7 @@
 
   function welcome() {
     var w = el("div", "ac-welcome");
-    w.appendChild(el("div", "ac-avatar", "A"));
+    w.appendChild(alfredImg("pied-accueil", "ac-welcome-fig"));
     var fn = root.getAttribute("data-firstname") || "";
     w.appendChild(el("h3", null, "Bonjour" + (fn ? " " + fn : "") + ","));
     w.appendChild(el("p", null, "Je consulte pour vous la main courante, le trafic, la meteo, les alertes, la timeline et les procedures. Que puis-je verifier ?"));
@@ -488,13 +524,25 @@
     return txt + "... " + s + " s";
   }
 
+  // Pendant l'attente : il ecoute l'oreillette, puis consulte sa montre.
+  function typingPose(started) {
+    var s = Math.max(0, Math.round((Date.now() - started) / 1000));
+    return s < 4 || (s >= 20 && s < 45) ? "ecoute" : "montre";
+  }
+
   function messageRow(m, readOnly) {
     var isUser = m.role === "user";
     var pending = !isUser && (m.status === "queued" || m.status === "running");
     var isErr = !isUser && m.status === "error";
     var row = el("div", "ac-row " + (isUser ? "is-user" : "is-bot") + (isErr ? " is-error" : ""));
     row.setAttribute("data-id", m.id);
-    if (!isUser) row.appendChild(el("div", "ac-avatar is-sm", "A"));
+    if (!isUser) {
+      var started = Date.parse(m.created_at) || Date.now();
+      var av = avatar(pending ? typingPose(started) : isErr ? "stop"
+        : m.rating === 1 ? "pouce" : m.rating === -1 ? "salut" : "neutre", "is-sm");
+      if (pending) av.setAttribute("data-started", String(started));
+      row.appendChild(av);
+    }
     var col = el("div", "ac-col");
     var bubble = el("div", "ac-bubble");
     if (pending) {
@@ -644,6 +692,7 @@
       hintRight.className = "ac-hint-r";
     }
     fab.classList.toggle("is-thinking", state.busy);
+    renderPoses();
   }
 
   function autosize() {
@@ -657,9 +706,12 @@
     return api("GET", "/state").then(function (j) {
       if (!j || !j.ok) {
         body.innerHTML = "";
-        body.appendChild(el("div", "ac-banner", j && j._status === 403
+        var ko = el("div", "ac-empty");
+        ko.appendChild(alfredImg("buste-stop", "ac-empty-fig is-bust"));
+        ko.appendChild(el("p", null, j && j._status === 403
           ? "Le chat Alfred n'est pas active pour votre groupe."
           : "Impossible de charger la conversation."));
+        body.appendChild(ko);
         return;
       }
       state.loaded = true;
@@ -785,7 +837,7 @@
       var lib = m.rating_motif;
       MOTIFS.forEach(function (x) { if (x[0] === lib) lib = x[1]; });
       box.className = "ac-fb is-done";
-      box.appendChild(icon("flag"));
+      box.appendChild(avatar("salut", "is-xs"));
       box.appendChild(document.createTextNode(lib ? "Signalé : " + lib : "Signalé"));
       if (!m.rating_motif) {
         var add = el("button", "ac-fb-link", "Préciser");
@@ -874,7 +926,12 @@
       var box = el("div", "ac-history");
       box.appendChild(el("h4", null, "Vos conversations (90 jours)"));
       var list = (j && j.sessions) || [];
-      if (!list.length) box.appendChild(el("div", "ac-typing-label", "Aucune conversation pour l'instant."));
+      if (!list.length) {
+        var vide = el("div", "ac-empty");
+        vide.appendChild(alfredImg("pied-the", "ac-empty-fig"));
+        vide.appendChild(el("p", null, "Aucune conversation pour l'instant. Alfred prend le the en vous attendant."));
+        box.appendChild(vide);
+      }
       list.forEach(function (s) {
         var b = el("button", "ac-hist-item");
         b.type = "button";
@@ -926,6 +983,10 @@
     var lbls = body.querySelectorAll(".ac-typing-label[data-started]");
     for (var i = 0; i < lbls.length; i++) {
       lbls[i].textContent = typingLabel(parseInt(lbls[i].getAttribute("data-started"), 10));
+    }
+    var avs = body.querySelectorAll(".ac-avatar[data-started]");
+    for (var k = 0; k < avs.length; k++) {
+      setPose(avs[k], typingPose(parseInt(avs[k].getAttribute("data-started"), 10)));
     }
   }, 1000);
 

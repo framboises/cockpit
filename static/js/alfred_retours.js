@@ -247,16 +247,27 @@
     return card;
   }
 
+  // Liste vide : Alfred en personnage (static/img/alfred) au-dessus du message
+  function vide(pose, texte) {
+    var box = el("div", "ar-empty alfred-empty");
+    var img = el("img", "alfred-fig");
+    img.src = "/static/img/alfred/" + pose + ".webp";
+    img.alt = "";
+    box.appendChild(img);
+    box.appendChild(el("p", null, texte));
+    return box;
+  }
+
   function charger() {
     var q = query();
     exportLink.href = API + "/export" + q;
     api("GET", API + q).then(function (j) {
       list.innerHTML = "";
-      if (!j || !j.ok) { list.appendChild(el("p", "ar-empty", "Chargement impossible.")); return; }
+      if (!j || !j.ok) { list.appendChild(vide("buste-stop", "Chargement impossible.")); return; }
       motifs = j.motifs || {};
       renderKpis(j.compteurs || {});
       if (!j.retours.length) {
-        list.appendChild(el("p", "ar-empty", "Aucun retour pour ces filtres."));
+        list.appendChild(vide("pied-the", "Aucun retour pour ces filtres."));
         return;
       }
       j.retours.forEach(function (r) { list.appendChild(carte(r)); });

@@ -624,12 +624,13 @@
       <!-- Section Contexte des evenements (Alfred) -->
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="alfred-contexte">
-          <h3>Contexte des événements (Alfred)</h3>
+          <h3><span class="alfred-face"><img src="{{ url_for('static', filename='img/alfred/buste-montre.webp') }}" alt=""></span> Contexte des événements (Alfred)</h3>
           <span id="aec-status" style="font-size:0.78rem; color:var(--muted); margin-left:auto; margin-right:8px;"></span>
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="alfred-contexte-body">
           <p class="aec-intro">
+            <img class="alfred-fig" src="{{ url_for('static', filename='img/alfred/pied-document.webp') }}" alt="">
             Quelques lignes par événement pour qu'Alfred <strong>comprenne</strong> les questions : nature de
             l'événement, public, particularités, vocabulaire du PC. Les <strong>surnoms</strong> (« les camions »,
             « TC ») lui permettent de retrouver l'événement dont parle l'opérateur.

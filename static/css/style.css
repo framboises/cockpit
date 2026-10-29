@@ -16462,6 +16462,26 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-row-integ { font-size: 15px !important; color: #6366f1; }
 .pcorg-row-integ.is-attention { color: #ea580c; }
 
+/* Alfred en personnage hors du widget de chat (images static/img/alfred) :
+   visage rond tire d'un buste, et pose en pied posee a cote d'un texte. */
+.alfred-face {
+  --af-size: 28px;
+  position: relative; display: inline-block; flex: 0 0 auto; vertical-align: middle;
+  width: var(--af-size); height: var(--af-size); border-radius: 50%; overflow: hidden;
+  background: linear-gradient(160deg, #eaf0ff, #c9d6f5);
+}
+.alfred-face img {
+  position: absolute; left: 50%; top: 4%; width: 165%; max-width: none; height: auto;
+  transform: translateX(-50%); pointer-events: none;
+}
+.nav-btn .material-symbols-outlined.alfred-face { --af-size: 22px; }
+.alfred-fig {
+  float: right; height: 130px; width: auto; margin: -4px 0 6px 16px; shape-outside: margin-box;
+  filter: drop-shadow(0 5px 8px rgba(12, 22, 34, 0.14));
+}
+.alfred-empty { text-align: center; }
+.alfred-empty .alfred-fig { float: none; display: block; height: 150px; margin: 0 auto 10px; }
+
 /* Configuration > Contexte des evenements (Alfred) : alfred_contexte_admin.js */
 .aec-intro { margin: 0 0 12px; font-size: .85rem; color: var(--muted); line-height: 1.5; }
 .aec-list { display: flex; flex-direction: column; gap: 6px; }
