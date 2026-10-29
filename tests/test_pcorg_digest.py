@@ -40,6 +40,15 @@ class TestReponseModele:
         r = PD.parse_reply(json.dumps({"gravite": 3, "donnees_personnelles": ["nom", "sante"]}))
         assert r["donnees_personnelles"] == ["nom", "sante"]
 
+    def test_v5_famille_titre_victime_personnel(self):
+        r = PD.parse_reply(json.dumps({"gravite": 4, "famille": "Rixe", "titre": "Rixe ~20 personnes",
+                                       "victime_personnel": False, "resume": "Rixe."}))
+        assert r["famille"] == "rixe" and r["titre"] == "Rixe ~20 personnes" and r["victime_personnel"] is False
+        assert r["resume_modele"] == "Rixe."
+        r = PD.parse_reply(json.dumps({"gravite": 4, "famille": "bagarre generale",
+                                       "agression_agent": {"cible": "accueil", "forme": "verbale"}}))
+        assert r["famille"] is None and r["victime_personnel"] is True
+
     @pytest.mark.parametrize("raw", ['{"gravite": 7}', '{"gravite": "x"}', "[1]", "pas du json"])
     def test_reponse_rejetee(self, raw):
         with pytest.raises(ValueError):

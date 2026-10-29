@@ -67,8 +67,8 @@
                         <button class="btn btn-primary" id="gf-launch">
                             <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">play_arrow</span> Lancer
                         </button>
-                        <label class="gf-check" style="margin-left:auto;" title="La tache planifiee traite la suite chaque nuit entre 23:00 et 07:00">
-                            <input type="checkbox" id="gf-night"> Traitement automatique la nuit (23:00 - 07:00)
+                        <label class="gf-check" style="margin-left:auto;" title="La tache planifiee traite la suite chaque nuit entre 23:00 et 06:50">
+                            <input type="checkbox" id="gf-night"> Traitement automatique la nuit (23:00 - 06:50)
                         </label>
                     </div>
                     <div id="gf-run-box" class="gf-run-box" hidden>
@@ -85,6 +85,17 @@
                     <h4 class="gf-sub">Repartition des gravites evaluees</h4>
                     <div id="gf-gravites" class="gf-gravites"></div>
                 </div>
+            </section>
+
+            <section class="widget-card gf-dash" id="gf-sec-anticipation" style="margin-top:16px;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle;">event_upcoming</span> Anticipation</h3>
+                    <div style="margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <select id="gf-ant-event" class="gf-select" title="Evenement"><option value="">Evenement...</option></select>
+                        <select id="gf-ant-avant" class="gf-select" title="Editions prises en compte"><option value="">Toutes les editions</option></select>
+                    </div>
+                </header>
+                <div class="widget-body" id="gf-ant"><div class="gf-muted">Choisissez un evenement : ce qui revient, ou, a quelle heure, et ce qu'il faut retenir des editions passees.</div></div>
             </section>
 
             <section class="widget-card gf-dash" id="gf-sec-controle" style="margin-top:16px;">
@@ -197,6 +208,9 @@
     <button type="button" data-action="sample">
         <span class="material-symbols-outlined">fact_check</span><span>Controler</span>
     </button>
+    <button type="button" data-target="gf-sec-anticipation">
+        <span class="material-symbols-outlined">event_upcoming</span><span>Anticiper</span>
+    </button>
     <button type="button" data-target="gf-sec-lots">
         <span class="material-symbols-outlined">inventory_2</span><span>Lots</span>
     </button>
@@ -235,6 +249,7 @@
 <script src="{{ url_for('static', filename='libs/leaflet/leaflet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script>window.__familles = {{ familles|tojson }};</script>
 <script src="{{ url_for('static', filename='js/gravite_fiches.js') }}?v={{ asset_v }}"></script>
 <script>
   window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};

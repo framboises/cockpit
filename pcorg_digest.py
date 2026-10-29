@@ -74,7 +74,14 @@ OLLAMA_TIMEOUT = int(os.getenv("PCORG_DIGEST_TIMEOUT", "180"))
 # prioritaire ; zone de saisie marquee approximative ; blocs agression_agent et
 # chaleur. Rejouee sur 85 controles : 72 justes, autant que la v3 rejouee (des
 # echelles 3 / 4 plus detaillees faisaient 66 a 71 : le modele oscille).
-PROMPT_VERSION = "v4"
+# v5 (28/10/2026) : titre de 70 caracteres, famille (liste fermee
+# pcorg_enrich.FAMILLES, le `type` libre avait 255 valeurs), victime_personnel
+# (au lieu d'une phrase dans 444 resumes), regle absolue contre les issues non
+# ecrites (97 resumes sur 119 citant evacuation / ambulance / stabilise sans le
+# mot dans la fiche), heures des etapes ECRITES seulement. En code
+# (pcorg_enrich.guarded_fields, rejoue aussi sur les v4) : phrases non
+# justifiees retirees, chronologie lue dans comment_history.
+PROMPT_VERSION = "v5"
 CAUSES = ("alcool", "meteo", "affluence", "travaux", "panne_materiel", "signaletique",
           "conduite_dangereuse", "malveillance", "accident", "sante", "stationnement", "autre")
 ISSUES = ("resolu", "transmis", "sans_suite", "en_attente", "non_precise")
@@ -113,9 +120,11 @@ La CONCLUSION du deroule prime sur le premier signalement (« vu avec X, juste a
     incident, fausse alerte levee, essai ou fiche de test (texte incoherent)
 2 = gene ou anomalie sans risque pour les personnes : panne, congestion, objet trouve ou perdu, demande de
     service, personnel bloque ou en attente (portail encore ferme), materiel tombe ou deplace (barrieres),
-    vol simple sans violence ni menace (velo, objet)
-3 = incident demandant une intervention, risque modere : TOUT DEPART DE FEU meme vite eteint, malaise pris en
-    charge sans gravite, chute sans blessure grave, conflit verbal entre personnes du public ou entre
+    vol simple sans violence ni menace (velo, objet). TOUTE PANNE TECHNIQUE SANS VICTIME = 2 : sanitaires
+    sans electricite ou sans eau chaude, eclairage en panne, fuite d'eau, bouche d'egout, trou sur un
+    parking, climatisation en panne, cle perdue (la famille de la fiche ne change pas la gravite)
+3 = incident demandant une intervention, risque modere : TOUT DEPART DE FEU meme vite eteint, MALAISE pris en
+    charge par le CMS (meme personne inconsciente, saignement de nez) sans arret cardiaque ni evacuation ecrite, chute sans blessure grave, conflit verbal entre personnes du public ou entre
     personnels, intrusion sans suite, chute d'arbre sans victime, personne ou enfant egare, engin ou materiel
     dangereux (grue deployee, charge instable)
 4 = atteinte aux personnes ou aux biens, ou risque serieux : bagarre, blesse (saignement abondant, ambulance),
@@ -131,11 +140,23 @@ patrouille » = 3 ; « Grue deployee sur un parking » = 3 ; « Agent d'accueil 
 « Femme, saignement abondant, prise en charge CMS puis ambulance » = 4 ; « Agression sexuelle sur une agente
 d'accueil » = 5 ; « Fuite sur bouteille de gaz, panache, non maitrisable » = 5.
 
-2. FAITS (n'invente rien ; ce qui n'est pas ecrit vaut "non precise", null ou une liste vide) :
+2. FAITS (n'invente rien ; ce qui n'est pas ecrit vaut "non precise", null ou une liste vide).
+REGLE ABSOLUE : n'ecris JAMAIS une evacuation, une ambulance, un transport a l'hopital, un service exterieur
+(pompiers, SAMU, police...) ou un etat final (stabilise, maitrise, apaise, sans suite) qui n'est pas ECRIT dans
+la fiche. Une fiche passee a « Termine » sans autre detail = issue "non decrite", pas « situation resolue ».
+- titre : la fiche en 70 caracteres maximum, faits ecrits seulement, sans nom : quoi + chiffre utile
+  (ex. "Rixe ~20 personnes, machette signalee", "Malaise homme 62 ans alcoolise", "Femme bloquee dans les WC")
+- famille : UNE valeur parmi """ + ", ".join(PE.FAMILLES) + """
+  (rixe = bagarre entre personnes ; agression = une victime visee, menace, insultes ; comportement = ivresse,
+  nuisance, refus d'obtemperer ; ronde / service / information pour les routines)
+- victime_personnel : true si la victime ou la personne visee est un membre du PERSONNEL de l'organisation
+  (agent d'accueil, de securite, benevole, technicien), false si c'est le public, null si sans objet
 - lieu : le lieu cite, tel qu'ecrit (ex. "T34", "Porte Nord", "P4D", "giratoire Antares", "Welcome") ;
   "non precise" si aucun lieu n'est ecrit dans le titre ou le deroule. La "zone de saisie" n'est PAS le lieu :
   ne la reprends ni dans lieu ni dans le resume. Un carroye seul ("AJ 17") n'est pas un nom de lieu.
-- etapes : heures HH:MM lues dans le deroule pour signalement, engagement des moyens, arrivee sur place, fin
+- etapes : heures HH:MM ECRITES dans le deroule pour signalement, engagement des moyens, arrivee sur place, fin
+  ("19h15 technicien sur place" -> sur_place 19:15). L'horodatage de saisie en tete de ligne
+  ("21/09/2025 02:00:21 , NOM") n'est une heure d'arrivee sur place que si la ligne le dit ; sinon null.
 - equipement : l'equipement ou materiel en cause (ex. "pompe a essence", "ecran geant", "barriere"), sinon "aucun"
 - moyens_engages : liste des EQUIPES ou moyens internes cites (ex. "S3M", "PS Nord", "patrouille 4", "Tangos",
   "CMS", "SERI" (parfois ecrit "siri")) ; JAMAIS un nom de personne ni l'auteur d'une
@@ -185,6 +206,7 @@ activite : ronde, ouverture_fermeture, prise_service, prestation, consigne, cont
 
 Reponds UNIQUEMENT par un objet JSON :
 {"gravite": 1 a 5, "justification": "pourquoi ce niveau, 20 mots maximum",
+ "titre": "...", "famille": "...", "victime_personnel": true, false ou null,
  "type": "nature de l'incident en quelques mots", "victimes": nombre (0 si aucune ou non precise),
  "lieu": "...", "etapes": {"signalement": "HH:MM" ou null, "engagement": "HH:MM" ou null,
  "sur_place": "HH:MM" ou null, "fin": "HH:MM" ou null}, "equipement": "...",
@@ -194,8 +216,8 @@ Reponds UNIQUEMENT par un objet JSON :
  "dysfonctionnement": {...} ou null, "jalon": {...} ou null, "secours": {...} ou null,
  "prise_service": {...} ou null, "agression_agent": {...} ou null, "chaleur": {...} ou null,
  "sous_classification": "..." ou null,
- "resume": "deux phrases maximum, sans nom de personne, telephone ni plaque ; dis si la victime est un
- membre du personnel (agent d'accueil, agent de securite...)"}
+ "resume": "deux phrases maximum, faits ECRITS seulement (quoi, ou, moyens engages, fin si elle est
+ decrite), sans nom de personne, telephone ni plaque ; ne dis rien du personnel si la fiche n'en parle pas"}
 
 Fiche :
 """
@@ -221,7 +243,7 @@ def _now():
 # JAMAIS l'appelant ni le telephone au modele.
 SOURCE_PROJECTION = {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1,
                      "event": 1, "year": 1, "ts": 1, "date_local": 1, "time_local": 1,
-                     "area": 1, "gps": 1, "sql_id": 1,
+                     "area": 1, "gps": 1, "sql_id": 1, "close_ts": 1, "comment_history": 1,
                      "content_category.carroye": 1, "content_category.classification": 1,
                      "content_category.motif_intervention": 1, "content_category.sous_classification": 1,
                      "content_category.service_contacte": 1, "content_category.relance": 1,
@@ -282,7 +304,7 @@ def src_hash(doc):
 # ---------------------------------------------------------------------------
 # Appel du modele et controle de la reponse
 # ---------------------------------------------------------------------------
-_TEXT_FIELDS = ("justification", "type", "lieu", "equipement", "issue", "resume")
+_TEXT_FIELDS = ("justification", "type", "lieu", "equipement", "issue", "resume", "titre")
 _LIST_FIELDS = ("moyens_engages", "services_exterieurs")
 
 
@@ -409,6 +431,14 @@ def parse_reply(raw, sc_allowed=None):
     if sc and sc_allowed:
         match = next((x for x in sc_allowed if PE.norm(x) == PE.norm(sc)), None)
     out["sous_classification_proposee"] = match
+    out["titre"] = out["titre"][:90]
+    fam = str(data.get("famille") or "").strip().lower().replace(" ", "_")
+    out["famille"] = fam if fam in PE.FAMILLES else None
+    vp = data.get("victime_personnel")
+    out["victime_personnel"] = vp if isinstance(vp, bool) else (True if out["agression_agent"] else None)
+    # Reponse brute gardee : le garde-fou (pcorg_enrich.guarded_fields) en repart
+    for k in ("resume", "issue", "titre", "etapes"):
+        out[k + "_modele"] = out[k]
     return out
 
 
@@ -471,12 +501,16 @@ def todo_ids(db, only_gps=False, event=None):
     passes = [dict(base, gps={"$ne": None})]
     if not only_gps:
         passes.append(dict(base, gps=None))
-    out = []
+    new, redo = [], []
     for q in passes:
-        for doc in db["pcorg"].find(q, SOURCE_PROJECTION).sort("ts", -1):
-            if needs_work(doc, done.get(doc["_id"])):
-                out.append(doc["_id"])
-    return out
+        for doc in db["pcorg"].find(q, {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1}).sort("ts", -1):
+            dg = done.get(doc["_id"])
+            if needs_work(doc, dg):
+                fresh = dg is None or dg.get("error") or dg.get("src_hash") != src_hash(doc)
+                (new if fresh else redo).append(doc["_id"])
+    # Jamais structurees d'abord : couverture complete avant de refaire les
+    # anciennes versions (deja utilisables, garde-fou en code applique)
+    return new + redo
 
 
 def iter_todo(db, only_gps=False, event=None):
@@ -536,6 +570,17 @@ def _end_deadline(end_at, now_local):
     return dl
 
 
+def _post_process(db, touched):
+    """Doublons, alarmes non remises et doublons declares des evenements touches (code pur, rapide)."""
+    dups = alarms = 0
+    for ev, yr in touched:
+        dups += PE.link_duplicates(db, COLL, ev, yr)
+        alarms += PE.flag_unrestored_alarms(db, COLL, ev, yr)
+        PE.resolve_declared_duplicates(db, COLL, ev, yr)
+    if touched:
+        log.info("Doublons probables : %d ; alarmes sans remise en service : %d", dups, alarms)
+
+
 def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
         only_gps=False, event=None, session=None, requested_by=None):
     started = _now()
@@ -575,6 +620,10 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
                 reason = "heure de fin atteinte"
                 break
             if in_batch >= batch_size:
+                # Doublons et alarmes des la fin du lot : une nuit coupee net
+                # (limite de la tache planifiee) ne les perd plus
+                _post_process(db, touched)
+                touched = set()
                 # Fiches a controler marquees des la fin du lot (controle possible sans attendre)
                 n_mark = PE.select_for_review(db, COLL, "%s-%03d" % (run_id, batch_no))
                 log.info("Lot %s-%03d termine (%d fiches a controler)", run_id, batch_no, n_mark)
@@ -616,13 +665,7 @@ def run(db, batch_size=BATCH_SIZE, max_batches=None, limit=None, end_at=None,
         else:
             if in_batch:
                 log.info("Lot %s-%03d termine", run_id, batch_no)
-        dups = alarms = 0
-        for ev, yr in touched:          # par evenement touche (code pur, rapide)
-            dups += PE.link_duplicates(db, COLL, ev, yr)
-            alarms += PE.flag_unrestored_alarms(db, COLL, ev, yr)
-            PE.resolve_declared_duplicates(db, COLL, ev, yr)
-        if touched:
-            log.info("Doublons probables : %d ; alarmes sans remise en service : %d", dups, alarms)
+        _post_process(db, touched)
         # Re-selection des fiches a controler de chaque lot de ce traitement, maintenant
         # que doublons et alarmes non remises sont connus (fiches deja controlees gardees)
         for b in sorted(db[COLL].distinct("batch", {"batch": {"$regex": "^%s-" % re.escape(run_id)}})):

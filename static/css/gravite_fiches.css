@@ -33,6 +33,8 @@
   font: inherit; font-size: 13px; cursor: pointer; }
 .gf-lieu-item:hover { background: #eff6ff; border-color: #93c5fd; }
 .gf-lieu-map { height: 240px; border-radius: 8px; border: 1px solid var(--border); }
+.gf-lieu-pin { box-sizing: border-box; width: 24px; height: 24px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: #dc2626;
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .45); cursor: grab; }
 .gf-lieu-chosen { font-size: 13px; font-weight: 600; color: #1e3a8a; }
 .gf-lieu-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
@@ -287,3 +289,21 @@ body.gf-reviewing .gf-batch-toggle { width: 100%; }
   .gf-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .gf-quality-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* v5 : ligne de lecture rapide de la fiche */
+.gf-ligne { margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--brand); background: rgba(0, 0, 0, .03);
+  font-weight: 600; border-radius: 4px; }
+
+/* Anticipation d'un evenement */
+.gf-ant-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; margin-top: 8px; }
+.gf-ant-table td, .gf-ant-table th { font-size: 13px; vertical-align: top; }
+.gf-ant-fam { display: grid; grid-template-columns: minmax(0, 11em) 1fr auto; gap: 8px; align-items: center; font-size: 13px;
+  margin: 3px 0; }
+.gf-ant-bar { height: 8px; border-radius: 4px; background: var(--brand); opacity: .7; }
+.gf-ant-hours { display: flex; align-items: flex-end; gap: 2px; height: 80px; }
+.gf-ant-hcol { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+  font-size: 10px; color: var(--text-muted, #888); }
+.gf-ant-hbar { width: 100%; background: var(--brand); opacity: .6; border-radius: 2px 2px 0 0; min-height: 1px; }
+.gf-ant-line { display: flex; gap: 8px; align-items: baseline; font-size: 13px; padding: 3px 0;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+@media (max-width: 900px) { .gf-ant-grid { grid-template-columns: 1fr; } }

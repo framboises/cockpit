@@ -22,7 +22,7 @@ logger = logging.getLogger("gravite_fiches")
 VERDICTS = ("ok", "trop_haut", "trop_bas")   # jugement porte sur la gravite du modele
 IGNORE = "ignoree"      # fiche de test / essai : ni jugee, ni retraitee, hors statistiques
 # Champs que l'admin peut signaler faux (controle par sondage des faits extraits)
-CHAMPS = ("lieu", "position", "heures", "equipement", "moyens", "services", "causes", "issue", "resume",
+CHAMPS = ("famille", "lieu", "position", "heures", "equipement", "moyens", "services", "causes", "issue", "resume",
           "nature", "ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service",
           "sous_classification", "agression_agent", "chaleur")
 FICHE_FIELDS = {"text": 1, "comment": 1, "category": 1, "niveau_urgence": 1,
@@ -64,7 +64,8 @@ def _pub_digest(d, fiche=None):
                                   "sous_classification_proposee", "taxo", "area", "relances",
                                   "doublon_declare", "alarme_non_remise", "a_controler",
                                   "competence", "dans", "pres", "ignoree", "plaques",
-                                  "agression_agent", "chaleur")}
+                                  "agression_agent", "chaleur", "titre", "famille", "victime_personnel",
+                                  "ligne", "chrono", "retouches", "resume_modele")}
     lc = d.get("lieu_corrige")
     out["lieu_corrige"] = dict(lc, at=_iso(lc.get("at"))) if lc else None
     out["id"] = d["_id"]
@@ -122,7 +123,7 @@ def gravite_fiches_page():
                            user_lastname=payload.get("lastname", ""),
                            user_email=payload.get("email", ""),
                            prompt_version=PD.PROMPT_VERSION, model=PD.OLLAMA_MODEL,
-                           batch_size=PD.BATCH_SIZE)
+                           batch_size=PD.BATCH_SIZE, familles=PD.PE.FAMILLES)
 
 
 @gravite_fiches_bp.route("/api/gravite-fiches/summary")
@@ -816,6 +817,36 @@ def gravite_fiches_lieu_appris_delete():
     n = _reenrich(ids, _gazetteer(fresh=True))
     logger.info("Lieu appris %r oublie par %s (%d fiche(s) recalculee(s))", key, _who(), n)
     return jsonify({"ok": True, "recalculees": n})
+
+
+@gravite_fiches_bp.route("/api/gravite-fiches/anticipation")
+@admin_required
+def gravite_fiches_anticipation():
+    """Fiche d'anticipation d'un evenement (pcorg_anticipation, code pur) :
+    ?event=<nom>&avant=<annee> (editions strictement anterieures, defaut toutes).
+    Sans event : liste des evenements structures."""
+    import pcorg_anticipation as PA
+    db = _db()
+    col = db[PD.COLL]
+    event = str(request.args.get("event") or "").strip()
+    if not event:
+        rows = col.aggregate([{"$match": {"error": None, "gravite": {"$ne": None}, "event": {"$nin": [None, ""]}}},
+                              {"$group": {"_id": "$event", "n": {"$sum": 1}, "years": {"$addToSet": "$year"}}},
+                              {"$sort": {"n": -1}}])
+        return jsonify({"events": [{"event": r["_id"], "n": r["n"],
+                                    "years": sorted((y for y in r["years"] if y is not None), key=str)}
+                                   for r in rows]})
+    q = {"event": event, "error": None, "gravite": {"$ne": None}}
+    avant = request.args.get("avant")
+    if avant and avant.isdigit():
+        q["year"] = {"$lt": int(avant)}
+    digests = list(col.find(q, PA.PROJECTION))
+    totals = {r["_id"]: r["n"] for r in db["pcorg"].aggregate([
+        {"$match": {"event": event}}, {"$group": {"_id": "$year", "n": {"$sum": 1}}}])}
+    out = PA.build(digests, totals)
+    out.update(event=event, avant=int(avant) if avant and avant.isdigit() else None,
+               prompt_versions=sorted({d.get("prompt_version") for d in digests} - {None}))
+    return jsonify(out)
 
 
 @gravite_fiches_bp.route("/api/gravite-fiches/night", methods=["POST"])

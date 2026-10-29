@@ -14,7 +14,7 @@
   };
   var state = { batch: null, items: [], focus: 0, timer: null, running: false };
   // Faits que l'admin peut signaler faux (meme liste que gravite_fiches.CHAMPS, sauf resume)
-  var CHAMPS = [["nature", "Nature"], ["lieu", "Lieu"], ["position", "Position"], ["heures", "Heures"],
+  var CHAMPS = [["nature", "Nature"], ["famille", "Famille"], ["lieu", "Lieu"], ["position", "Position"], ["heures", "Heures"],
                 ["equipement", "Equipement"], ["moyens", "Moyens"], ["services", "Services ext."], ["causes", "Causes"],
                 ["issue", "Issue"], ["sous_classification", "Sous-classif."], ["ronde", "Ronde"], ["alarme", "Alarme"],
                 ["dysfonctionnement", "Dysfonct."], ["jalon", "Jalon"], ["secours", "Secours"],
@@ -22,6 +22,8 @@
   // Puces des blocs v3 / v4 : affichees seulement si le bloc est present sur la fiche
   var CHAMPS_BLOCS = ["ronde", "alarme", "dysfonctionnement", "jalon", "secours", "prise_service",
                       "agression_agent", "chaleur"];
+  // Familles d'incident v5 (pcorg_enrich.FAMILLES, injectees par le gabarit)
+  var FAMILLES = window.__familles || {};
   var NATURE_LABELS = { incident: "Incident", routine: "Routine", information: "Information" };
   var POS_LABELS = { gps: "GPS d'origine", carroyage: "Carroyage", lieu: "Lieu cite", titre: "Titre", aucune: "Aucune",
                      operateur: "Corrige a la main" };
@@ -466,8 +468,24 @@
     head.appendChild(el("strong", null, GRAV_LABELS[it.gravite] || ""));
     right.appendChild(head);
     right.appendChild(el("div", "gf-muted", it.justification || ""));
+    // v5 : ligne de lecture rapide et ce que le garde-fou a retire de la reponse du modele
+    if (it.ligne) right.appendChild(el("div", "gf-ligne", it.ligne));
+    if (it.retouches && it.retouches.length) {
+      var ret = el("div", "gf-why");
+      ret.appendChild(el("span", "gf-muted", "Retire (non ecrit dans la fiche) : "));
+      it.retouches.forEach(function (r) { ret.appendChild(el("span", "gf-tag gf-warn", r.replace(":", " : "))); });
+      if (it.resume_modele && it.resume_modele !== it.resume) ret.title = "Resume du modele : " + it.resume_modele;
+      right.appendChild(ret);
+    }
+    var ch = it.chrono || {};
+    var chronoTxt = ch.ouverture ? "ouverte " + ch.ouverture + (ch.termine ? ", terminee " + ch.termine : "") +
+      (ch.duree_min != null ? " (" + ch.duree_min + " min)" : "") + (ch.maj ? ", " + ch.maj + " mise(s) a jour" : "") : null;
+    var vp = it.victime_personnel === true ? "oui" : (it.victime_personnel === false ? "non" : null);
     var dl = el("dl");
-    [["Type", it.type], ["Victimes", it.victimes], ["Issue", it.issue], ["Resume", it.resume]].forEach(function (p) {
+    [["Famille", FAMILLES[it.famille] || it.famille], ["Type", it.type], ["Victimes", it.victimes],
+     ["Personnel vise", vp], ["Chronologie", chronoTxt],
+     ["Issue", it.issue], ["Resume", it.resume]].forEach(function (p) {
+      if ((p[0] === "Famille" || p[0] === "Personnel vise" || p[0] === "Chronologie") && !p[1]) return;
       dl.appendChild(el("dt", null, p[0]));
       dl.appendChild(el("dd", null, p[1] === undefined || p[1] === null ? "-" : p[1]));
     });
@@ -688,7 +706,10 @@
       if (!map) return;
       if (marker) marker.setLatLng([p.lat, p.lng]);
       else {
-        marker = L.marker([p.lat, p.lng], { draggable: true }).addTo(map);
+        // Icone dessinee en CSS : l'icone par defaut de Leaflet cherche des images
+        // absentes de static/libs (image cassee)
+        marker = L.marker([p.lat, p.lng], { draggable: true, icon: L.divIcon({
+          className: "", html: '<div class="gf-lieu-pin"></div>', iconSize: [24, 24], iconAnchor: [12, 29] }) }).addTo(map);
         marker.on("dragend", function () {
           var ll = marker.getLatLng();
           choose({ name: txt.value.trim() || "Lieu corrige", label: "Point pose", layer: "appris", lat: ll.lat, lng: ll.lng });
@@ -1215,7 +1236,138 @@
     });
   }
 
+  // ---------- Anticipation d'un evenement (pcorg_anticipation, code pur) ----------
+  function initAnticipation() {
+    var evSel = document.getElementById("gf-ant-event");
+    var avSel = document.getElementById("gf-ant-avant");
+    var events = [];
+    apiGet("/api/gravite-fiches/anticipation").then(function (r) {
+      events = r.events || [];
+      events.forEach(function (e) {
+        var o = el("option", null, e.event + " (" + fmtInt(e.n) + " fiches, " + e.years.join(", ") + ")");
+        o.value = e.event;
+        evSel.appendChild(o);
+      });
+    }).catch(function (e) { toast("error", "Evenements illisibles : " + e.message); });
+    evSel.addEventListener("change", function () {
+      clear(avSel);
+      var all = el("option", null, "Toutes les editions"); all.value = "";
+      avSel.appendChild(all);
+      var ev = events.filter(function (e) { return e.event === evSel.value; })[0];
+      ((ev && ev.years) || []).slice(1).forEach(function (y) {
+        var o = el("option", null, "Avant " + y + " (pour preparer " + y + ")"); o.value = y;
+        avSel.appendChild(o);
+      });
+      loadAnticipation();
+    });
+    avSel.addEventListener("change", loadAnticipation);
+  }
+
+  function antLine(x, extra) {
+    var row = el("div", "gf-ant-line");
+    row.appendChild(el("span", "gf-badge gf-g" + x.gravite, x.gravite));
+    row.appendChild(el("span", "gf-muted", (x.year || "") + " " + (x.jour || "") + " " + (x.quand || "")));
+    row.appendChild(el("span", null, x.ligne || "-"));
+    if (extra) row.appendChild(el("span", "gf-muted", extra));
+    return row;
+  }
+
+  function antBlock(box, title, items, render) {
+    if (!items || !items.length) return;
+    box.appendChild(el("h4", "gf-sub", title));
+    items.forEach(function (x) { box.appendChild(render ? render(x) : antLine(x)); });
+  }
+
+  function loadAnticipation() {
+    var box = document.getElementById("gf-ant");
+    var ev = document.getElementById("gf-ant-event").value;
+    if (!ev) return;
+    var avant = document.getElementById("gf-ant-avant").value;
+    clear(box);
+    box.appendChild(el("div", "gf-muted", "Calcul..."));
+    apiGet("/api/gravite-fiches/anticipation?event=" + encodeURIComponent(ev) + (avant ? "&avant=" + avant : ""))
+      .then(function (r) { renderAnticipation(box, r); })
+      .catch(function (e) { clear(box); box.appendChild(el("div", "gf-error", "Calcul impossible : " + e.message)); });
+  }
+
+  function renderAnticipation(box, r) {
+    clear(box);
+    if (!r.nb_editions) { box.appendChild(el("div", "gf-muted", "Aucune fiche structuree pour ces editions.")); return; }
+    // Editions et couverture (le rattrapage de nuit n'est peut-etre pas fini)
+    var k = el("div", "gf-kpis");
+    r.editions.forEach(function (e) {
+      var cov = e.total_pcorg ? " / " + fmtInt(e.total_pcorg) + " fiches (" + fmtPct(e.fiches, e.total_pcorg) + " structurees)" : "";
+      k.appendChild(kpi(String(e.year), fmtInt(e.incidents) + " incidents",
+        e.graves + " graves (3+), " + e.tres_graves + " tres graves (4+)" + cov));
+    });
+    box.appendChild(k);
+    if (r.prompt_versions && r.prompt_versions.length > 1)
+      box.appendChild(el("div", "gf-muted", "Consignes melangees (" + r.prompt_versions.join(", ") + ") : familles v5 a partir de la v5, sous-classification avant."));
+
+    var grid = el("div", "gf-ant-grid");
+    // Foyers
+    var fo = el("div");
+    fo.appendChild(el("h4", "gf-sub", "Lieux qui reviennent (incidents, doublons exclus)"));
+    var t = el("table", "table table-striped gf-ant-table");
+    var th = el("tr");
+    ["Lieu", "Editions", "Fiches", "Grav. max", "Heures", "Ce qui s'y passe"].forEach(function (h) { th.appendChild(el("th", null, h)); });
+    t.appendChild(th);
+    r.foyers.forEach(function (f) {
+      var tr = el("tr");
+      tr.title = f.exemples.map(function (x) { return x.year + " " + x.quand + " - " + x.ligne; }).join("\n");
+      tr.appendChild(el("td", null, f.lieu));
+      tr.appendChild(el("td", "gf-num", f.editions + "/" + f.sur));
+      tr.appendChild(el("td", "gf-num", f.fiches));
+      var g = el("td"); g.appendChild(el("span", "gf-badge gf-g" + f.gravite_max, f.gravite_max)); tr.appendChild(g);
+      tr.appendChild(el("td", null, f.heures.join(", ")));
+      tr.appendChild(el("td", null, f.familles.map(function (x) { return x.famille + " (" + x.n + ")"; }).join(", ")));
+      t.appendChild(tr);
+    });
+    var sc = el("div", "gf-scroll"); sc.appendChild(t); fo.appendChild(sc);
+    grid.appendChild(fo);
+
+    // Familles + heures
+    var side = el("div");
+    side.appendChild(el("h4", "gf-sub", "Ce qui arrive (par edition)"));
+    r.familles.forEach(function (f) {
+      var row = el("div", "gf-ant-fam");
+      row.appendChild(el("span", null, f.famille));
+      var bar = el("span", "gf-ant-bar");
+      bar.style.width = Math.max(4, Math.round(100 * f.n / r.familles[0].n)) + "%";
+      row.appendChild(bar);
+      row.appendChild(el("span", "gf-muted", f.par_edition + " / ed. (grav. " + f.gravite_moy + ")"));
+      side.appendChild(row);
+    });
+    side.appendChild(el("h4", "gf-sub", "Heures des incidents"));
+    var hist = el("div", "gf-ant-hours");
+    var max = Math.max.apply(null, r.heures.concat([1]));
+    r.heures.forEach(function (n, h) {
+      var c = el("div", "gf-ant-hcol");
+      c.title = (h < 10 ? "0" : "") + h + ":00 - " + n + " incident(s)";
+      var b = el("div", "gf-ant-hbar"); b.style.height = Math.round(100 * n / max) + "%";
+      c.appendChild(b);
+      c.appendChild(el("span", null, h % 3 === 0 ? h : ""));
+      hist.appendChild(c);
+    });
+    side.appendChild(hist);
+    if (r.creneaux.length) {
+      side.appendChild(el("h4", "gf-sub", "Creneaux les plus charges (ponderes par la gravite)"));
+      side.appendChild(el("div", null, r.creneaux.map(function (c) { return c.jour + " " + c.heure; }).join(" · ")));
+    }
+    grid.appendChild(side);
+    box.appendChild(grid);
+
+    antBlock(box, "Fiches graves (4-5)", r.graves);
+    antBlock(box, "Dysfonctionnements a retenir", r.dysfonctionnements, function (x) {
+      return antLine(x, (x.type ? x.type + " : " : "") + (x.description || ""));
+    });
+    antBlock(box, "Alarmes mises hors service et jamais remises", r.alarmes_non_remises);
+    antBlock(box, "Personnel victime ou vise", r.agressions_agents);
+    antBlock(box, "Chaleur", r.chaleur);
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
+    initAnticipation();
     document.getElementById("gf-refresh").addEventListener("click", loadSummary);
     document.getElementById("gf-sample").addEventListener("click", openSample);
     document.getElementById("gf-stop").addEventListener("click", stopRun);

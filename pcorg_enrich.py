@@ -344,6 +344,184 @@ def delays(etapes):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Chronologie lue dans l'historique du deroule (v5) : le modele ne devine plus
+# des heures deja horodatees. comment_history = [{ts ISO avec decalage,
+# operator, text}] (30 177 fiches sur 30 607 au 28/10/2026), ts = ouverture
+# (UTC naif), close_ts = cloture.
+# ---------------------------------------------------------------------------
+_WRITTEN_HM = re.compile(r"(?<!\d)([01]?\d|2[0-3])\s*(?:h|H|:)\s*([0-5]\d)(?!\d)")
+_TERMINE = re.compile(r"->\s*termin", re.I)
+
+
+def _local(v):
+    """datetime (UTC naif ou avec decalage) ou ISO -> datetime heure de Paris."""
+    from zoneinfo import ZoneInfo
+    from datetime import timezone
+    if isinstance(v, str):
+        try:
+            v = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(v, datetime):
+        return None
+    if v.tzinfo is None:
+        v = v.replace(tzinfo=timezone.utc)
+    return v.astimezone(ZoneInfo("Europe/Paris"))
+
+
+def written_hours(*texts):
+    """Heures HH:MM ecrites dans un texte (« 19h15 », « 2h12 », « 07H00 », « 19:15 »)."""
+    out = set()
+    for t in texts:
+        for h, m in _WRITTEN_HM.findall(str(t or "")):
+            out.add("%02d:%s" % (int(h), m))
+    return out
+
+
+def chronology(fiche):
+    """{ouverture, termine, cloture (HH:MM heure de Paris), duree_min (ouverture ->
+    passage a Termine, sinon cloture), maj (entrees du deroule hors statut),
+    statuts [{heure, texte}], heures (toutes les heures connues : horodatages et
+    heures ecrites)} ; None sans aucune heure."""
+    opened = _local(fiche.get("ts"))
+    closed = _local(fiche.get("close_ts"))
+    entries = []
+    for h in fiche.get("comment_history") or []:
+        if isinstance(h, dict):
+            at = _local(h.get("ts"))
+            if at is not None:
+                entries.append((at, str(h.get("text") or "")))
+    entries.sort(key=lambda x: x[0])
+    if opened is None and not entries:
+        return None
+    statuts, maj, termine = [], 0, None
+    for at, txt in entries:
+        m = re.search(r"Statut\s*:\s*([^\n\r]+)", txt)
+        if m:
+            statuts.append({"heure": at.strftime("%H:%M"), "texte": m.group(1).strip()[:60]})
+            if termine is None and _TERMINE.search(m.group(1)):
+                termine = at
+            rest = txt.replace(m.group(0), "").strip()
+            if rest:
+                maj += 1
+        elif txt.strip():
+            maj += 1
+    start = opened or entries[0][0]
+    end = termine or closed
+    duree = int(round((end - start).total_seconds() / 60)) if end and end >= start else None
+    # Heures ecrites dans le texte (sans les entetes « 21/09/2025 02:00:21 , NOM »
+    # du deroule, qui sont des horodatages de saisie)
+    body = re.sub(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}", " ", str(fiche.get("comment") or ""))
+    ecrites = written_hours(fiche.get("text"), body, *(t for _, t in entries))
+    heures = {start.strftime("%H:%M")} | {at.strftime("%H:%M") for at, _ in entries} | ecrites
+    return {"ouverture": start.strftime("%H:%M"), "date": start.strftime("%Y-%m-%d"),
+            "termine": termine.strftime("%H:%M") if termine else None,
+            "cloture": closed.strftime("%H:%M") if closed else None,
+            "duree_min": duree, "maj": maj, "statuts": statuts[:8], "heures": sorted(heures),
+            "ecrites": sorted(ecrites)}
+
+
+def checked_steps(etapes, chrono):
+    """Heures des etapes du modele gardees SEULEMENT si elles figurent dans la
+    fiche (horodatage ou heure ecrite) : le modele recopiait l'heure du
+    signalement dans engagement et sur place. Signalement absent = ouverture
+    de la fiche, fin absente = passage a Termine. Rend (etapes, retirees)."""
+    etapes = dict(etapes or {})
+    if not chrono:
+        return etapes, []
+    known = set(chrono.get("heures") or [])
+    removed = []
+    for k in ETAPES:
+        v = etapes.get(k)
+        if v and v not in known:
+            etapes[k] = None
+            removed.append(k)
+    # Arrivee sur place a l'heure meme du signalement, heure qui n'est ecrite
+    # nulle part (seulement l'horodatage de la saisie) : recopie du modele
+    sig = etapes.get("signalement")
+    if sig and etapes.get("sur_place") == sig and sig not in set(chrono.get("ecrites") or []):
+        etapes["sur_place"] = None
+        removed.append("sur_place")
+    if not etapes.get("signalement"):
+        etapes["signalement"] = chrono.get("ouverture")
+    if not etapes.get("fin") and chrono.get("termine"):
+        etapes["fin"] = chrono["termine"]
+    return etapes, removed
+
+
+# ---------------------------------------------------------------------------
+# Garde-fou des resumes (v5) : une issue ou un moyen qui n'est pas ecrit dans
+# la fiche est retire. Mesure du 28/10/2026 : 97 resumes sur 119 citant
+# evacuation / ambulance / stabilise / maitrise n'avaient pas le mot dans la fiche.
+# ---------------------------------------------------------------------------
+# racine cherchee dans le resume -> racines qui la justifient dans la fiche
+CLAIMS = {
+    "evacu": ("evacu", "transport", "ambulance", "hopital", "hospital", "vsav", "smur", "urgences", "chu"),
+    "ambulance": ("ambulance", "ambu", "vsav", "asm", "transport", "evacu"),
+    "hopital": ("hopital", "hospital", "chu", "clinique", "urgences"),
+    "hospitalis": ("hopital", "hospital", "chu", "clinique", "urgences"),
+    "transporte": ("transport", "ambulance", "evacu", "vsav", "hopital"),
+    "stabilis": ("stabil",),
+    "maitris": ("maitris", "eteint", "apais", "calme", "circonscrit"),
+    "apais": ("apais", "calme", "maitris"),
+    "interpel": ("interpel", "garde a vue", "police", "gendarm"),
+    "pompier": ("pompier", "sdis", "vsav", "fpt", "ccf"),
+    "sdis": ("pompier", "sdis", "vsav", "fpt", "ccf"),
+    "samu": ("samu", "smur"),
+    "smur": ("samu", "smur"),
+    "police": ("police", "bac", "commissariat"),
+    "gendarm": ("gendarm", "psig"),
+    "deces": ("deces", "decede", "dcd", "mort"),
+}
+# Phrase de la consigne v4 recopiee dans 444 resumes sur 4 765 : remplacee par victime_personnel
+_PERSONNEL_RE = re.compile(r"\b(aucune?|pas|non|ni|n'est|n'a|sans)\b.{0,40}\bpersonnel", re.I)
+# Une phrase est coupee en propositions : « Pris en charge par le CMS, sans
+# evacuation » garde le CMS (essai sur les v4 du 28/10/2026)
+_CLAUSE_RE = re.compile(r",\s*|;\s*|\s+et\s+|\s+puis\s+")
+
+
+def unsupported_claims(text, source):
+    """Racines de CLAIMS presentes dans text mais justifiees par rien dans source."""
+    t, s = " %s " % norm(text), " %s " % norm(source)
+    out = []
+    for claim, proofs in CLAIMS.items():
+        if re.search(r" %s" % claim, t) and not any(re.search(r" %s" % p, s) for p in proofs):
+            out.append(claim)
+    return out
+
+
+def _sentences(text):
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+", str(text or "").strip()) if x.strip()]
+
+
+def guard_text(text, source, drop_personnel=True):
+    """(texte garde, racines retirees) : chaque phrase qui affirme une issue ou un
+    moyen non ecrit dans la fiche est retiree, ainsi que la phrase sur le
+    personnel. Texte vide apres nettoyage -> "non precise"."""
+    kept, removed = [], []
+    for s in _sentences(text):
+        end = s[-1] if s[-1] in ".!?" else "."
+        body = s.rstrip(".!? ")
+        seps = _CLAUSE_RE.findall(body)
+        clauses = _CLAUSE_RE.split(body)
+        out = []
+        for i, c in enumerate(clauses):
+            bad = unsupported_claims(c, source)
+            if bad:
+                removed += [b for b in bad if b not in removed]
+                continue
+            if drop_personnel and _PERSONNEL_RE.search(c):
+                continue
+            # le separateur qui precedait la proposition gardee (sauf en tete)
+            out.append((seps[i - 1] if i and out else "") + c)
+        s2 = "".join(out).strip()
+        if s2:
+            s2 = re.sub(r"^(et|puis)\s+", "", s2)
+            kept.append(s2[0].upper() + s2[1:] + end)
+    return (" ".join(kept) or "non precise"), removed
+
+
 def completeness(d, geo):
     checks = {
         "lieu": bool(geo) or norm(d.get("lieu")) not in ("", "non precise"),
@@ -449,8 +627,68 @@ def _relances(fiche):
     return n if 0 <= n <= 20 else None
 
 
+def guard_source(fiche):
+    """Ce que la fiche ecrit vraiment : titre, deroule, service contacte, intervenants."""
+    cc = fiche.get("content_category") or {}
+    extra = [cc.get(k) for k in ("service_contacte", "intervenant1", "intervenant2", "intervenant3",
+                                 "intervenant4", "intervenant5", "motif_intervention", "sous_classification")]
+    return " ".join(str(x or "") for x in [fiche.get("text"), fiche.get("comment")] + extra)
+
+
+# Familles d'incident (v5, liste fermee) : remplace le champ `type` libre
+# (255 valeurs differentes sur 4 765 fiches v4, casse et accents compris)
+FAMILLES = {
+    "malaise": "Malaise", "blessure": "Blessure / chute", "secours_autre": "Autre secours",
+    "rixe": "Rixe / bagarre", "agression": "Agression / menace", "vol": "Vol", "degradation": "Degradation",
+    "intrusion": "Intrusion / acces non autorise", "comportement": "Ivresse / comportement / nuisance",
+    "objet_suspect": "Objet ou colis suspect", "incendie": "Feu / incendie", "fuite_gaz": "Fuite gaz / produit",
+    "electricite": "Panne electrique", "technique": "Panne technique / materiel", "eau_sanitaire": "Eau / sanitaires",
+    "circulation": "Circulation / accident routier", "stationnement": "Stationnement / fourriere",
+    "personne_egaree": "Personne / enfant egare", "objet_perdu": "Objet perdu / trouve",
+    "acces_billetterie": "Acces / billetterie / controle", "alarme": "Alarme", "meteo": "Meteo",
+    "ronde": "Ronde", "service": "Prise / fin de service", "exploitation": "Exploitation / logistique",
+    "information": "Information / consigne", "autre": "Autre",
+}
+ISSUE_LABELS = {"resolu": "resolu", "transmis": "transmis", "sans_suite": "sans suite",
+                "en_attente": "en attente"}
+
+
+def reading_line(d, geo, chrono):
+    """Ligne de lecture rapide : « Rixe ~20 pers. · Trucker Camp D2 · 02:00 · resolu »."""
+    head = d.get("titre") if norm(d.get("titre")) not in ("", "non precise") else None
+    head = head or FAMILLES.get(d.get("famille")) or d.get("type")
+    lieu = (geo or {}).get("name") or (d.get("lieu") if norm(d.get("lieu")) not in ("", "non precise") else None)
+    parts = [head, lieu if lieu and norm(lieu) not in norm(head) else None,
+             (chrono or {}).get("ouverture"), ISSUE_LABELS.get(d.get("issue_code"))]
+    return " · ".join(str(p) for p in parts if p)[:160] or None
+
+
+def guarded_fields(fiche, d, chrono):
+    """Champs gardes du modele (v5) recalcules depuis sa reponse brute
+    (`*_modele`) : idempotent, et appliquable aux digests v4 sans le modele."""
+    src = guard_source(fiche)
+    out, removed = {}, []
+    for k in ("resume", "issue", "titre"):
+        raw = d.get(k + "_modele") if d.get(k + "_modele") is not None else d.get(k)
+        if raw is None:
+            continue
+        txt, rm = guard_text(raw, src, drop_personnel=(k == "resume"))
+        out[k] = txt
+        out[k + "_modele"] = raw
+        removed += ["%s:%s" % (k, r) for r in rm]
+    raw_steps = d.get("etapes_modele") if d.get("etapes_modele") is not None else d.get("etapes")
+    steps, rm = checked_steps(raw_steps, chrono)
+    out["etapes"], out["etapes_modele"] = steps, raw_steps
+    removed += ["etapes:%s" % r for r in rm]
+    out["retouches"] = removed
+    return out
+
+
 def enrich(gaz, fiche, d, taxo=None):
     """Champs calcules a stocker dans le digest."""
+    chrono = chronology(fiche)
+    g = guarded_fields(fiche, d, chrono)
+    d = dict(d, **g)
     geo = gaz.locate(fiche, d.get("lieu"), override=(d.get("lieu_corrige") or {}).get("geo"))
     around = gaz.surroundings(geo["lat"], geo["lng"], geo["source"]) if geo and hasattr(gaz, "near") else {}
     out = {"geo": geo, "zone": gaz.zone_of(geo["lat"], geo["lng"]) if geo else None,
@@ -459,7 +697,19 @@ def enrich(gaz, fiche, d, taxo=None):
            "lieu_norm": norm(geo["name"]) if geo and geo.get("name") else norm(d.get("lieu")),
            "area": area_levels(fiche), "relances": _relances(fiche),
            "plaques": plates(fiche.get("text"), fiche.get("comment")),
-           "doublon_declare_sql": declared_duplicate(fiche)}
+           "doublon_declare_sql": declared_duplicate(fiche),
+           "chrono": chrono, "ligne": reading_line(d, geo, chrono)}
+    out.update(g)
+    # Completude « heures » : une heure ECRITE par l'operateur ou une etape
+    # au-dela du signalement (qui vaut maintenant l'ouverture de la fiche)
+    comp = out["completude"]
+    has_hours = bool((chrono or {}).get("ecrites")) or any((d.get("etapes") or {}).get(k)
+                                                           for k in ("engagement", "sur_place"))
+    if has_hours != ("heures" not in comp["manquants"]):
+        comp["manquants"] = [m for m in comp["manquants"] if m != "heures"] + ([] if has_hours else ["heures"])
+        comp["score"] = comp["max"] - len(comp["manquants"])
+    if d.get("victime_personnel") is None and d.get("agression_agent"):
+        out["victime_personnel"] = True
     if taxo is not None:
         out["taxo"] = taxo.of(fiche)
     return out

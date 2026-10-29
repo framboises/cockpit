@@ -233,7 +233,7 @@ fiche, stockee en base et relue directement par le moteur.
   garde la gravite et la version JUGEES (`review.gravite_modele`, `review.prompt_version`) et la page mesure
   chaque version sur les fiches validees.
 - Lancement uniquement par la page (lots de 50 / 100) ou la fenetre de nuit, via la tache planifiee
-  « Cockpit - Fiches structurees » (`pcorg_digest.bat`, chaque minute, `--poll --night 23:00-07:00`, fenetre passee a 23:00-07:00 le 27/10/2026).
+  « Cockpit - Fiches structurees » (`pcorg_digest.bat`, chaque minute, `--poll --night 23:00-06:50`, fenetre passee a 23:00-07:00 le 27/10/2026 puis 06:50 le 28/10/2026).
 - Consignes **v3** (27/10/2026), apres lecture d'un echantillon : 52 % de la base est le PC Surete (rondes,
   ouvertures / fermetures, prestations, alarmes) et 15 % des prises de service. Ajouts : `nature`
   (incident / routine / information) et `activite` ; blocs facultatifs `ronde` (horaires, points dans
@@ -270,6 +270,36 @@ fiche, stockee en base et relue directement par le moteur.
   Nouveaux blocs : `agression_agent` (cible accueil / securite / autre_personnel, forme verbale / menace /
   physique ; pas les disputes entre personnels) et `chaleur` (impact personne / materiel / organisation ;
   pose d'office sur un `secours.nature == coup_de_chaleur`), marques « a controler » en priorite.
+- Consignes **v5** (28/10/2026) : `titre` (70 caracteres, faits ecrits), `famille` (liste fermee
+  `pcorg_enrich.FAMILLES`, le `type` libre avait 255 valeurs sur 4 765 fiches), `victime_personnel`
+  (au lieu de la phrase « aucun membre du personnel » recopiee dans 444 resumes), regle absolue : jamais
+  d'evacuation / ambulance / service exterieur / etat final non ECRIT. Fiches jamais structurees traitees
+  AVANT de refaire les anciennes versions (`todo_ids`).
+- Code pur v5 (`pcorg_enrich.guarded_fields`, idempotent, repart de la reponse brute `resume_modele`,
+  `issue_modele`, `titre_modele`, `etapes_modele` ; `--enrich-only` l'applique aux v4) :
+  - **garde-fou** : chaque proposition (« , » « et » « puis ») d'un resume / issue / titre qui affirme une
+    racine de `CLAIMS` (evacu, ambulance, hopital, stabilis, maitris, pompier, samu, police...) sans preuve
+    dans la fiche (titre, deroule, service contacte, intervenants) est retiree ; `retouches` liste ce qui
+    l'a ete. Mesure du 28/10 sur les v4 : 97 resumes sur 119 citant evacuation / ambulance / stabilise
+    sans le mot dans la fiche ; essai : 631 resumes nettoyes sur 4 764 ;
+  - **chronologie** (`chrono`) lue dans `comment_history` (ts ISO avec decalage) + `ts` / `close_ts` :
+    ouverture, passage a Termine, cloture, duree, mises a jour, statuts, heures ecrites. Les heures des
+    etapes du modele ne sont gardees que si elles figurent dans la fiche ; arrivee sur place = heure du
+    signalement non ecrite = recopie (838 retirees sur les v4) ; signalement absent = ouverture, fin
+    absente = passage a Termine ;
+  - **ligne de lecture** (`ligne`) : « titre · lieu · heure d'ouverture · issue ».
+- Tache : fenetre 23:00-**06:50** (`pcorg_digest.bat`) : la tache Windows a une limite de 8 h (`PT8H`,
+  non modifiable sans le mot de passe du compte) qui tuait le traitement a 07:00:02, avant son bilan ;
+  doublons / alarmes non remises sont de plus recalcules a chaque fin de lot (`_post_process`).
+- Debit reel : ~5,8 s par fiche (p90 6,6 s), soit ~4 800 fiches par nuit.
+- Rejeu de deux versions avant bascule : `scripts/replay_pcorg_digest.py --old <ancien pcorg_digest.py>`
+  (`git show HEAD:pcorg_digest.py`), rien n'est ecrit en base.
+- **Anticipation** (`pcorg_anticipation.py`, code pur, onglet Anticipation de /admin/gravite-fiches,
+  `/api/gravite-fiches/anticipation?event=&avant=`) : editions et couverture, lieux qui reviennent
+  (position nommee > zone > lieu cite ; score gravite 1/2/4/8/16 x bonus de recurrence), familles par
+  edition (sous-classification officielle pour les versions < v5), heures et creneaux jour x heure,
+  fiches graves, dysfonctionnements, alarmes jamais remises, personnel vise, chaleur. Incidents seulement
+  (`nature`), doublons exclus.
 - Les notes libres des controles ne sont PAS lues par le modele : elles servent a ecrire la version suivante
   des consignes (relire toutes les notes, y compris sur les gravites justes).
 - ⚠️ Pour les propositions de patrouilles (6.1) : ne retenir que `nature == "incident"`, sinon les foyers sont

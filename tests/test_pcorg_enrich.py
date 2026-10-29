@@ -299,3 +299,72 @@ def test_point_dans_polygone_avec_trou():
     assert not PE.point_in_geom(5, 5, geom)
     assert not PE.point_in_geom(20, 20, geom)
     assert datetime  # module importe pour les dates des doublons
+
+
+# ---------------------------------------------------------------------------
+# v5 : chronologie lue dans l'historique, heures verifiees, garde-fou des resumes
+# ---------------------------------------------------------------------------
+FICHE_V5 = {
+    "text": "Femme bloquee dans les WC S12", "ts": datetime(2026, 5, 9, 16, 42, 0),
+    "close_ts": datetime(2026, 5, 9, 17, 30, 0),
+    "comment": "09/05/2026 18:42:48 , X\n Appel CP T12, ST ACO se rend sur place\n"
+               "09/05/2026 19:16:34 , X\n 19h15 Technicien sur place\n09/05/2026 19:25:25 , X\n Statut: En cours -> Terminé",
+    "comment_history": [
+        {"ts": "2026-05-09T18:42:48+02:00", "text": "Appel CP T12, ST ACO se rend sur place"},
+        {"ts": "2026-05-09T19:16:34+02:00", "text": "19h15 Technicien sur place"},
+        {"ts": "2026-05-09T19:25:25+02:00", "text": "Statut: En cours -> Terminé"},
+    ],
+}
+
+
+class TestChronologie:
+    def test_ouverture_termine_duree_en_heure_de_paris(self):
+        c = PE.chronology(FICHE_V5)
+        assert c["ouverture"] == "18:42" and c["termine"] == "19:25" and c["cloture"] == "19:30"
+        assert c["duree_min"] == 43 and c["maj"] == 2
+        assert c["ecrites"] == ["19:15"] and "18:42" in c["heures"]
+
+    def test_sans_aucune_heure(self):
+        assert PE.chronology({"text": "x"}) is None
+
+    def test_heures_non_ecrites_retirees_et_completees(self):
+        c = PE.chronology(FICHE_V5)
+        steps, rm = PE.checked_steps({"signalement": None, "engagement": "18:50", "sur_place": "19:15",
+                                      "fin": None}, c)
+        assert steps == {"signalement": "18:42", "engagement": None, "sur_place": "19:15", "fin": "19:25"}
+        assert rm == ["engagement"]
+
+    def test_sur_place_recopie_du_signalement(self):
+        c = PE.chronology(FICHE_V5)
+        steps, rm = PE.checked_steps({"signalement": "18:42", "sur_place": "18:42"}, c)
+        assert steps["sur_place"] is None and "sur_place" in rm
+
+
+class TestGardeFou:
+    def test_issue_non_ecrite_retiree(self):
+        src = "Homme 30 ans coma ethylique en PLS au camping du Houx. Le CMS se rend sur place."
+        txt, rm = PE.guard_text("Homme en coma ethylique pris en charge par le CMS. Il a ete evacue par ambulance.", src)
+        assert txt == "Homme en coma ethylique pris en charge par le CMS." and set(rm) == {"evacu", "ambulance"}
+
+    def test_issue_ecrite_gardee(self):
+        txt, rm = PE.guard_text("Victime evacuee par le VSAV.", "transport par les pompiers, VSAV sur place")
+        assert rm == [] and txt == "Victime evacuee par le VSAV."
+
+    def test_phrase_sur_le_personnel_retiree(self):
+        txt, _ = PE.guard_text("Vol de velo au paddock. Aucun membre du personnel n'est concerne.", "vol velo")
+        assert txt == "Vol de velo au paddock."
+
+    def test_tout_retire_vaut_non_precise(self):
+        assert PE.guard_text("Situation stabilisee.", "rien")[0] == "non precise"
+
+    def test_champs_gardes_idempotents_depuis_la_reponse_brute(self):
+        d = {"resume": "Technicien sur place. Situation maitrisee.", "etapes": {"sur_place": "19:15"}}
+        c = PE.chronology(FICHE_V5)
+        g1 = PE.guarded_fields(FICHE_V5, d, c)
+        assert g1["resume"] == "Technicien sur place." and "resume:maitris" in g1["retouches"]
+        g2 = PE.guarded_fields(FICHE_V5, dict(d, **g1), c)
+        assert g2["resume"] == g1["resume"] and g2["resume_modele"] == d["resume"]
+
+    def test_ligne_de_lecture(self):
+        d = {"titre": "Femme bloquee dans les WC", "lieu": "S12", "issue_code": "resolu"}
+        assert PE.reading_line(d, None, PE.chronology(FICHE_V5)) == "Femme bloquee dans les WC · S12 · 18:42 · resolu"
