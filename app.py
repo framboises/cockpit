@@ -20,6 +20,8 @@ from flask import (
 from flask_cors import CORS
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from functools import wraps
+
+import medias_looker
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
@@ -1494,27 +1496,22 @@ def get_3p():
     return jsonify({"features": features})
 
 
-# Photos 3P (servies depuis le dossier looker/static/img/media)
-LOOKER_MEDIA = os.path.join(os.path.dirname(__file__), '..', 'looker', 'static', 'img', 'media')
+# Photos 3P : dossier partage des medias de Looker, hors de static/ (Q24 ; medias_looker.py, repli sur l'ancien
+# dossier looker/static/img/media pendant la transition).
 
 
 @app.route('/api/3p/photo/thumb/<filename>')
 @role_required("user")
 def get_3p_thumb(filename):
     """Sert la miniature d'une photo 3P."""
-    safe = os.path.basename(filename)
-    return send_from_directory(os.path.join(LOOKER_MEDIA, 'thumbnails'), safe)
+    return medias_looker.reponse_photo(db, os.path.basename(filename), ('thumbnails',))
 
 
 @app.route('/api/3p/photo/original/<filename>')
 @role_required("user")
 def get_3p_original(filename):
     """Sert la photo originale 3P (fallback sur thumbnail si pas d'original)."""
-    safe = os.path.basename(filename)
-    orig_path = os.path.join(LOOKER_MEDIA, 'original', safe)
-    if os.path.isfile(orig_path):
-        return send_from_directory(os.path.join(LOOKER_MEDIA, 'original'), safe)
-    return send_from_directory(os.path.join(LOOKER_MEDIA, 'thumbnails'), safe)
+    return medias_looker.reponse_photo(db, os.path.basename(filename))
 
 
 @app.route('/get_gm_categories', methods=['GET'])

@@ -23,6 +23,8 @@ import time
 import unicodedata
 from urllib.parse import quote
 
+import medias_looker
+
 RAYON_DEFAUT = 150       # m autour d'un point
 RAYON_SURFACE = 50       # m autour d'une aire / d'un parking (dedans = 0 m)
 MEME_ENDROIT_M = 200     # deux couches dont les lieux sont a moins de 200 m : le meme endroit
@@ -98,15 +100,14 @@ def _points(geom):
     return pts, anneaux
 
 
-# Photos des portails : meme dossier que /api/3p/photo/* (app.LOOKER_MEDIA)
-MEDIA_3P = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "looker", "static", "img", "media")
+# Photos des portails : meme dossier que /api/3p/photo/* (medias_looker, Q24 de la refonte de Looker)
 _RX_PHOTO = re.compile(r"^[A-Za-z0-9_.-]{1,120}\.(jpe?g|png|webp)$", re.I)
 
 
 def _photo(nom):
     """Nom de fichier si sa miniature existe (636 sur 638 au 09/10/2026), sinon None."""
     nom = str(nom or "").strip()
-    if not _RX_PHOTO.match(nom) or not os.path.isfile(os.path.join(MEDIA_3P, "thumbnails", nom)):
+    if not _RX_PHOTO.match(nom) or medias_looker.dossier_de("thumbnails", nom) is None:
         return None
     return nom
 

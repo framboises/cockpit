@@ -207,7 +207,8 @@ def test_cockpit_lieux_situer_et_repli_hors_parametrage(db):
 def test_photo_du_portail_si_la_miniature_existe(db, tmp_path, monkeypatch):
     (tmp_path / "thumbnails").mkdir()
     (tmp_path / "thumbnails" / "ACT_2.jpeg").write_bytes(b"x")
-    monkeypatch.setattr(P, "MEDIA_3P", str(tmp_path))
+    monkeypatch.setattr(P.medias_looker, "DOSSIER", str(tmp_path))
+    monkeypatch.setattr(P.medias_looker, "ANCIEN", str(tmp_path / "ancien"))
     db["3p"].docs[0]["features"][0]["properties"]["Photos"] = "ACT_2.jpeg"
     db["3p"].docs[0]["features"][1]["properties"]["Photos"] = "absente.jpeg"     # pas de miniature
     db["3p"].docs[0]["features"][2]["properties"]["Photos"] = "../../etc/passwd"

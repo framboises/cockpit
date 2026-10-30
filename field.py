@@ -27,6 +27,8 @@ import re
 import uuid as _uuid
 from functools import wraps
 
+import medias_looker
+
 import pcorg_history as PH
 import dispatch_auto as DA
 import patrols as PATROLS
@@ -155,8 +157,7 @@ MEDIAMTX_RTSP_LOCAL = os.getenv("MEDIAMTX_RTSP_LOCAL", "rtsp://127.0.0.1:8554").
 FFMPEG_PATH = os.getenv("FFMPEG_PATH", r"E:\TITAN\production\mediamtx\ffmpeg.exe")
 FIELD_TEST_PATTERN_MAX_S = int(os.getenv("FIELD_TEST_PATTERN_MAX_S", "900"))
 
-# Photos 3P (portes/portails) partagees avec l'app looker
-LOOKER_3P_MEDIA_DIR = os.path.join(SCRIPT_DIR, "..", "looker", "static", "img", "media")
+# Photos 3P (portes/portails) partagees avec l'app looker : medias_looker (dossier hors de static/, Q24)
 
 
 def _now():
@@ -4623,30 +4624,14 @@ def field_resources_3p():
 @field_token_required
 def field_3p_photo_thumb(filename):
     """Miniature d'une photo 3P. Miroir de /api/3p/photo/thumb cote tablette."""
-    safe = os.path.basename(filename)
-    thumb_dir = os.path.join(LOOKER_3P_MEDIA_DIR, "thumbnails")
-    if not os.path.isfile(os.path.join(thumb_dir, safe)):
-        abort(404)
-    resp = send_from_directory(thumb_dir, safe)
-    resp.headers["Cache-Control"] = "public, max-age=86400"
-    return resp
+    return medias_looker.reponse_photo(_get_mongo_db(), os.path.basename(filename), ("thumbnails",))
 
 
 @field_bp.route("/field/resources/3p/photo/original/<filename>", methods=["GET"])
 @field_token_required
 def field_3p_photo_original(filename):
     """Photo originale 3P avec fallback sur miniature si absente."""
-    safe = os.path.basename(filename)
-    orig_dir = os.path.join(LOOKER_3P_MEDIA_DIR, "original")
-    thumb_dir = os.path.join(LOOKER_3P_MEDIA_DIR, "thumbnails")
-    if os.path.isfile(os.path.join(orig_dir, safe)):
-        resp = send_from_directory(orig_dir, safe)
-    elif os.path.isfile(os.path.join(thumb_dir, safe)):
-        resp = send_from_directory(thumb_dir, safe)
-    else:
-        abort(404)
-    resp.headers["Cache-Control"] = "public, max-age=86400"
-    return resp
+    return medias_looker.reponse_photo(_get_mongo_db(), os.path.basename(filename))
 
 
 @field_bp.route("/field/resources/gm-categories", methods=["GET"])
