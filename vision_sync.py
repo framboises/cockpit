@@ -21,6 +21,9 @@ passage (10 700 docs x 288 passages/jour) coutait ~1,60 EUR/jour. D'ou :
 - sortie : l'app Firebase est fermee et le process termine par os._exit,
   sinon les threads gRPC le gardaient vivant et la tache planifiee
   (IgnoreNew) restait bloquee jusqu'a 72 h.
+- delais : chaque appel Firestore et MongoDB a un delai, et un chien de
+  garde termine le process apres WATCHDOG_S quoi qu'il arrive (le 27/10 un
+  passage est reste bloque 64 h apres "Sync terminee", avant os._exit).
 
 Usage:
     python vision_sync.py            # sync incremental (evenement actif)
@@ -32,6 +35,7 @@ import sys
 import json
 import logging
 import re
+import threading
 from datetime import datetime, timedelta
 
 from pymongo import MongoClient
@@ -51,6 +55,12 @@ OVERLAP_MIN = 15
 FULL_RESYNC_HOURS = 24
 BLACKLIST_INTERVAL_MIN = 60
 STATE_ID = "sync_state"
+# Delais (s). Une resync complete (10 700 docs) prend ~2 min 30 : le flux a
+# FS_STREAM_TIMEOUT_S, le chien de garde au-dessus, sous la limite de la tache.
+FS_TIMEOUT_S = 30
+FS_STREAM_TIMEOUT_S = 300
+MONGO_SOCKET_TIMEOUT_MS = 60000
+WATCHDOG_S = 480
 
 logging.basicConfig(
     level=logging.INFO,
@@ -191,7 +201,7 @@ def sync_config(fs_db, mongo_db):
     """Sync le document config/current de Vision."""
     col = mongo_db["vision_config"]
     try:
-        doc = fs_db.collection("config").document("current").get()
+        doc = fs_db.collection("config").document("current").get(timeout=FS_TIMEOUT_S)
         if doc.exists:
             data = doc.to_dict()
             col.update_one(
@@ -222,7 +232,7 @@ def _event_query(fs_db, evenement, annee):
 def _firestore_count(query):
     """count() facture ~1 lecture par tranche de 1000 docs. None si echec."""
     try:
-        return int(query.count().get()[0][0].value)
+        return int(query.count().get(timeout=FS_TIMEOUT_S)[0][0].value)
     except Exception as exc:
         log.warning("count() Firestore indisponible: %s", exc)
         return None
@@ -262,7 +272,7 @@ def sync_immatriculations(fs_db, mongo_db, evenement=None, annee=None, full=Fals
     count_upsert = 0
     max_date = None
     try:
-        for doc in query.stream():
+        for doc in query.stream(timeout=FS_STREAM_TIMEOUT_S):
             data = doc.to_dict()
             date_str = data.get("date", "")
             if isinstance(date_str, str) and date_str and (max_date is None or date_str > max_date):
@@ -316,7 +326,7 @@ def sync_blacklist(fs_db, mongo_db):
     count = 0
     seen_norms = set()
     try:
-        for doc in fs_db.collection("blacklist").stream():
+        for doc in fs_db.collection("blacklist").stream(timeout=FS_STREAM_TIMEOUT_S):
             data = doc.to_dict()
             plaque = data.get("plaque", "")
             plaque_norm = _normalize_plate(plaque)
@@ -369,7 +379,8 @@ def main():
 
     # Init MongoDB
     try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000,
+                             socketTimeoutMS=MONGO_SOCKET_TIMEOUT_MS)
         client.server_info()
         mongo_db = client[DB_NAME]
     except Exception as exc:
@@ -467,7 +478,20 @@ def main():
         client.close()
 
 
+def _watchdog():
+    """Passage trop long (reseau, fermeture gRPC) : statut down et sortie forcee."""
+    try:
+        log.error("Chien de garde : passage interrompu apres %d s", WATCHDOG_S)
+        _update_cron_status("down", f"Interrompu par le chien de garde ({WATCHDOG_S} s)")
+        logging.shutdown()
+    finally:
+        os._exit(2)
+
+
 if __name__ == "__main__":
+    garde = threading.Timer(WATCHDOG_S, _watchdog)
+    garde.daemon = True
+    garde.start()
     try:
         main()
     finally:
