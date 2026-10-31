@@ -718,9 +718,14 @@ def capture_camera_list():
                   "az": c["view"]["az"], "fov": c["view"]["fov"], "range": c["view"]["range"]}
                  for c in d.get("channels") or []
                  if c.get("enabled", True) is not False and isinstance(c.get("view"), dict) and c["view"].get("az") is not None]
+        # Canaux orientables (optique « mobile » : dome PTZ) : ils peuvent viser tout autour, angle dessine ou non.
+        mobiles = [{"no": c.get("no", 1), "name": c.get("name", ""),
+                    "range": (c.get("view") or {}).get("range") if isinstance(c.get("view"), dict) else None}
+                   for c in d.get("channels") or []
+                   if c.get("enabled", True) is not False and c.get("optics") == "mobile"]
         out.append({"_id": str(d["_id"]), "name": d.get("name", ""), "ip": d.get("ip", ""),
                     "location": d.get("location") or d.get("site", ""),
-                    "lat": p[0] if p else None, "lon": p[1] if p else None, "views": views})
+                    "lat": p[0] if p else None, "lon": p[1] if p else None, "views": views, "mobiles": mobiles})
     return out
 
 
@@ -757,6 +762,8 @@ def latest_snapshot_path(cam_id, channel=None):
 # canal voit le trace ET la camera est a moins de LOOKER_SUR_AXE_M. Jamais d'IP
 # ni d'identifiants dans la reponse. Chaque consultation est journalisee.
 LOOKER_SUR_AXE_M = 50        # camera a moins de 50 m du trace (et un canal le voit)
+LOOKER_DOME_PORTEE_M = 200   # dome orientable : portee minimale (sa portee dessinee si plus grande)
+LOOKER_DOME_PORTEE_MAX_M = 600
 LOOKER_POINTS_MAX = 150      # points du trace recus au plus
 LOOKER_CAMERAS_MAX = 24
 LOOKER_PAS_ECHANTILLON_M = 40  # le trace est echantillonne pour tester les angles de vue
@@ -825,9 +832,19 @@ def _capture_le(cam_id, channel):
     return _iso(datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc))
 
 
+def _portee_dome(canal):
+    try:
+        portee = float(canal.get("range") or 0)
+    except (TypeError, ValueError):
+        portee = 0
+    return max(LOOKER_DOME_PORTEE_M, min(portee, LOOKER_DOME_PORTEE_MAX_M))
+
+
 def cameras_le_long(trace):
-    """Cameras SUR l'axe (liste de la main courante) : a moins de LOOKER_SUR_AXE_M du trace ET un canal le voit ;
-    les plus proches d'abord, le canal qui voit l'axe."""
+    """Cameras SUR l'axe (liste de la main courante), les plus proches d'abord, avec le canal retenu :
+    - canal orientable (dome, optique « mobile ») : l'axe a moins de sa portee (_portee_dome), quel que soit son
+      angle dessine (il peut pivoter) ; « orientable » dans la reponse ;
+    - sinon : a moins de LOOKER_SUR_AXE_M du trace ET un canal le voit (angle de vue dessine)."""
     out = []
     for cam in capture_camera_list():
         if cam.get("lat") is None or cam.get("lon") is None:
@@ -835,6 +852,12 @@ def cameras_le_long(trace):
         vers_m = _metres((cam["lat"], cam["lon"]))
         pts_m = [vers_m(p) for p in trace]
         distance = min(_distance_segment((0.0, 0.0), a, b) for a, b in zip(pts_m, pts_m[1:]))
+        dome = next((c for c in cam.get("mobiles") or [] if distance <= _portee_dome(c)), None)
+        if dome is not None:
+            out.append({"id": cam["_id"], "nom": cam.get("name", ""), "lieu": cam.get("location", ""),
+                        "canal": dome["no"], "canalNom": dome.get("name", ""), "distance_m": round(distance),
+                        "voit": True, "orientable": True, "capture_le": _capture_le(cam["_id"], dome["no"])})
+            continue
         if distance > LOOKER_SUR_AXE_M:
             continue
         canaux_voyant = [v for v in cam.get("views") or [] if _voit(v, _echantillons(pts_m))]

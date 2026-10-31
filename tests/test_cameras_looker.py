@@ -50,6 +50,22 @@ def test_seulement_les_cameras_sur_l_axe_sans_ip(monkeypatch):
     assert "ip" not in out[0] and "10.0.0" not in str(out)
 
 
+def test_dome_orientable_retenu_quel_que_soit_son_angle(monkeypatch):
+    liste = [
+        # dome a ~110 m, angle dessine tourne a l'oppose de l'axe : il peut pivoter, il est retenu
+        {"_id": "f" * 24, "name": "Dome", "ip": "10.0.0.6", "location": "Giratoire", "lat": 47.901, "lon": 0.205,
+         "views": [{"no": 1, "az": 0, "fov": 20, "range": 50}], "mobiles": [{"no": 1, "name": "PTZ", "range": 50}]},
+        # dome trop loin (~330 m, au-dela de la portee minimale de 200 m) : ecarte
+        {"_id": "1" * 24, "name": "Dome loin", "ip": "10.0.0.7", "location": "", "lat": 47.903, "lon": 0.205,
+         "views": [], "mobiles": [{"no": 1, "name": "PTZ", "range": None}]},
+    ]
+    monkeypatch.setattr(C, "capture_camera_list", lambda: liste)
+    monkeypatch.setattr(C, "_capture_le", lambda cam_id, no: None)
+    out = C.cameras_le_long([(47.9, 0.2), (47.9, 0.21)])
+    assert [c["nom"] for c in out] == ["Dome"]
+    assert out[0]["orientable"] is True and out[0]["canal"] == 1 and out[0]["distance_m"] > C.LOOKER_SUR_AXE_M
+
+
 def test_actualiser_reserve_au_relais_local_et_jamais_la_piste(monkeypatch):
     from flask import Flask
     app = Flask(__name__)
