@@ -1134,7 +1134,8 @@ def cameras_map():
 # ---------------------------------------------------------------------------
 # "120 - [F] - Porte Houx", "048- P9C Siege", "151 Giratoire Technoparc"
 _NAME_RE = re.compile(r"^\s*(\d+[A-Za-z]?)(?:\s*-\s*|\s+)(.+?)\s*$")
-_PTZ_MODEL_RE = re.compile(r"(2DE|2DF|2SF|2DY|SD\d|PTZ|AUTODOME|SNP)", re.I)
+# 2DP : Hikvision PanoVu (DS-2DP…), objectifs fixes + dome PTZ ; le premier canal est le dome.
+_PTZ_MODEL_RE = re.compile(r"(2DE|2DF|2SF|2DY|2DP|SD\d|PTZ|AUTODOME|SNP)", re.I)
 
 
 def _split_name(name):
