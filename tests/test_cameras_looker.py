@@ -27,21 +27,42 @@ def test_angle_de_vue():
     assert not C._voit({"az": None}, [(150.0, 0.0)])
 
 
-def test_cameras_le_long_sans_ip_et_tri(monkeypatch):
+def test_seulement_les_cameras_sur_l_axe_sans_ip(monkeypatch):
     liste = [
-        {"_id": "a" * 24, "name": "Loin", "ip": "10.0.0.1", "location": "", "lat": 47.95, "lon": 0.25, "views": []},
-        {"_id": "b" * 24, "name": "Proche", "ip": "10.0.0.2", "location": "Parking", "lat": 47.9001, "lon": 0.205,
+        {"_id": "a" * 24, "name": "Loin", "ip": "10.0.0.1", "location": "", "lat": 47.95, "lon": 0.25,
+         "views": [{"no": 1, "az": 180, "fov": 90, "range": 9000}]},
+        # tout pres mais ne voit pas l'axe (regarde au nord, l'axe est au sud)
+        {"_id": "b" * 24, "name": "Proche aveugle", "ip": "10.0.0.2", "location": "Parking", "lat": 47.9001, "lon": 0.205,
          "views": [{"no": 1, "name": "Canal 1", "az": 0, "fov": 10, "range": 50}]},
-        {"_id": "c" * 24, "name": "Voit", "ip": "10.0.0.3", "location": "", "lat": 47.898, "lon": 0.205,
+        # voit l'axe mais a 220 m : pas sur l'axe
+        {"_id": "c" * 24, "name": "Voit de loin", "ip": "10.0.0.3", "location": "", "lat": 47.898, "lon": 0.205,
          "views": [{"no": 2, "name": "Route", "az": 0, "fov": 40, "range": 400}]},
+        {"_id": "e" * 24, "name": "Sur l'axe", "ip": "10.0.0.5", "location": "Giratoire", "lat": 47.9003, "lon": 0.206,
+         "views": [{"no": 1, "name": "Nord", "az": 0, "fov": 30, "range": 100},
+                   {"no": 3, "name": "Sud", "az": 180, "fov": 60, "range": 100}]},
         {"_id": "d" * 24, "name": "Sans position", "ip": "10.0.0.4", "location": "", "lat": None, "lon": None, "views": []},
     ]
     monkeypatch.setattr(C, "capture_camera_list", lambda: liste)
     monkeypatch.setattr(C, "_capture_le", lambda cam_id, no: None)
     out = C.cameras_le_long([(47.9, 0.2), (47.9, 0.21)])
-    assert [c["nom"] for c in out] == ["Voit", "Proche"]
-    assert out[0]["voit"] is True and out[0]["canal"] == 2
-    assert all("ip" not in c for c in out) and "10.0.0" not in str(out)
+    assert [c["nom"] for c in out] == ["Sur l'axe"]
+    assert out[0]["canal"] == 3 and out[0]["distance_m"] <= C.LOOKER_SUR_AXE_M
+    assert "ip" not in out[0] and "10.0.0" not in str(out)
+
+
+def test_actualiser_reserve_au_relais_local_et_jamais_la_piste(monkeypatch):
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(C.cameras_bp)
+    monkeypatch.setattr(C, "_check_admin", lambda: None)  # droits testes ailleurs (page Cameras)
+    vus = []
+    monkeypatch.setattr(C, "capturable_doc", lambda cam_id: vus.append(cam_id))  # None : piste, desactivee...
+    client = app.test_client()
+    url = "/api/cameras/" + "a" * 24 + "/actualiser-looker"
+    assert client.post(url).status_code == 403                                   # sans l'en-tete du relais
+    assert client.post(url, headers={"X-Looker-Relais": "1", "X-Forwarded-For": "1.2.3.4"}).status_code == 403  # via IIS
+    assert client.post(url, headers={"X-Looker-Relais": "1"}).status_code == 404  # camera hors main courante
+    assert vus == ["a" * 24]
 
 
 def test_derniere_capture_jamais_la_piste(monkeypatch):

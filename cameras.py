@@ -749,12 +749,14 @@ def latest_snapshot_path(cam_id, channel=None):
 # Appele par Looker (titan_looker/trafic/cameras.py), cote serveur, avec la
 # session de la personne : MEMES DROITS que la page Cameras (_check_admin du
 # blueprint : admin, super_admin ou page "cameras" accordee par un groupe).
-# LECTURE SEULE de la DERNIERE capture deja enregistree : aucune capture
-# declenchee, aucun pilotage. Memes cameras que la main courante
-# (capture_camera_list : actives, pilotables, profil d'identifiants, JAMAIS la
-# piste). Jamais d'IP ni d'identifiants dans la reponse. Chaque consultation
-# est journalisee (qui, quelle camera).
-LOOKER_PROCHE_M = 120        # camera a moins de 120 m du trace
+# Liste et DERNIERE capture deja enregistree en lecture seule ; une capture a
+# jour seulement par le bouton « Actualiser » (route /actualiser-looker, reservee
+# au relais local de Looker, memes garde-fous que la capture manuelle). Memes
+# cameras que la main courante (capture_camera_list : actives, pilotables,
+# profil d'identifiants, JAMAIS la piste). Seules les cameras SUR l'axe : un
+# canal voit le trace ET la camera est a moins de LOOKER_SUR_AXE_M. Jamais d'IP
+# ni d'identifiants dans la reponse. Chaque consultation est journalisee.
+LOOKER_SUR_AXE_M = 50        # camera a moins de 50 m du trace (et un canal le voit)
 LOOKER_POINTS_MAX = 150      # points du trace recus au plus
 LOOKER_CAMERAS_MAX = 24
 LOOKER_PAS_ECHANTILLON_M = 40  # le trace est echantillonne pour tester les angles de vue
@@ -824,7 +826,8 @@ def _capture_le(cam_id, channel):
 
 
 def cameras_le_long(trace):
-    """Cameras (liste de la main courante) proches du trace ou dont un canal le voit, celles qui le voient d'abord."""
+    """Cameras SUR l'axe (liste de la main courante) : a moins de LOOKER_SUR_AXE_M du trace ET un canal le voit ;
+    les plus proches d'abord, le canal qui voit l'axe."""
     out = []
     for cam in capture_camera_list():
         if cam.get("lat") is None or cam.get("lon") is None:
@@ -832,15 +835,16 @@ def cameras_le_long(trace):
         vers_m = _metres((cam["lat"], cam["lon"]))
         pts_m = [vers_m(p) for p in trace]
         distance = min(_distance_segment((0.0, 0.0), a, b) for a, b in zip(pts_m, pts_m[1:]))
-        canaux_voyant = [v for v in cam.get("views") or [] if _voit(v, _echantillons(pts_m))]
-        if distance > LOOKER_PROCHE_M and not canaux_voyant:
+        if distance > LOOKER_SUR_AXE_M:
             continue
-        canal = canaux_voyant[0] if canaux_voyant else ((cam.get("views") or [None])[0])
-        no = canal["no"] if canal else None
+        canaux_voyant = [v for v in cam.get("views") or [] if _voit(v, _echantillons(pts_m))]
+        if not canaux_voyant:
+            continue
+        canal = canaux_voyant[0]
         out.append({"id": cam["_id"], "nom": cam.get("name", ""), "lieu": cam.get("location", ""),
-                    "canal": no, "canalNom": (canal or {}).get("name", ""), "distance_m": round(distance),
-                    "voit": bool(canaux_voyant), "capture_le": _capture_le(cam["_id"], no)})
-    out.sort(key=lambda c: (not c["voit"], c["distance_m"]))
+                    "canal": canal["no"], "canalNom": canal.get("name", ""), "distance_m": round(distance),
+                    "voit": True, "capture_le": _capture_le(cam["_id"], canal["no"])})
+    out.sort(key=lambda c: c["distance_m"])
     return out[:LOOKER_CAMERAS_MAX]
 
 
@@ -863,6 +867,36 @@ def looker_derniere_capture(cam_id):
     if not path:
         return "", 404
     logger.info("Looker : derniere capture de la camera %s (canal %s) consultee par %s", cam_id, channel or 1, _who())
+    resp = send_file(path, mimetype="image/jpeg", max_age=0)
+    resp.headers["Cache-Control"] = "private, no-store"
+    resp.headers["X-Capture-Le"] = _capture_le(cam_id, channel) or ""
+    return resp
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/actualiser-looker", methods=["POST"])
+def looker_actualiser(cam_id):
+    """Capture a jour d'un canal (bouton « Actualiser » de Looker), memes garde-fous que la capture manuelle.
+
+    Reservee au relais LOCAL de Looker : en-tete X-Looker-Relais et AUCUN X-Forwarded-For (toute requete venue
+    d'IIS en porte un). La protection CSRF de Cockpit reste active : le relais presente le jeton obtenu par
+    GET /api/csrf-token avec la meme session. Droits : _check_admin du blueprint (page Cameras). Jamais la piste
+    (capturable_doc, puis _require_control) ; une capture a la fois par appareil, delai par canal (capture_to)."""
+    if request.headers.get("X-Looker-Relais") != "1" or request.headers.get("X-Forwarded-For"):
+        return jsonify({"error": "Reserve au relais de Looker"}), 403
+    doc = capturable_doc(cam_id)
+    if not doc:
+        return "", 404
+    err = _require_control(doc)
+    if err:
+        return err
+    channel = _channel_arg()
+    try:
+        path, _no = capture_to(doc, channel)
+    except CaptureBusy as e:
+        return jsonify({"error": str(e)}), 429
+    except Exception as e:
+        return jsonify({"error": camera_error(doc, e, "Capture")}), 502
+    logger.info("Looker : capture a jour de la camera %s (canal %s) demandee par %s", cam_id, channel or 1, _who())
     resp = send_file(path, mimetype="image/jpeg", max_age=0)
     resp.headers["Cache-Control"] = "private, no-store"
     resp.headers["X-Capture-Le"] = _capture_le(cam_id, channel) or ""
