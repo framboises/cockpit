@@ -11,6 +11,7 @@
 # Usages d'un canal : catalogue ROLE_TYPES. L'usage "anpr" alimente la page
 # LAPI (miroir dans anpr_camera_config, lu par anpr.py et cockpit_dispatch).
 # Pilotage (capture, essuie-glace) : Hikvision seulement pour l'instant.
+import math
 import os
 import re
 import time
@@ -740,6 +741,132 @@ def latest_snapshot_path(cam_id, channel=None):
         return None
     path = os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, channel))
     return path if os.path.isfile(path) else None
+
+
+# ---------------------------------------------------------------------------
+# Looker : cameras qui voient un axe Waze (fiche d'un itineraire du trafic)
+# ---------------------------------------------------------------------------
+# Appele par Looker (titan_looker/trafic/cameras.py), cote serveur, avec la
+# session de la personne : MEMES DROITS que la page Cameras (_check_admin du
+# blueprint : admin, super_admin ou page "cameras" accordee par un groupe).
+# LECTURE SEULE de la DERNIERE capture deja enregistree : aucune capture
+# declenchee, aucun pilotage. Memes cameras que la main courante
+# (capture_camera_list : actives, pilotables, profil d'identifiants, JAMAIS la
+# piste). Jamais d'IP ni d'identifiants dans la reponse. Chaque consultation
+# est journalisee (qui, quelle camera).
+LOOKER_PROCHE_M = 120        # camera a moins de 120 m du trace
+LOOKER_POINTS_MAX = 150      # points du trace recus au plus
+LOOKER_CAMERAS_MAX = 24
+LOOKER_PAS_ECHANTILLON_M = 40  # le trace est echantillonne pour tester les angles de vue
+_RE_POINT = re.compile(r"^-?\d{1,3}(\.\d{1,7})?,-?\d{1,3}(\.\d{1,7})?$")
+
+
+def trace_looker(texte):
+    """« lat,lng;lat,lng;... » -> [(lat, lng)] (2 a LOOKER_POINTS_MAX points valides), sinon None."""
+    morceaux = (texte or "").split(";")
+    if not 2 <= len(morceaux) <= LOOKER_POINTS_MAX:
+        return None
+    points = []
+    for m in morceaux:
+        if not _RE_POINT.match(m.strip()):
+            return None
+        lat, lng = (float(v) for v in m.split(","))
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return None
+        points.append((lat, lng))
+    return points
+
+
+def _metres(origine):
+    """Projection locale (m) autour d'un point : ecart negligeable sur quelques km."""
+    kx = 111320.0 * math.cos(math.radians(origine[0]))
+    return lambda p: ((p[1] - origine[1]) * kx, (p[0] - origine[0]) * 110540.0)
+
+
+def _distance_segment(p, a, b):
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    dx, dy = bx - ax, by - ay
+    n = dx * dx + dy * dy
+    t = 0 if n == 0 else max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / n))
+    return math.hypot(px - ax - t * dx, py - ay - t * dy)
+
+
+def _echantillons(pts_m):
+    """Points du trace (m) tous les LOOKER_PAS_ECHANTILLON_M au plus."""
+    out = [pts_m[0]]
+    for a, b in zip(pts_m, pts_m[1:]):
+        n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) // LOOKER_PAS_ECHANTILLON_M))
+        out.extend((a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(1, n + 1))
+    return out
+
+
+def _voit(view, pts_m):
+    """Un des points (m, origine = camera) est-il dans le secteur de vue (azimut, ouverture, portee) ?"""
+    try:
+        az, fov, portee = float(view["az"]), float(view["fov"]), float(view["range"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    for x, y in pts_m:
+        d = math.hypot(x, y)
+        if d == 0 or d > portee:
+            continue
+        cap = math.degrees(math.atan2(x, y)) % 360
+        if abs((cap - az + 180) % 360 - 180) <= fov / 2:
+            return True
+    return False
+
+
+def _capture_le(cam_id, channel):
+    path = os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, channel))
+    if not os.path.isfile(path):
+        return None
+    return _iso(datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc))
+
+
+def cameras_le_long(trace):
+    """Cameras (liste de la main courante) proches du trace ou dont un canal le voit, celles qui le voient d'abord."""
+    out = []
+    for cam in capture_camera_list():
+        if cam.get("lat") is None or cam.get("lon") is None:
+            continue
+        vers_m = _metres((cam["lat"], cam["lon"]))
+        pts_m = [vers_m(p) for p in trace]
+        distance = min(_distance_segment((0.0, 0.0), a, b) for a, b in zip(pts_m, pts_m[1:]))
+        canaux_voyant = [v for v in cam.get("views") or [] if _voit(v, _echantillons(pts_m))]
+        if distance > LOOKER_PROCHE_M and not canaux_voyant:
+            continue
+        canal = canaux_voyant[0] if canaux_voyant else ((cam.get("views") or [None])[0])
+        no = canal["no"] if canal else None
+        out.append({"id": cam["_id"], "nom": cam.get("name", ""), "lieu": cam.get("location", ""),
+                    "canal": no, "canalNom": (canal or {}).get("name", ""), "distance_m": round(distance),
+                    "voit": bool(canaux_voyant), "capture_le": _capture_le(cam["_id"], no)})
+    out.sort(key=lambda c: (not c["voit"], c["distance_m"]))
+    return out[:LOOKER_CAMERAS_MAX]
+
+
+@cameras_bp.route("/api/cameras/le-long", methods=["GET"])
+def looker_cameras_le_long():
+    """GET ?trace=lat,lng;lat,lng... (Looker) : cameras qui voient cet axe, sans IP."""
+    trace = trace_looker(request.args.get("trace"))
+    if trace is None:
+        return jsonify({"error": "Trace invalide"}), 400
+    cameras = cameras_le_long(trace)
+    logger.info("Looker : %d camera(s) le long d'un axe, consultees par %s", len(cameras), _who())
+    return jsonify({"cameras": cameras})
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/derniere-capture", methods=["GET"])
+def looker_derniere_capture(cam_id):
+    """Derniere capture enregistree d'une camera de la main courante (jamais la piste), pour Looker."""
+    channel = _channel_arg()
+    path = latest_snapshot_path(cam_id, channel)  # capturable_doc : piste, desactivee, sans profil -> None
+    if not path:
+        return "", 404
+    logger.info("Looker : derniere capture de la camera %s (canal %s) consultee par %s", cam_id, channel or 1, _who())
+    resp = send_file(path, mimetype="image/jpeg", max_age=0)
+    resp.headers["Cache-Control"] = "private, no-store"
+    resp.headers["X-Capture-Le"] = _capture_le(cam_id, channel) or ""
+    return resp
 
 
 @cameras_bp.route("/api/cameras", methods=["GET"])
