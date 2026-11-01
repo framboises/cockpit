@@ -24,6 +24,7 @@ def env(monkeypatch):
         return deco
     fake.role_required = role_required
     fake._user_can_view_bibler = lambda p: who["voir"]
+    fake._user_can_publish_consigne = lambda p: who.get("publier", True)
     monkeypatch.setitem(sys.modules, "app", fake)
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -88,6 +89,7 @@ def test_visuel(env):
     assert r.headers["Content-Type"] == "image/png"
     assert r.headers["Cache-Control"] == "private, max-age=86400"
     assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["Content-Security-Policy"] == "sandbox; default-src 'none'"
     env.mp.setattr(bibler_pont, "lire_binaire", lambda c, ttl=86400: (b"<svg/>", "image/svg+xml"))
     assert env.client.get("/api/bibler/visuel/x.svg").status_code == 404
     env.mp.setattr(bibler_pont, "lire_binaire", lambda c, ttl=86400: (b"IMG", "image/png"))
@@ -141,3 +143,142 @@ def test_droits_groupe():
     borne = {"type_compte": "borne", "app_role": "admin"}
     assert BP.peut_voir(borne, [{"bibler_postes": True}]) is False
     assert BP.peut_publier(borne, [{"bibler_postes": True, "can_publish_consigne": True}]) is False
+
+
+# --- Ecriture ---------------------------------------------------------------------------------------------------
+
+from datetime import datetime, timezone
+
+MAINT = datetime(2026, 6, 13, 9, 30, tzinfo=timezone.utc)
+BASE = {"titre": "T", "texte": "X", "priorite": "information", "event": "SAISON", "year": 2026,
+        "cible": {"departements": ["D"], "zones": [], "secteurs": [], "postes": [1], "tout_evenement": False},
+        "dans_briefing": True}
+
+
+def _form(duree):
+    return dict(BASE, duree=duree)
+
+
+def test_duree_permanente():
+    c = BP.consigne_depuis_formulaire(_form({"mode": "permanente"}), MAINT)
+    assert c["debut"] == "2026-06-13T09:30:00+00:00" and "fin" not in c
+    assert c["cible"]["formats"] == [] and c["statut"] == "publiee"
+    assert c["titre"] == "T" and c["event"] == "SAISON" and c["year"] == 2026
+    assert c["cible"]["postes"] == [1] and c["dans_briefing"] is True
+
+
+def test_duree_shift():
+    d = {"mode": "shift", "debut": "2026-06-13T10:00:00+02:00", "fin": "2026-06-13T18:00:00+02:00",
+         "format": "10:00-18:00"}
+    c = BP.consigne_depuis_formulaire(_form(d), MAINT)
+    assert c["debut"] == d["debut"] and c["fin"] == d["fin"] and c["cible"]["formats"] == ["10:00-18:00"]
+
+
+def test_duree_format():
+    c = BP.consigne_depuis_formulaire(_form({"mode": "format", "format": "10:00-18:00"}), MAINT)
+    assert c["debut"] == "2026-06-13T09:30:00+00:00" and "fin" not in c
+    assert c["cible"]["formats"] == ["10:00-18:00"]
+
+
+def test_duree_shift_passe_minuit():
+    d = {"mode": "shift", "debut": "2026-06-13T18:00:00+02:00", "fin": "2026-06-14T02:00:00+02:00",
+         "format": "18:00-02:00"}
+    assert BP.consigne_depuis_formulaire(_form(d), MAINT)["fin"] == d["fin"]
+
+
+@pytest.mark.parametrize("debut,fin", [
+    ("2026-06-13T10:00:00+02:00", "2026-06-13T10:00:00+02:00"),
+    ("2026-06-13T10:00:00+02:00", "2026-06-13T09:00:00+02:00"),
+    ("2026-06-13T10:00:00+02:00", "2026-06-14T16:00:00+02:00"),
+    ("2026-06-13T10:00:00", "2026-06-13T18:00:00"),
+    ("nimporte", "2026-06-13T18:00:00+02:00"),
+])
+def test_duree_shift_invalide(debut, fin):
+    with pytest.raises(ValueError, match="shift_invalide"):
+        BP.consigne_depuis_formulaire(_form({"mode": "shift", "debut": debut, "fin": fin, "format": "f"}), MAINT)
+
+
+def test_duree_invalide():
+    with pytest.raises(ValueError, match="duree_invalide"):
+        BP.consigne_depuis_formulaire(_form({"mode": "x"}), MAINT)
+    with pytest.raises(ValueError, match="duree_invalide"):
+        BP.consigne_depuis_formulaire(_form({"mode": "format"}), MAINT)
+
+
+@pytest.fixture
+def ecr(env):
+    envois = []
+    env.mp.setattr(bibler_pont, "envoyer",
+                   lambda m, c, corps, capacites=("consignes:ecrire",), idempotence=None:
+                   envois.append((m, c, corps, idempotence)) or ({"ok": True, "consigne": {"id": "a1" * 12}}, 201))
+    env.envois = envois
+    env.who["payload"] = {"email": "op@aco.fr", "firstname": "Ada", "lastname": "Lovelace"}
+    return env
+
+
+def test_ecriture_sans_droit_403(ecr):
+    ecr.who["publier"] = False
+    r = ecr.client.post("/api/bibler/consignes", json=_form({"mode": "permanente"}),
+                        headers={"X-Idempotency-Key": "k"})
+    assert r.status_code == 403 and ecr.envois == []
+
+
+def test_ecriture_compte_borne_403(ecr):
+    ecr.who["payload"] = {"email": "tv@aco.fr", "type_compte": "borne"}
+    for r in (ecr.client.post("/api/bibler/consignes", json=_form({"mode": "permanente"}),
+                              headers={"X-Idempotency-Key": "k"}),
+              ecr.client.post("/api/bibler/consignes/" + "a1" * 12 + "/lever", json={})):
+        assert r.status_code == 403
+    assert ecr.envois == []
+
+
+def test_relais_injecte_auteur(ecr):
+    r = ecr.client.post("/api/bibler/consignes", json=_form({"mode": "permanente"}),
+                        headers={"X-Idempotency-Key": "k-1"})
+    assert r.status_code == 201
+    m, chemin, corps, idem = ecr.envois[0]
+    assert (m, chemin) == ("POST", "/api/v1/consignes")
+    assert corps["source"]["auteur"] == {"email": "op@aco.fr", "nom": "Ada Lovelace"}
+    assert "duree" not in corps
+
+
+def test_relais_transmet_cle_idempotence(ecr):
+    ecr.client.post("/api/bibler/consignes", json=_form({"mode": "permanente"}),
+                    headers={"X-Idempotency-Key": "k-1"})
+    assert ecr.envois[0][3] == "k-1"
+    r = ecr.client.post("/api/bibler/consignes", json=_form({"mode": "permanente"}))
+    assert r.status_code == 400 and r.get_json()["code"] == "idempotence_requise"
+    assert len(ecr.envois) == 1
+
+
+def test_creation_duree_invalide_422(ecr):
+    r = ecr.client.post("/api/bibler/consignes", json=_form({"mode": "x"}), headers={"X-Idempotency-Key": "k"})
+    assert r.status_code == 422 and r.get_json()["code"] == "duree_invalide"
+
+
+def test_modifier_et_lever(ecr):
+    cid = "a1" * 12
+    r = ecr.client.patch("/api/bibler/consignes/" + cid, json={"titre": "N", "version": 2, "junk": 1})
+    assert r.status_code == 201
+    m, chemin, corps, _ = ecr.envois[0]
+    assert (m, chemin) == ("PATCH", "/api/v1/consignes/" + cid)
+    assert corps == {"titre": "N", "version": 2, "source": {"auteur": {"email": "op@aco.fr", "nom": "Ada Lovelace"}}}
+    ecr.client.post("/api/bibler/consignes/%s/lever" % cid)
+    assert ecr.envois[1][:2] == ("POST", "/api/v1/consignes/%s/lever" % cid)
+    assert ecr.client.patch("/api/bibler/consignes/zz", json={}).status_code == 404
+    assert ecr.client.post("/api/bibler/consignes/zz/lever").status_code == 404
+
+
+def test_erreur_bibler_ecriture_relayee(ecr):
+    def boom(*a, **k):
+        raise bibler_pont.BiblerErreur(409, {"erreur": "version_perimee"})
+    ecr.mp.setattr(bibler_pont, "envoyer", boom)
+    r = ecr.client.patch("/api/bibler/consignes/" + "a1" * 12, json={"version": 1})
+    assert r.status_code == 409 and r.get_json() == {"erreur": "version_perimee"}
+
+
+def test_ecriture_journalisee(ecr, caplog):
+    import logging
+    with caplog.at_level(logging.INFO, logger="bibler_postes"):
+        ecr.client.post("/api/bibler/consignes/%s/lever" % ("a1" * 12))
+    assert any("Consigne Bibler levee " + "a1" * 12 + " par op@aco.fr" in m for m in caplog.messages)
