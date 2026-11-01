@@ -16,6 +16,7 @@ import re
 import threading
 import time
 import uuid
+from urllib.parse import urlsplit
 
 import jwt
 import requests
@@ -26,11 +27,12 @@ SECRET_MIN = 32
 JETON_TTL_S = 60
 TIMEOUT = (3, 8)
 TAILLE_MAX = 5 * 1024 * 1024
-_CHEMIN_RE = re.compile(r"^/api/v1/[A-Za-z0-9._~\-/%]*$")
+_CHEMIN_RE = re.compile(r"^/api/v1/[A-Za-z0-9._~\-/]*$")
 
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
 _SESSION = None
+_AVERTI_HTTP = False
 
 
 class BiblerNonConfigure(Exception):
@@ -58,9 +60,29 @@ def _secret():
     return (os.environ.get("COCKPIT_PONT_SECRET_BIBLER") or "").strip()
 
 
+def _url_valide(url):
+    """True si l'URL est une base http(s) nue (sans identifiants, requete ni fragment)."""
+    global _AVERTI_HTTP
+    try:
+        u = urlsplit(url)
+        hote = u.hostname
+        u.port
+    except ValueError:
+        return False
+    if u.scheme not in ("http", "https") or not u.netloc or not hote:
+        return False
+    if "@" in u.netloc or u.query or u.fragment or u.path not in ("", "/"):
+        return False
+    if u.scheme == "http" and hote not in ("127.0.0.1", "::1", "localhost") and not _AVERTI_HTTP:
+        _AVERTI_HTTP = True
+        logger.warning("Pont Bibler en http vers un hote non local (%s) : le jeton circule en clair", hote)
+    return True
+
+
 def configure():
-    """True si l'URL et un secret de 32 caracteres au moins sont presents."""
-    return bool(_url_base()) and len(_secret()) >= SECRET_MIN
+    """True si l'URL (valide) et un secret de 32 caracteres au moins sont presents."""
+    url = _url_base()
+    return bool(url) and _url_valide(url) and len(_secret()) >= SECRET_MIN
 
 
 def _session():

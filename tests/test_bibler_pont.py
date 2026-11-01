@@ -84,7 +84,8 @@ def test_claims_du_jeton(env):
 
 def test_chemin_refuse(env, monkeypatch):
     _session(monkeypatch)
-    for chemin in ("/api/v1/../x", "http://x/api/v1/", "/autre", "/api/v1//x"):
+    for chemin in ("/api/v1/../x", "http://x/api/v1/", "/autre", "/api/v1//x",
+                   "/api/v1/postes/%2e%2e/x", "/api/v1/%2f"):
         with pytest.raises(ValueError):
             bibler_pont.lire(chemin)
 
@@ -166,3 +167,30 @@ def test_idempotence_en_tete(env, monkeypatch):
 def test_lire_binaire(env, monkeypatch):
     _session(monkeypatch, reponse=FauxReponse(200, brut=b"PNG", ctype="image/png"))
     assert bibler_pont.lire_binaire("/api/v1/postes/1/photo") == (b"PNG", "image/png")
+
+
+@pytest.mark.parametrize("url,attendu", [
+    ("ftp://x", False),
+    ("http://user:pw@h", False),
+    ("http://h/?a=1", False),
+    ("http://h#f", False),
+    ("http://h/chemin", False),
+    ("http://127.0.0.1:5010", True),
+    ("https://bibler.lemans.org", True),
+])
+def test_validation_url(monkeypatch, url, attendu):
+    monkeypatch.setenv("COCKPIT_PONT_URL_BIBLER", url)
+    monkeypatch.setenv("COCKPIT_PONT_SECRET_BIBLER", SECRET)
+    assert bibler_pont.configure() is attendu
+    if not attendu:
+        with pytest.raises(bibler_pont.BiblerNonConfigure):
+            bibler_pont.lire("/api/v1/postes")
+
+
+def test_avertissement_http_une_fois(monkeypatch, caplog):
+    monkeypatch.setattr(bibler_pont, "_AVERTI_HTTP", False)
+    monkeypatch.setenv("COCKPIT_PONT_URL_BIBLER", "http://bibler.exemple")
+    monkeypatch.setenv("COCKPIT_PONT_SECRET_BIBLER", SECRET)
+    with caplog.at_level("WARNING"):
+        assert bibler_pont.configure() and bibler_pont.configure()
+    assert len([r for r in caplog.records if "http" in r.getMessage()]) == 1
