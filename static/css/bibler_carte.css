@@ -1,0 +1,313 @@
+/* ==========================================================================
+   Couche "Personnels en poste" (Bibler) sur la carte d'accueil
+   (bibler_carte.js). Reprend les variables de style.css.
+   ========================================================================== */
+
+/* Barre compacte + bandeau, en haut au centre de la carte */
+.bibler-haut {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: min(620px, calc(100% - 120px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: Outfit, sans-serif;
+  font-size: 0.84rem;
+}
+.bibler-haut[hidden] { display: none; }
+
+.bibler-barre {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.bibler-temps { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+
+.bibler-btn,
+.bibler-heure,
+.bibler-champ {
+  height: 30px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  padding: 0 10px;
+}
+.bibler-btn { cursor: pointer; white-space: nowrap; }
+.bibler-btn:hover:not(:disabled) { color: var(--brand); border-color: var(--brand); }
+.bibler-btn:disabled { color: var(--muted); cursor: default; opacity: 0.8; }
+.bibler-btn.active,
+.bibler-heure.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.bibler-heure { padding: 0 6px; width: 190px; }
+.bibler-heure.active::-webkit-calendar-picker-indicator { filter: invert(1); }
+
+.bibler-recherche { position: relative; flex: 1 1 auto; min-width: 120px; }
+.bibler-champ { width: 100%; }
+.bibler-champ:focus,
+.bibler-heure:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--brand); }
+
+.bibler-suggestions {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.bibler-suggestions.open { display: block; }
+.bibler-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.bibler-suggestion:hover,
+.bibler-suggestion.active { background: var(--brand-light); }
+.bibler-suggestion-texte { flex: 1 1 auto; min-width: 0; }
+.bibler-suggestion-texte small { display: block; color: var(--muted); font-size: 0.75rem; }
+.bibler-suggestion-vide { padding: 6px 10px; color: var(--muted); }
+.bibler-pastille {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.bibler-sans-position {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.bibler-bandeau {
+  align-self: center;
+  max-width: 100%;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  font-weight: 500;
+  text-align: center;
+}
+.bibler-bandeau[hidden] { display: none; }
+.bibler-bandeau-erreur { background: var(--danger); border-color: var(--danger); color: #fff; }
+.bibler-bandeau-prevu {
+  background: var(--brand-strong);
+  border: 1px dashed #fff;
+  color: #fff;
+}
+.bibler-bandeau-reel { background: var(--text); border-color: var(--text); color: #fff; }
+
+/* Grappes (zoom < 15) */
+.bibler-grappe {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  color: #fff;
+  font: 600 12px/1 Outfit, sans-serif;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+}
+.bibler-etat-pourvu { background: #16a34a; }
+.bibler-etat-incomplet,
+.bibler-etat-en_retard { background: #f59e0b; }
+.bibler-etat-vide { background: #dc2626; }
+.bibler-etat-a_venir { background: #94a3b8; }
+.bibler-grappe-consigne { border: 4px solid #7c3aed; }
+.bibler-grappe.bibler-prevu { border-style: dashed; }
+.bibler-grise { opacity: 0.4; }
+
+.bibler-infobulle { font-family: Outfit, sans-serif; font-size: 0.8rem; line-height: 1.35; }
+.bibler-infobulle-consigne { color: #7c3aed; font-weight: 600; }
+
+/* Panneau du poste */
+.bibler-panneau {
+  position: absolute;
+  top: 96px;
+  right: 56px;
+  bottom: 10px;
+  z-index: 1000;
+  width: 340px;
+  max-width: calc(100% - 76px);
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  font-family: Outfit, sans-serif;
+  font-size: 0.84rem;
+  overflow: hidden;
+}
+.bibler-panneau[hidden] { display: none; }
+
+.bibler-panneau-entete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.bibler-panneau-titre { font-weight: 700; font-size: 0.95rem; }
+.bibler-panneau-fermer {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+}
+.bibler-panneau-fermer:hover { color: var(--text); }
+.bibler-panneau-fermer .material-symbols-outlined { font-size: 18px; }
+
+.bibler-panneau-tete { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.bibler-affectation { font-weight: 600; margin-bottom: 6px; }
+.bibler-etat-ligne { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bibler-etat-puce {
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.bibler-effectif { font-weight: 600; }
+.bibler-tag-prevu,
+.bibler-tag-reel,
+.bibler-tag-grise {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+}
+.bibler-tag-prevu { border: 1px dashed var(--brand); color: var(--brand); }
+.bibler-tag-reel { border: 1px solid var(--line); color: var(--muted); }
+.bibler-tag-grise { background: var(--danger-light); color: var(--danger); }
+
+.bibler-panneau-corps { flex: 1 1 auto; overflow-y: auto; padding: 4px 14px 14px; }
+.bibler-panneau-info { padding: 14px; color: var(--muted); }
+.bibler-panneau-erreur { color: var(--danger); }
+
+.bibler-section { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.bibler-section:last-child { border-bottom: none; }
+.bibler-section-titre {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.bibler-chemin { color: var(--muted); margin-bottom: 4px; }
+.bibler-libelle { color: var(--muted); }
+.bibler-vide { color: var(--muted); font-style: italic; }
+
+.bibler-details { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.bibler-details summary { cursor: pointer; font-weight: 600; }
+.bibler-details p,
+.bibler-details ol,
+.bibler-details ul { margin: 6px 0; white-space: pre-line; }
+.bibler-details ol,
+.bibler-details ul { padding-left: 18px; }
+
+.bibler-specimens {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+.bibler-specimen {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.bibler-specimen img { width: 100%; height: 70px; object-fit: contain; background: var(--bg); }
+.bibler-specimen.sans-visuel::before {
+  content: "";
+  display: block;
+  height: 70px;
+  background: var(--bg);
+}
+.bibler-specimen figcaption { padding: 4px 6px; display: flex; flex-direction: column; gap: 3px; }
+.bibler-specimen-libelle { font-size: 0.75rem; line-height: 1.2; }
+.bibler-controle {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: var(--prep-none-bg);
+  color: var(--prep-none-fg);
+}
+.bibler-controle-scan { background: var(--brand-light); color: var(--brand); }
+.bibler-controle-visuel { background: var(--warning-light); color: #92400e; }
+
+.bibler-agents,
+.bibler-shifts,
+.bibler-consignes { list-style: none; margin: 0; padding: 0; }
+.bibler-agents li,
+.bibler-shifts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+}
+.bibler-agent-nom { font-weight: 500; }
+.bibler-agent-detail,
+.bibler-shift-agents { color: var(--muted); text-align: right; }
+.bibler-shift-format { font-variant-numeric: tabular-nums; font-weight: 500; }
+
+.bibler-consigne {
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border-left: 3px solid #7c3aed;
+  background: var(--bg);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.bibler-consigne-titre { font-weight: 600; display: flex; justify-content: space-between; gap: 6px; }
+.bibler-consigne-priorite { color: var(--muted); font-weight: 500; font-size: 0.72rem; white-space: nowrap; }
+.bibler-consigne-texte { margin-top: 3px; white-space: pre-line; }
+.bibler-consigne-meta { margin-top: 3px; color: var(--muted); font-size: 0.72rem; }
+
+.bibler-panneau-actions:empty { display: none; }
+
+/* Telephone : barre pleine largeur, panneau en bas */
+@media (max-width: 700px) {
+  .bibler-haut { top: 52px; width: calc(100% - 20px); }
+  .bibler-barre { flex-wrap: wrap; }
+  .bibler-heure { width: 170px; }
+  .bibler-recherche { flex-basis: 100%; order: 3; }
+  .bibler-panneau {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-width: none;
+    max-height: 55%;
+  }
+}

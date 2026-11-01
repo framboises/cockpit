@@ -955,6 +955,11 @@ if (window.MomentusLieu) {
 }
 </script>
 <script src="{{ url_for('static', filename='js/map_view.js') }}"></script>
+{% if bibler_allowed is defined and bibler_allowed() %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bibler_carte.css') }}">
+<script nonce="{{ nonce }}">window.BIBLER_PUBLISH = {{ 'true' if bibler_publish_allowed() else 'false' }};</script>
+<script src="{{ url_for('static', filename='js/bibler_carte.js') }}"></script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>
 <script src="{{ url_for('static', filename='js/controle_dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/musee_block.js') }}"></script>

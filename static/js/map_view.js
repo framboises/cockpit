@@ -386,12 +386,14 @@
   //   plein ecran, fond de carte, carroyage ; mesures pliees derriere un
   //   bouton "Mesures" ;
   // - DROITE (ce qui est affiche), pliee derriere un bouton "oeil" :
-  //   preferences, portes, PMV, Momentus, filtre et "ignorer" main courante
+  //   preferences, portes, PMV, Momentus, personnels en poste (Bibler,
+  //   bibler_carte.js), filtre et "ignorer" main courante
   //   (ces deux-la sont ajoutes plus tard par pcorg.js : observes).
   var LEFT_TOOLS = [".cockpit-recenter-ctrl", ".cockpit-fullscreen-ctrl", ".cockpit-tile-ctrl",
                     ".cockpit-grid-ctrl", ".cockpit-grid25-ctrl"];
   var RIGHT_DATA = [".cockpit-prefs-ctrl", ".cockpit-portes-ctrl", ".cockpit-pmv-ctrl",
-                    ".cockpit-momentus-ctrl", ".pcorg-map-filter-ctrl", ".pcorg-ignore-all-ctrl"];
+                    ".cockpit-momentus-ctrl", ".cockpit-bibler-ctrl", ".pcorg-map-filter-ctrl",
+                    ".pcorg-ignore-all-ctrl"];
 
   function setupMapTools() {
     var container = map.getContainer();
@@ -1751,6 +1753,10 @@
     const ev = window.selectedEvent;
     const yr = window.selectedYear;
     if (!ev || !yr) return;
+
+    // Signal des couches externes (bibler_carte.js) : evenement / annee
+    // peut-etre changes, carte affichee.
+    document.dispatchEvent(new CustomEvent("cockpit:map-reload", { detail: { event: ev, year: yr } }));
 
     // Clear existing
     clearAllLayers();
