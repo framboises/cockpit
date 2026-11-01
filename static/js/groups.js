@@ -660,6 +660,8 @@
       if(row) row.style.display = "";
     });
     if(groupForm.elements.can_convert_declaration) groupForm.elements.can_convert_declaration.checked = false;
+    if(groupForm.elements.bibler_postes) groupForm.elements.bibler_postes.checked = false;
+    if(groupForm.elements.can_publish_consigne) groupForm.elements.can_publish_consigne.checked = false;
     if(groupForm.elements.dispatch_manager) groupForm.elements.dispatch_manager.checked = false;
     if(groupForm.elements.fiche_lecture_seule) groupForm.elements.fiche_lecture_seule.checked = false;
     // Nouveau groupe : pas de creation tant que l'admin ne l'accorde pas
@@ -696,6 +698,8 @@
                    fiche_lecture_seule: !!(groupForm.elements.fiche_lecture_seule && groupForm.elements.fiche_lecture_seule.checked),
                    can_create_fiche: !!(groupForm.elements.can_create_fiche && groupForm.elements.can_create_fiche.checked),
                    can_convert_declaration: !!(groupForm.elements.can_convert_declaration && groupForm.elements.can_convert_declaration.checked),
+                   bibler_postes: !!(groupForm.elements.bibler_postes && groupForm.elements.bibler_postes.checked),
+                   can_publish_consigne: !!(groupForm.elements.can_publish_consigne && groupForm.elements.can_publish_consigne.checked),
                    alfred_chat: !!(groupForm.elements.alfred_chat && groupForm.elements.alfred_chat.checked),
                    operateur: !!(groupForm.elements.operateur && groupForm.elements.operateur.checked),
                    allowed_categories: allowedCats};
@@ -782,6 +786,8 @@
         if(row) row.style.display = isSys ? "none" : "";
       });
       if(groupForm.elements.can_convert_declaration) groupForm.elements.can_convert_declaration.checked = !!(g.can_convert_declaration);
+      if(groupForm.elements.bibler_postes) groupForm.elements.bibler_postes.checked = !!(g.bibler_postes);
+      if(groupForm.elements.can_publish_consigne) groupForm.elements.can_publish_consigne.checked = !!(g.can_publish_consigne);
       if(groupForm.elements.dispatch_manager) groupForm.elements.dispatch_manager.checked = !!(g.dispatch_manager);
       if(groupForm.elements.fiche_lecture_seule) groupForm.elements.fiche_lecture_seule.checked = !!(g.fiche_lecture_seule);
       // Creation : utile aussi pour le groupe par defaut (utilisateurs sans

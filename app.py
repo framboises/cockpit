@@ -1103,7 +1103,9 @@ def _inject_page_access():
     (barre laterale)."""
     return {"page_allowed": _page_allowed_for_request,
             "admin_page_allowed": _admin_page_allowed_for_request,
-            "alfred_chat_allowed": _alfred_chat_allowed_for_request}
+            "alfred_chat_allowed": _alfred_chat_allowed_for_request,
+            "bibler_allowed": _bibler_allowed_for_request,
+            "bibler_publish_allowed": _bibler_publish_allowed_for_request}
 
 
 def _user_dispatch_categories(payload):
@@ -1189,6 +1191,46 @@ def _user_can_treat_declaration(payload):
     if payload.get("is_super_admin") or payload.get("app_role") == "admin":
         return True
     return any(g.get("can_convert_declaration") for g in _user_group_docs(payload))
+
+
+def _user_can_view_bibler(payload):
+    """Postes Bibler sur la carte : droit de groupe `bibler_postes` (bibler_postes.py)."""
+    import bibler_postes
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return bibler_postes.peut_voir(payload, [])
+    return bibler_postes.peut_voir(payload, _user_group_docs(payload))
+
+
+def _user_can_publish_consigne(payload):
+    """Donner des consignes sur les postes : `can_publish_consigne` + `bibler_postes`."""
+    import bibler_postes
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return bibler_postes.peut_publier(payload, [])
+    return bibler_postes.peut_publier(payload, _user_group_docs(payload))
+
+
+def _bibler_allowed_for_request():
+    payload = _request_payload_peek()
+    if not payload:
+        return False
+    if not hasattr(g, "_bibler_voir"):
+        try:
+            g._bibler_voir = _user_can_view_bibler(payload)
+        except Exception:
+            g._bibler_voir = False
+    return g._bibler_voir
+
+
+def _bibler_publish_allowed_for_request():
+    payload = _request_payload_peek()
+    if not payload:
+        return False
+    if not hasattr(g, "_bibler_publier"):
+        try:
+            g._bibler_publier = _user_can_publish_consigne(payload)
+        except Exception:
+            g._bibler_publier = False
+    return g._bibler_publier
 
 
 _PCORG_CREATE_ERROR = ({"error": "Votre groupe ne permet pas de creer des fiches",
@@ -2810,6 +2852,8 @@ app.register_blueprint(DA.dispatch_bp)
 # (routes user, CSRF ACTIF).
 from declarations import declarations_bp, field_declaration_create, field_declaration_comment
 app.register_blueprint(declarations_bp)
+from bibler_postes import bibler_bp
+app.register_blueprint(bibler_bp)
 csrf.exempt(field_declaration_create)
 csrf.exempt(field_declaration_comment)
 # Applications externes (integrations.py) : Friday... Point d'entree signe
@@ -5091,6 +5135,8 @@ def create_group():
         'fiche_lecture_seule': bool(data.get('fiche_lecture_seule', False)),
         'can_create_fiche': bool(data.get('can_create_fiche', False)),
         'can_convert_declaration': bool(data.get('can_convert_declaration', False)),
+        'bibler_postes': bool(data.get('bibler_postes', False)),
+        'can_publish_consigne': bool(data.get('can_publish_consigne', False)),
         'alfred_chat': bool(data.get('alfred_chat', False)),
         'operateur': bool(data.get('operateur', False)),
         'allowed_pages': _parse_allowed_pages(data.get('allowed_pages')),
@@ -5161,6 +5207,10 @@ def update_group(gid):
         patch['can_create_fiche'] = bool(data.get('can_create_fiche', False))
     if 'can_convert_declaration' in data:
         patch['can_convert_declaration'] = bool(data.get('can_convert_declaration', False))
+    if 'bibler_postes' in data:
+        patch['bibler_postes'] = bool(data.get('bibler_postes', False))
+    if 'can_publish_consigne' in data:
+        patch['can_publish_consigne'] = bool(data.get('can_publish_consigne', False))
     if 'alfred_chat' in data and not is_admin_grp:
         patch['alfred_chat'] = bool(data.get('alfred_chat', False))
     # Prise de poste operateur (docs/claude/operateurs.md) : jamais pour les admins
