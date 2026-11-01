@@ -1210,9 +1210,18 @@ def _user_can_publish_consigne(payload):
     return bibler_postes.peut_publier(payload, _user_group_docs(payload))
 
 
+def _bibler_pont_configure():
+    """Spec 4.1 : pont non configure -> fonctionnalite masquee (oeil, sidebar, formulaire)."""
+    import bibler_pont
+    try:
+        return bibler_pont.configure()
+    except Exception:
+        return False
+
+
 def _bibler_allowed_for_request():
     payload = _request_payload_peek()
-    if not payload:
+    if not payload or not _bibler_pont_configure():
         return False
     if not hasattr(g, "_bibler_voir"):
         try:
@@ -1224,7 +1233,7 @@ def _bibler_allowed_for_request():
 
 def _bibler_publish_allowed_for_request():
     payload = _request_payload_peek()
-    if not payload:
+    if not payload or not _bibler_pont_configure():
         return False
     if not hasattr(g, "_bibler_publier"):
         try:

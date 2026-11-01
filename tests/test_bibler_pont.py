@@ -194,3 +194,20 @@ def test_avertissement_http_une_fois(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         assert bibler_pont.configure() and bibler_pont.configure()
     assert len([r for r in caplog.records if "http" in r.getMessage()]) == 1
+
+
+def test_fonction_masquee_si_pont_non_configure(monkeypatch):
+    """Spec 4.1 : pont non configure -> ni oeil sur la carte, ni page, ni formulaire (meme pour un admin)."""
+    import app as A
+    admin = {"email": "a@aco.fr", "app_role": "admin"}
+    monkeypatch.setattr(A, "_request_payload_peek", lambda: admin)
+    monkeypatch.delenv("COCKPIT_PONT_URL_BIBLER", raising=False)
+    monkeypatch.delenv("COCKPIT_PONT_SECRET_BIBLER", raising=False)
+    with A.app.test_request_context("/"):
+        assert A._bibler_allowed_for_request() is False
+        assert A._bibler_publish_allowed_for_request() is False
+    monkeypatch.setenv("COCKPIT_PONT_URL_BIBLER", "http://127.0.0.1:5010")
+    monkeypatch.setenv("COCKPIT_PONT_SECRET_BIBLER", "s" * 40)
+    with A.app.test_request_context("/"):
+        assert A._bibler_allowed_for_request() is True
+        assert A._bibler_publish_allowed_for_request() is True
