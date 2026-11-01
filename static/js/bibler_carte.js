@@ -43,7 +43,7 @@
   var map = null;
   var ctrlBtn = null;
   var couche = null;
-  var barre = null;
+  var haut = null;            // bloc .bibler-haut (barre compacte + bandeau)
   var bandeau = null;
   var champHeure = null;
   var btnDirect = null;
@@ -63,6 +63,7 @@
   var timer = null;
   var genListe = 0;
   var genFiche = 0;
+  var genConsignes = 0;
   var dernierChargement = 0;
   var posteOuvert = null;
   var suggestionsCourantes = [];
@@ -137,7 +138,7 @@
     if (code === "evenement_inconnu") {
       return { code: "evenement_inconnu", texte: "Evenement inconnu de Bibler" };
     }
-    if (rep.statut === 403) return { code: "droit", texte: "Droit insuffisant pour voir les postes Bibler" };
+    if (code === "droit_insuffisant") return { code: "droit", texte: "Droit insuffisant pour voir les postes Bibler" };
     if (code === "poste_inconnu") return { code: code, texte: "Poste inconnu ou inactif dans Bibler" };
     return { code: code || "erreur", texte: c.message || c.error || ("Erreur Bibler (" + rep.statut + ")") };
   }
@@ -175,7 +176,7 @@
 
   function construireBarre() {
     var conteneur = map.getContainer();
-    barre = el("div", "bibler-barre");
+    var barre = el("div", "bibler-barre");
     barre.id = "bibler-barre";
 
     var temps = el("div", "bibler-temps");
@@ -193,7 +194,6 @@
       arreterTimer();
       majTemps();
       charger();
-      if (posteOuvert !== null) ouvrirPoste(posteOuvert, true);
     });
     temps.appendChild(btnDirect);
     temps.appendChild(champHeure);
@@ -230,13 +230,13 @@
     bandeau.setAttribute("role", "status");
     bandeau.hidden = true;
 
-    var bloc = el("div", "bibler-haut");
-    bloc.appendChild(barre);
-    bloc.appendChild(bandeau);
-    L.DomEvent.disableClickPropagation(bloc);
-    L.DomEvent.disableScrollPropagation(bloc);
-    conteneur.appendChild(bloc);
-    barre = bloc;
+    haut = el("div", "bibler-haut");
+    haut.id = "bibler-haut";
+    haut.appendChild(barre);
+    haut.appendChild(bandeau);
+    L.DomEvent.disableClickPropagation(haut);
+    L.DomEvent.disableScrollPropagation(haut);
+    conteneur.appendChild(haut);
     majTemps();
   }
 
@@ -247,7 +247,6 @@
     majTemps();
     charger();
     demarrerTimer();
-    if (posteOuvert !== null) ouvrirPoste(posteOuvert, true);
   }
 
   function majTemps() {
@@ -262,15 +261,16 @@
 
   function chargerCompteurConsignes() {
     var cle = cleCourante();
+    var gen = ++genConsignes;
     fetch("/api/bibler/consignes?" + parametres(false), { credentials: "same-origin" })
       .then(lireJson)
       .then(function (rep) {
-        if (!actif || cle !== cleCourante()) return;
+        if (gen !== genConsignes || !actif || cle !== cleCourante()) return;
         var liste = rep.statut === 200 && rep.corps && rep.corps.consignes;
         if (!Array.isArray(liste)) { majCompteurConsignes(null); return; }
         majCompteurConsignes(liste.filter(function (c) { return c && c.etat === "en_vigueur"; }).length);
       })
-      .catch(function () { majCompteurConsignes(null); });
+      .catch(function () { if (gen === genConsignes) majCompteurConsignes(null); });
   }
 
   // Bandeau : erreur, ou mode de la vue figee ("Presence reelle a" / "Prevu a")
@@ -288,7 +288,7 @@
       texte = "Prevu a " + heureEtJour(donnees.instant) +
         " : planning seulement, aucune presence constatee (vert = prevu)";
       bandeau.classList.add("bibler-bandeau-prevu");
-    } else if (donnees && !direct) {
+    } else if (donnees && !donnees.direct) {
       texte = "Presence reelle a " + heureEtJour(donnees.instant);
       bandeau.classList.add("bibler-bandeau-reel");
     }
@@ -296,7 +296,7 @@
     if (texte && sans && !erreurCode) texte += " - " + sans + " poste(s) sans position (recherche)";
     bandeau.textContent = texte;
     bandeau.hidden = !texte;
-    if (btnDirect && donnees && direct && !erreurCode) {
+    if (btnDirect && donnees && donnees.direct && !erreurCode) {
       btnDirect.title = "Presence en direct, actualisee chaque minute (maj " + heure(donnees.instant) + ")";
     }
   }
@@ -313,12 +313,15 @@
     if (cle !== cleVue) chargerCompteurConsignes();
     cleVue = cle;
     dernierChargement = Date.now();
-    fetch("/api/bibler/postes?" + parametres(true), { credentials: "same-origin" })
+    var params = parametres(true);
+    var enDirect = direct;
+    fetch("/api/bibler/postes?" + params, { credentials: "same-origin" })
       .then(lireJson)
       .then(function (rep) {
         if (gen !== genListe || !actif) return;
         if (rep.statut === 200 && rep.corps && Array.isArray(rep.corps.postes)) {
-          donnees = { mode: rep.corps.mode, instant: rep.corps.instant, postes: rep.corps.postes };
+          donnees = { mode: rep.corps.mode, instant: rep.corps.instant, postes: rep.corps.postes,
+                      params: params, direct: enDirect };
           cleChargee = cle;
           grise = false;
           erreurCode = "";
@@ -328,13 +331,32 @@
         }
         rendre();
         majBandeau();
+        synchroniserPanneau();
       })
       .catch(function () {
         if (gen !== genListe || !actif) return;
         traiterErreurListe({ code: "indisponible", texte: "Bibler indisponible" }, cle);
         rendre();
         majBandeau();
+        synchroniserPanneau();
       });
+  }
+
+  // Le panneau suit toujours la liste affichee (meme instant, meme mode que
+  // le bandeau) : apres chaque chargement de la liste, la fiche est relue
+  // avec les parametres de cette liste, ou reaffichee telle quelle (grisee)
+  // si Bibler ne repond plus.
+  function synchroniserPanneau() {
+    if (posteOuvert === null || !panneau || panneau.hidden) return;
+    var fiche = panneau._fiche;
+    var memeFiche = fiche && fiche.numero === posteOuvert;
+    if (donnees && !grise) {
+      ouvrirPoste(posteOuvert, true);
+    } else if (memeFiche && donnees && panneau._params === donnees.params) {
+      remplirPanneau(fiche, panneau._params);
+    } else if (!donnees) {
+      afficherErreurPanneau(posteOuvert, erreurCode || "Bibler indisponible");
+    }
   }
 
   function traiterErreurListe(err, cle) {
@@ -558,6 +580,9 @@
   }
 
   function ouvrirPoste(numero, silencieux) {
+    // Parametres de la liste affichee : la fiche a le meme instant et le meme
+    // mode que le bandeau (sinon les agents d'une heure prevue seraient lus
+    // comme presents).
     numero = parseInt(numero, 10);
     if (isNaN(numero)) return;
     if (!actif) activer();
@@ -571,30 +596,53 @@
       panneau.appendChild(el("div", "bibler-panneau-info", "Chargement..."));
       panneau.hidden = false;
     }
-    fetch("/api/bibler/postes/" + numero + "?" + parametres(true), { credentials: "same-origin" })
+    var params = donnees ? donnees.params : parametres(true);
+    function aJour() {
+      return gen === genFiche && posteOuvert === numero && (!donnees || donnees.params === params);
+    }
+    function echec(err) {
+      var fiche = panneau._fiche;
+      if (err.code === "indisponible" && fiche && fiche.numero === numero && panneau._params === params) {
+        remplirPanneau(fiche, params);   // derniere fiche gardee, etiquetee "Bibler indisponible"
+      } else {
+        afficherErreurPanneau(numero, err.texte);
+      }
+    }
+    fetch("/api/bibler/postes/" + numero + "?" + params, { credentials: "same-origin" })
       .then(lireJson)
       .then(function (rep) {
-        if (gen !== genFiche || posteOuvert !== numero) return;
+        if (!aJour()) return;
         if (rep.statut === 200 && rep.corps && rep.corps.numero !== undefined) {
-          remplirPanneau(rep.corps);
+          remplirPanneau(rep.corps, params);
         } else {
-          afficherErreurPanneau(numero, erreurDe(rep).texte);
+          echec(erreurDe(rep));
         }
       })
       .catch(function () {
-        if (gen !== genFiche || posteOuvert !== numero) return;
-        afficherErreurPanneau(numero, "Bibler indisponible");
+        if (!aJour()) return;
+        echec({ code: "indisponible", texte: "Bibler indisponible" });
       });
   }
 
   function afficherErreurPanneau(numero, texte) {
+    panneau._fiche = null;
+    panneau._params = null;
     viderPanneau();
     panneau.appendChild(enteteSimple("Poste " + numero));
     panneau.appendChild(el("div", "bibler-panneau-info bibler-panneau-erreur", texte));
     panneau.hidden = false;
   }
 
-  function remplirPanneau(f) {
+  function remplirPanneau(f, params) {
+    // Reaffichage du meme poste : sections ouvertes et defilement gardes
+    var ouverts = {}, defilement = 0;
+    if (panneau._fiche && panneau._fiche.numero === f.numero) {
+      Array.prototype.forEach.call(panneau.querySelectorAll("details[open] > summary"), function (s) {
+        ouverts[s.textContent] = true;
+      });
+      var ancien = panneau.querySelector(".bibler-panneau-corps");
+      if (ancien) defilement = ancien.scrollTop;
+    }
     viderPanneau();
     var resume = donnees && donnees.postes.filter(function (p) { return p.numero === f.numero; })[0];
     var prevu = donnees && donnees.mode === "prevu";
@@ -610,7 +658,7 @@
       ligne.appendChild(el("span", "bibler-effectif",
         (resume.presents || 0) + "/" + (resume.planifies || 0) + (prevu ? " prevu(s)" : " present(s)")));
       if (prevu) ligne.appendChild(el("span", "bibler-tag-prevu", "Prevu a " + heureEtJour(donnees.instant)));
-      else if (!direct && donnees) ligne.appendChild(el("span", "bibler-tag-reel", "a " + heureEtJour(donnees.instant)));
+      else if (donnees && !donnees.direct) ligne.appendChild(el("span", "bibler-tag-reel", "a " + heureEtJour(donnees.instant)));
       if (grise) ligne.appendChild(el("span", "bibler-tag-grise", "Bibler indisponible"));
       tete.appendChild(ligne);
     }
@@ -765,7 +813,12 @@
 
     panneau.appendChild(corps);
     panneau._fiche = f;
+    panneau._params = params || null;
     panneau.hidden = false;
+    Array.prototype.forEach.call(panneau.querySelectorAll("details > summary"), function (s) {
+      if (ouverts[s.textContent]) s.parentNode.open = true;
+    });
+    if (defilement) corps.scrollTop = defilement;
   }
 
   // ------------------------------------------------------------------------
@@ -810,7 +863,7 @@
   }
 
   function surVisibilite() {
-    if (!actif || !direct || document.hidden) return;
+    if (!actif || !direct || document.hidden || !visible()) return;
     if (Date.now() - dernierChargement > DIRECT_MS) charger();
   }
 
@@ -820,9 +873,9 @@
     if (ctrlBtn) ctrlBtn.classList.add("active");
     if (!couche) couche = L.layerGroup();
     couche.addTo(map);
-    if (!barre) construireBarre();
+    if (!haut) construireBarre();
     if (!panneau) construirePanneau();
-    barre.hidden = false;
+    haut.hidden = false;
     map.on("zoomend", rendre);
     donnees = null;
     cleChargee = "";
@@ -842,7 +895,7 @@
     if (ctrlBtn) ctrlBtn.classList.remove("active");
     map.off("zoomend", rendre);
     if (couche) { couche.clearLayers(); map.removeLayer(couche); }
-    if (barre) barre.hidden = true;
+    if (haut) haut.hidden = true;
     cleChargee = "";
     cleVue = "";
     donnees = null;
@@ -873,13 +926,15 @@
   };
 
   // La carte est creee a la premiere ouverture de la vue carte (initMap de
-  // map_view.js, synchrone) : attente legere jusqu'a ce qu'elle existe.
+  // map_view.js, synchrone, suivi de loadEventMarkers qui emet
+  // "cockpit:map-reload") : verification immediate, sinon au premier signal.
   function attendreCarte() {
     if (typeof L === "undefined") return;
     if (initialiser()) return;
-    var essai = setInterval(function () {
-      if (initialiser()) clearInterval(essai);
-    }, 700);
+    function auSignal() {
+      if (initialiser()) document.removeEventListener("cockpit:map-reload", auSignal);
+    }
+    document.addEventListener("cockpit:map-reload", auSignal);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", attendreCarte);
