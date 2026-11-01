@@ -655,7 +655,7 @@
     if(closeRow) closeRow.style.display = "";
     var closeCheck = groupForm.elements.can_close_fiche;
     if(closeCheck) closeCheck.checked = false;
-    ["group-dispatch-row", "group-readonly-row", "group-decl-row"].forEach(function(rid){
+    ["group-dispatch-row", "group-readonly-row", "group-decl-row", "group-bibler-row", "group-consigne-row"].forEach(function(rid){
       var row = document.getElementById(rid);
       if(row) row.style.display = "";
     });
@@ -781,7 +781,7 @@
       if(closeCheck) closeCheck.checked = !!(g.can_close_fiche);
       // Responsable de service / lecture seule : sans objet pour les groupes
       // systeme (admin = tous les droits, defaut = utilisateurs sans groupe)
-      ["group-dispatch-row", "group-readonly-row", "group-decl-row"].forEach(function(rid){
+      ["group-dispatch-row", "group-readonly-row", "group-decl-row", "group-bibler-row", "group-consigne-row"].forEach(function(rid){
         var row = document.getElementById(rid);
         if(row) row.style.display = isSys ? "none" : "";
       });

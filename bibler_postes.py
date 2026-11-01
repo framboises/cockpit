@@ -69,7 +69,8 @@ def _lecture(f):
         except bibler_pont.BiblerIndisponible:
             return jsonify({"error": "Bibler indisponible", "code": "bibler_indisponible"}), 502
         except bibler_pont.BiblerErreur as e:
-            corps = e.corps if isinstance(e.corps, (dict, list)) else {"error": str(e.corps)}
+            corps = e.corps if isinstance(e.corps, (dict, list)) and e.corps else \
+                {"error": "Erreur Bibler", "code": "bibler_erreur"}
             return jsonify(corps), e.statut
     return wrapper
 
@@ -101,9 +102,13 @@ def poste(numero):
 def visuel(nom):
     if not _RE_VISUEL.match(nom):
         return _non_trouve()
-    octets, ctype = bibler_pont.lire_binaire("/api/v1/visuels/" + nom, ttl=86400)
+    octets, ctype = bibler_pont.lire_binaire("/api/v1/specimens/visuel/" + nom, ttl=86400)
+    ctype = (ctype or "").split(";")[0].strip().lower()
+    if ctype not in ("image/jpeg", "image/png"):
+        return _non_trouve()
     rep = Response(octets, mimetype=ctype)
     rep.headers["Content-Type"] = ctype
+    rep.headers["X-Content-Type-Options"] = "nosniff"
     rep.headers["Cache-Control"] = "private, max-age=86400"
     return rep
 
@@ -111,7 +116,8 @@ def visuel(nom):
 @bibler_bp.route("/api/bibler/formats")
 @_lecture
 def formats():
-    return jsonify(bibler_pont.lire("/api/v1/formats", ttl=300))
+    params = _params("event", "year", "tout", "postes", "secteurs", "zones", "departements")
+    return jsonify(bibler_pont.lire("/api/v1/vacations/formats", params=params, ttl=300))
 
 
 def _consignes(chemin, params):
@@ -121,19 +127,21 @@ def _consignes(chemin, params):
 @bibler_bp.route("/api/bibler/consignes")
 @_lecture
 def consignes():
-    return _consignes("/api/v1/consignes", request.args.to_dict())
+    return _consignes("/api/v1/consignes", _params("event", "year"))
 
 
 @bibler_bp.route("/api/bibler/consignes/cibles")
 @_lecture
 def consignes_cibles():
-    return _consignes("/api/v1/consignes/cibles", request.args.to_dict())
+    return _consignes("/api/v1/consignes/cibles", _params("event", "year", "q"))
 
 
 @bibler_bp.route("/api/bibler/consignes/apercu")
 @_lecture
 def consignes_apercu():
-    return _consignes("/api/v1/consignes/apercu", request.args.to_dict())
+    return _consignes("/api/v1/consignes/apercu", _params(
+        "event", "year", "tout", "postes", "secteurs", "zones", "departements",
+        "formats", "debut", "fin"))
 
 
 @bibler_bp.route("/api/bibler/consignes/<cid>")
@@ -141,4 +149,4 @@ def consignes_apercu():
 def consigne(cid):
     if not _RE_ID.match(cid):
         return _non_trouve()
-    return _consignes("/api/v1/consignes/" + cid, request.args.to_dict())
+    return _consignes("/api/v1/consignes/" + cid, {})

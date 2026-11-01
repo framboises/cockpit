@@ -55,16 +55,21 @@ def test_lecture_relayee(env):
 
 def test_relais_autres_routes(env):
     env.client.get("/api/bibler/postes/12?event=E&year=2026")
-    env.client.get("/api/bibler/formats")
-    env.client.get("/api/bibler/consignes?event=E&year=2026")
-    env.client.get("/api/bibler/consignes/cibles?event=E")
-    env.client.get("/api/bibler/consignes/apercu?event=E")
+    env.client.get("/api/bibler/formats?event=E&year=2026&tout=1&postes=1,2&junk=x")
+    env.client.get("/api/bibler/consignes?event=E&year=2026&junk=x")
+    env.client.get("/api/bibler/consignes/cibles?event=E&year=2026&q=n&junk=x")
+    env.client.get("/api/bibler/consignes/apercu?event=E&zones=z&debut=d&fin=f&junk=x")
     env.client.get("/api/bibler/consignes/" + "a1" * 12)
     chemins = [a[0] for a in env.appels]
-    assert chemins == ["/api/v1/postes/12", "/api/v1/formats", "/api/v1/consignes",
+    assert chemins == ["/api/v1/postes/12", "/api/v1/vacations/formats", "/api/v1/consignes",
                        "/api/v1/consignes/cibles", "/api/v1/consignes/apercu",
                        "/api/v1/consignes/" + "a1" * 12]
     assert env.appels[1][3] == 300
+    assert env.appels[1][1] == {"event": "E", "year": "2026", "tout": "1", "postes": "1,2"}
+    assert env.appels[2][1] == {"event": "E", "year": "2026"}
+    assert env.appels[3][1] == {"event": "E", "year": "2026", "q": "n"}
+    assert env.appels[4][1] == {"event": "E", "zones": "z", "debut": "d", "fin": "f"}
+    assert env.appels[5][1] == {}
     assert env.appels[2][2] == ("consignes:lire",)
 
 
@@ -82,7 +87,11 @@ def test_visuel(env):
     assert r.status_code == 200 and r.data == b"IMG"
     assert r.headers["Content-Type"] == "image/png"
     assert r.headers["Cache-Control"] == "private, max-age=86400"
-    assert vus == ["/api/v1/visuels/poste-1.png"]
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    env.mp.setattr(bibler_pont, "lire_binaire", lambda c, ttl=86400: (b"<svg/>", "image/svg+xml"))
+    assert env.client.get("/api/bibler/visuel/x.svg").status_code == 404
+    env.mp.setattr(bibler_pont, "lire_binaire", lambda c, ttl=86400: (b"IMG", "image/png"))
+    assert vus == ["/api/v1/specimens/visuel/poste-1.png"]
     assert env.client.get("/api/bibler/visuel/.cache").status_code == 404
     assert env.client.get("/api/bibler/visuel/a%25b").status_code == 404
 
@@ -109,6 +118,14 @@ def test_erreur_bibler_relayee(env):
     env.mp.setattr(bibler_pont, "lire", boom)
     r = env.client.get("/api/bibler/postes?event=X&year=1")
     assert r.status_code == 404 and r.get_json() == {"code": "evenement_inconnu"}
+
+
+def test_erreur_bibler_corps_vide(env):
+    def boom(*a, **k):
+        raise bibler_pont.BiblerErreur(400, None)
+    env.mp.setattr(bibler_pont, "lire", boom)
+    r = env.client.get("/api/bibler/formats")
+    assert r.status_code == 400 and r.get_json()["code"] == "bibler_erreur"
 
 
 def test_droits_groupe():
