@@ -53,6 +53,13 @@ MIN_CONF = 0.1  # detections renvoyees ; le seuil d'alerte est cote recepteur
 # SigLIP comme confiance (vehicules eblouis par leurs phares, silhouettes
 # de 30 px). 0 fausse alerte validee par l'operateur reclassee au test.
 SIG_REAL, SIG_YOLO_MIN = 0.6, 0.1
+# Seule exception ou SigLIP decide : un OISEAU quasi certain (>= BIRD_VETO)
+# annule une personne / un vehicule devine par YOLO sous BIRD_YOLO_MAX
+# (01/11/2026, 901 : YOLO personne 59 % et vehicule 71 % sur des oiseaux de
+# 10 px). Mesure sur 171 photos confirmees avec reponse operateur : oiseau
+# >= 0,8 = 5 fausses alertes, 0 vraie cible ; les autres categories NON
+# (grillage >= 0,9 = 31 vraies personnes derriere une cloture).
+BIRD_VETO, BIRD_YOLO_MAX = 0.9, 0.8
 
 # Classes COCO -> categorie
 CATEGORY = {
@@ -301,8 +308,13 @@ def verify():
     sig_p = sum(g["p"] for g in sig)
     if yolo_real >= SIG_YOLO_MIN and sig_p >= SIG_REAL and sig_p > yolo_real:
         real_conf, by = round(sig_p, 3), "detecteur+avis"
+    bird = next((g["p"] for g in guess if g["label"] == "oiseau"), 0.0)
+    if real_conf and bird >= BIRD_VETO and yolo_real < BIRD_YOLO_MAX:
+        real_conf, by = 0.0, "avis:oiseau"
     label = best["category"] if best else "rien"
-    if by != "detecteur" and sig:
+    if by == "avis:oiseau":
+        label = "oiseau"
+    elif by != "detecteur" and sig:
         label = max(sig, key=lambda g: g["p"])["label"]
     _STATS["checks"] += 1
     out = {
@@ -310,7 +322,7 @@ def verify():
         "yolo_conf": yolo_real,
         "by": by,
         "label": label,
-        "conf": real_conf if real_conf else (best["conf"] if best else 0.0),
+        "conf": real_conf if real_conf else round(bird, 3) if by == "avis:oiseau" else (best["conf"] if best else 0.0),
         "detections": dets[:6],
         "guess": guess,
         "ms": round((time.time() - t) * 1000),

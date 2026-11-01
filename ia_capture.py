@@ -17,7 +17,7 @@ from flask import jsonify, request
 from pymongo import DESCENDING
 
 import detection_arming as arming
-from detection import detection_bp, _ensure_db, _iso, _utc, _oid, _img, _who, _pub_ai
+from detection import detection_bp, _ensure_db, _iso, _utc, _oid, _img, _who, _pub_ai, portee
 
 STATES = ("fluide", "dense", "ralenti", "bouchon", "normal", "charge", "trop", "rien", "sol", "immobile")
 VOTES = ("up", "down")
@@ -602,13 +602,17 @@ def global_map():
     db = _ensure_db()
     now = datetime.now(timezone.utc)
     day0 = now.astimezone(arming.PARIS).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    # Ecartees (oiseau, branche... selon l'IA ou l'operateur) : comptees dans
+    # le total (traces pour l'entrainement), jamais "a traiter" ni "reelles"
     intr = {}
-    for r in db["hik_intrusions"].aggregate([
-            {"$match": {"started_at": {"$gte": day0.replace(tzinfo=None)}, "armed": {"$ne": False}}},
-            {"$group": {"_id": "$camera_id", "n": {"$sum": 1},
-                        "open": {"$sum": {"$cond": [{"$ne": ["$status", "closed"]}, 1, 0]}},
-                        "real": {"$sum": {"$cond": [{"$ne": ["$ai.status", "filtered"]}, 1, 0]}}}}]):
-        intr[str(r["_id"])] = r
+    for ep in db["hik_intrusions"].find(
+            {"started_at": {"$gte": day0.replace(tzinfo=None)}, "armed": {"$ne": False}},
+            {"camera_id": 1, "status": 1, "ai.status": 1, "ai.guess": 1, "ai_vote": 1}):
+        r = intr.setdefault(str(ep.get("camera_id")), {"n": 0, "open": 0, "real": 0})
+        pt = portee(ep)
+        r["n"] += 1
+        r["open"] += pt != "ecartee" and ep.get("status") != "closed"
+        r["real"] += pt == "alerte"
     states = {s["_id"]: s for s in db["ia_capture_state"].find({"_id": {"$regex": ":"}})}
     order = {"inconnu": -1, "fluide": 0, "dense": 1, "ralenti": 2, "bouchon": 3}
     out, unplaced = [], 0
@@ -667,14 +671,17 @@ def global_map_detail(cid):
     day0 = now.astimezone(arming.PARIS).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     # Intrusions du jour par canal : dans le planning (vraies intrusions),
     # a traiter, hors planning (gardees pour l'entrainement, jamais comptees)
+    # (ecartees par l'IA ou l'operateur : jamais "a traiter")
     istats = {}
-    for r in db["hik_intrusions"].aggregate([
-            {"$match": {"camera_id": d["_id"], "started_at": {"$gte": day0.replace(tzinfo=None)}}},
-            {"$group": {"_id": "$channel",
-                        "armed": {"$sum": {"$cond": [{"$ne": ["$armed", False]}, 1, 0]}},
-                        "open": {"$sum": {"$cond": [{"$and": [{"$ne": ["$armed", False]}, {"$eq": [{"$ifNull": ["$status", "new"]}, "new"]}]}, 1, 0]}},
-                        "offplan": {"$sum": {"$cond": [{"$eq": ["$armed", False]}, 1, 0]}}}}]):
-        istats[r["_id"]] = {"armed": r["armed"], "open": r["open"], "offplan": r["offplan"]}
+    for ep in db["hik_intrusions"].find(
+            {"camera_id": d["_id"], "started_at": {"$gte": day0.replace(tzinfo=None)}},
+            {"channel": 1, "armed": 1, "status": 1, "ai.status": 1, "ai.guess": 1, "ai_vote": 1}):
+        r = istats.setdefault(ep.get("channel"), {"armed": 0, "open": 0, "offplan": 0})
+        if ep.get("armed") is False:
+            r["offplan"] += 1
+            continue
+        r["armed"] += 1
+        r["open"] += ep.get("status", "new") == "new" and portee(ep) != "ecartee"
     chans = []
     for ch in d.get("channels") or []:
         types = [r.get("type") for r in ch.get("roles") or []]

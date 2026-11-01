@@ -271,8 +271,13 @@ _REAL_CATS = ("personne", "vehicule")
 DOUTE_MIN = 0.5
 # Requete Mongo equivalente a portee(ep) == "ecartee"
 ECARTEE_OR = [
-    {"ai_vote.vote": "down"},
-    {"ai.status": "filtered", "ai_vote.vote": {"$ne": "up"},
+    # Reponse de l'operateur : ni personne, ni vehicule, ni velo
+    {"ai_vote.truth": {"$exists": True, "$nin": [None, "personne", "vehicule", "velo"]}},
+    # Pouce seul (up = l'IA a eu raison) : filtree a raison, ou alerte a tort
+    {"ai_vote.truth": {"$in": [None]}, "ai_vote.vote": "up", "ai.status": "filtered"},
+    {"ai_vote.truth": {"$in": [None]}, "ai_vote.vote": "down", "ai.status": {"$ne": "filtered"}},
+    # Sans avis : filtree, et l'avis SigLIP ne voit pas de personne / vehicule
+    {"ai_vote.vote": {"$exists": False}, "ai.status": "filtered",
      "ai.guess": {"$not": {"$elemMatch": {"label": {"$in": list(_REAL_CATS)}, "p": {"$gte": DOUTE_MIN}}}}},
 ]
 
@@ -786,11 +791,15 @@ def portee(ep):
     grillage, reflet..., ou fausse alerte selon l'operateur). Une ecartee
     n'allume jamais "en cours", "a traiter" ni une pastille de la carte : elle
     reste listee (filtre IA) pour l'entrainement."""
-    vote = (ep.get("ai_vote") or {}).get("vote")
-    if vote == "down":
-        return "ecartee"
-    ai = ep.get("ai") or {}
-    if vote == "up" or ai.get("status") != "filtered":
+    # Avis de l'operateur d'abord : la reponse (ce qu'est la cible), sinon le
+    # pouce, qui dit si l'IA a eu RAISON (up) de filtrer ou d'alerter, pas si
+    # l'intrusion est vraie (meme lecture que scripts/intrusion_training.py)
+    v, ai = ep.get("ai_vote") or {}, ep.get("ai") or {}
+    if v.get("truth"):
+        return "alerte" if v["truth"] in AI_TRUTH_REAL else "ecartee"
+    if v.get("vote") in AI_VOTES:
+        return "alerte" if (v["vote"] == "up") == (ai.get("status") != "filtered") else "ecartee"
+    if ai.get("status") != "filtered":
         return "alerte"
     if any(g.get("label") in _REAL_CATS and (g.get("p") or 0) >= DOUTE_MIN for g in ai.get("guess") or []):
         return "doute"

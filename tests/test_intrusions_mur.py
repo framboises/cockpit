@@ -104,9 +104,15 @@ def test_portee_des_intrusions():
     oiseau = {"ai": {"status": "filtered", "guess": [{"label": "oiseau", "p": 0.8}, {"label": "personne", "p": 0.2}]}}
     assert D.portee(oiseau) == "ecartee"
     assert D.portee({"ai": {"status": "filtered", "guess": [{"label": "personne", "p": 0.6}]}}) == "doute"
-    # L'avis de l'operateur l'emporte
-    assert D.portee(dict(oiseau, ai_vote={"vote": "up"})) == "alerte"
+    # L'avis de l'operateur l'emporte. Pouce = l'IA a-t-elle eu raison ?
+    assert D.portee(dict(oiseau, ai_vote={"vote": "up"})) == "ecartee"     # filtree a raison
+    assert D.portee(dict(oiseau, ai_vote={"vote": "down"})) == "alerte"    # filtree a tort
     assert D.portee({"ai": {"status": "confirmed"}, "ai_vote": {"vote": "down"}}) == "ecartee"
+    assert D.portee({"ai": {"status": "confirmed"}, "ai_vote": {"vote": "up"}}) == "alerte"
+    # Reponse (ce qu'est la cible) : seule une personne / un vehicule / un velo alerte
+    assert D.portee(dict(oiseau, ai_vote={"vote": "up", "truth": "branche"})) == "ecartee"
+    assert D.portee({"ai": {"status": "confirmed"}, "ai_vote": {"vote": "down", "truth": "oiseau"}}) == "ecartee"
+    assert D.portee(dict(oiseau, ai_vote={"vote": "down", "truth": "personne"})) == "alerte"
 
 
 def test_douteuse_a_traiter_jamais_en_cours(db):
@@ -146,7 +152,10 @@ def test_liste_sans_les_ecartees_par_defaut(db, monkeypatch):
     cas = {"oiseau": {"ai": {"status": "filtered", "guess": [{"label": "oiseau", "p": 0.9}]}},
            "doute": {"ai": {"status": "filtered", "guess": [{"label": "personne", "p": 0.7}]}},
            "faux": {"ai": {"status": "confirmed"}, "ai_vote": {"vote": "down"}},
-           "rachete": {"ai": {"status": "filtered", "guess": []}, "ai_vote": {"vote": "up"}},
+           "rachete": {"ai": {"status": "filtered", "guess": []}, "ai_vote": {"vote": "down"}},
+           "branche_ok": {"ai": {"status": "filtered", "guess": []}, "ai_vote": {"vote": "up", "truth": "branche"}},
+           "oiseau_alerte": {"ai": {"status": "confirmed"}, "ai_vote": {"vote": "down", "truth": "oiseau"}},
+           "pieton": {"ai": {"status": "filtered", "guess": []}, "ai_vote": {"vote": "down", "truth": "personne"}},
            "alerte": {"ai": {"status": "confirmed"}},
            "sans_ia": {}}
     for nom, extra in cas.items():
@@ -158,11 +167,11 @@ def test_liste_sans_les_ecartees_par_defaut(db, monkeypatch):
 
     def noms(ai):
         return sorted(e["camera_name"] for e in c.get("/api/detection/episodes?ai=" + ai).get_json()["items"])
-    assert noms("") == ["alerte", "doute", "rachete", "sans_ia"]
-    assert noms("ecartees") == ["faux", "oiseau"]
-    assert len(noms("all")) == 6
+    assert noms("") == ["alerte", "doute", "pieton", "rachete", "sans_ia"]
+    assert noms("ecartees") == ["branche_ok", "faux", "oiseau", "oiseau_alerte"]
+    assert len(noms("all")) == 9
     # Meme partage que portee()
-    assert sorted(n for n, x in cas.items() if D.portee(x) == "ecartee") == ["faux", "oiseau"]
+    assert sorted(n for n, x in cas.items() if D.portee(x) == "ecartee") == ["branche_ok", "faux", "oiseau", "oiseau_alerte"]
 
 
 def test_intrusion_de_test_sur_le_mur(db, monkeypatch):

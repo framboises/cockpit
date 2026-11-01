@@ -171,6 +171,13 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   l'operateur reclassee. Tout est dans le service : le recepteur n'a pas
   change (il compare toujours `real_conf` a `min_conf`). Le recepteur ne
   recopie pas `by` dans `ai` (seul le script de reverification l'ecrit).
+- VETO OISEAU (01/11/2026, seule exception ou SigLIP decide) : oiseau >=
+  `BIRD_VETO` 0,9 et YOLO personne / vehicule < `BIRD_YOLO_MAX` 0,8 ->
+  `real_conf` 0, `by: "avis:oiseau"`, label oiseau (901 : YOLO personne 59 %,
+  vehicule 71 % sur des oiseaux de 10 px, alertes parties). Mesure sur 171
+  photos confirmees avec reponse : oiseau >= 0,8 = 5 fausses, 0 vraie ;
+  JAMAIS pour les autres categories (grillage >= 0,9 = 31 vraies personnes
+  derriere une cloture, sol 2 vraies sur 3).
 - Recepteur : `intrusions.verify_photo` apres `record_intrusion`, appele par
   `ecoutehik2.py`. Personne / vehicule / velo >= `min_conf` -> alerte ; sinon
   `ai_filtered` : ni alerte ni WhatsApp, l'intrusion et ses photos restent.
@@ -219,6 +226,17 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   cadre orange.
 - "A verifier" (badge orange, `aiDoubt`) : filtree alors que SigLIP voit une
   personne / un vehicule >= 0,5. Jamais "fausse alerte probable" dans ce cas.
+- SENS DU POUCE (corrige le 01/11/2026) : `ai_vote.vote` dit si l'IA a eu
+  RAISON (up) de filtrer ou d'alerter, pas si l'intrusion est vraie.
+  `portee` lisait up = alerte, down = ecartee : une branche filtree a raison
+  ("branche", up) redevenait une alerte, un oiseau qui avait alerte
+  ("oiseau", down) etait bien ecarte mais un pieton filtre a tort (down)
+  l'etait aussi. Desormais : reponse `truth` d'abord (personne / vehicule /
+  velo = alerte, le reste = ecartee), sinon `(vote == up) == (status !=
+  filtered)` (meme lecture que `intrusion_training.py`), `ECARTEE_OR` aligne.
+  Carte globale (pastille `intrusions_open`, `intrusions_real`, volet par
+  canal) : comptees via `portee`, une ecartee n'allume plus rien (avant :
+  tout episode du planning non cloture, oiseaux compris).
 - ECARTEE PAR L'IA (25/10/2026, `detection.portee`) : filtree sans doute
   (oiseau, grillage, reflet...) ou avis operateur "down" = `ecartee` : JAMAIS
   "en cours", "a traiter", pastille de la carte ni zone rouge (avant, elles
