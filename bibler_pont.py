@@ -8,7 +8,10 @@ Bibler : COCKPIT_PONT_URL_BIBLER. Les deux sont lues a chaque appel.
 Delais : connexion 3 s, reponse 8 s ; reponse 5 Mo max ; redirections non
 suivies. Ni le secret ni le jeton ne sont jamais journalises.
 """
+import copy
+import json
 import logging
+import os
 import re
 import threading
 import time
@@ -48,12 +51,10 @@ class BiblerErreur(Exception):
 
 
 def _url_base():
-    import os
     return (os.environ.get("COCKPIT_PONT_URL_BIBLER") or "").strip().rstrip("/")
 
 
 def _secret():
-    import os
     return (os.environ.get("COCKPIT_PONT_SECRET_BIBLER") or "").strip()
 
 
@@ -104,7 +105,7 @@ def _appel(methode, chemin, capacites, params=None, corps=None, idempotence=None
     }
     if idempotence:
         entetes["Idempotency-Key"] = str(idempotence)
-    kw = {"headers": entetes, "timeout": TIMEOUT, "allow_redirects": False}
+    kw = {"headers": entetes, "timeout": TIMEOUT, "allow_redirects": False, "stream": True}
     if params:
         kw["params"] = params
     if corps is not None:
@@ -114,15 +115,21 @@ def _appel(methode, chemin, capacites, params=None, corps=None, idempotence=None
     except requests.RequestException as e:
         logger.warning("Bibler injoignable (%s %s) : %s", methode, chemin, type(e).__name__)
         raise BiblerIndisponible("Bibler injoignable") from e
-    statut = rep.status_code
-    if statut >= 500 or 300 <= statut < 400:
-        logger.warning("Bibler a repondu %s (%s %s)", statut, methode, chemin)
-        raise BiblerIndisponible("Bibler a repondu %s" % statut)
-    if len(rep.content) > TAILLE_MAX:
-        raise BiblerIndisponible("reponse Bibler trop volumineuse")
+    try:
+        statut = rep.status_code
+        if statut >= 500 or 300 <= statut < 400:
+            logger.warning("Bibler a repondu %s (%s %s)", statut, methode, chemin)
+            raise BiblerIndisponible("Bibler a repondu %s" % statut)
+        contenu = _lire_borne(rep)
+    finally:
+        try:
+            rep.close()
+        except Exception:
+            pass
+    rep.content_borne = contenu
     if statut >= 400:
         try:
-            donnees = rep.json()
+            donnees = json.loads(contenu.decode("utf-8"))
         except ValueError:
             donnees = {}
         if not isinstance(donnees, dict):
@@ -131,9 +138,28 @@ def _appel(methode, chemin, capacites, params=None, corps=None, idempotence=None
     return rep
 
 
+def _lire_borne(rep):
+    """Corps de la reponse, lu par morceaux et borne a TAILLE_MAX."""
+    try:
+        annonce = int(rep.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        annonce = 0
+    if annonce > TAILLE_MAX:
+        raise BiblerIndisponible("reponse Bibler trop volumineuse")
+    tampon = bytearray()
+    try:
+        for morceau in rep.iter_content(chunk_size=65536):
+            tampon.extend(morceau)
+            if len(tampon) > TAILLE_MAX:
+                raise BiblerIndisponible("reponse Bibler trop volumineuse")
+    except requests.RequestException as e:
+        raise BiblerIndisponible("lecture Bibler interrompue") from e
+    return bytes(tampon)
+
+
 def _json(rep):
     try:
-        donnees = rep.json()
+        donnees = json.loads(rep.content_borne.decode("utf-8"))
     except ValueError as e:
         raise BiblerIndisponible("reponse Bibler illisible") from e
     return donnees
@@ -143,7 +169,7 @@ def _cache_get(cle):
     with _CACHE_LOCK:
         v = _CACHE.get(cle)
         if v and v[0] > time.time():
-            return v[1]
+            return copy.deepcopy(v[1])
         _CACHE.pop(cle, None)
     return None
 
@@ -152,14 +178,14 @@ def _cache_set(cle, valeur, ttl):
     with _CACHE_LOCK:
         if len(_CACHE) > 200:
             _CACHE.clear()
-        _CACHE[cle] = (time.time() + ttl, valeur)
+        _CACHE[cle] = (time.time() + ttl, copy.deepcopy(valeur))
 
 
 def lire(chemin, params=None, capacites=("postes:lire",), ttl=0):
     """GET JSON ; ttl > 0 active un cache memoire par (chemin, parametres)."""
     cle = None
     if ttl > 0:
-        cle = (chemin, tuple(sorted((params or {}).items(), key=lambda kv: str(kv[0]))), tuple(capacites))
+        cle = (chemin, tuple(sorted((str(k), repr(v)) for k, v in (params or {}).items())), tuple(capacites))
         hit = _cache_get(cle)
         if hit is not None:
             return hit
@@ -176,7 +202,7 @@ def lire_binaire(chemin, ttl=86400):
     if hit is not None:
         return hit
     rep = _appel("GET", chemin, ("postes:lire",))
-    resultat = (rep.content, rep.headers.get("Content-Type", "application/octet-stream"))
+    resultat = (rep.content_borne, rep.headers.get("Content-Type", "application/octet-stream"))
     if ttl > 0:
         _cache_set(cle, resultat, ttl)
     return resultat

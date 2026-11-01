@@ -16,15 +16,19 @@ class FauxReponse:
         self._brut = brut
         self.is_redirect = False
 
-    @property
-    def content(self):
+    def _octets(self):
         if self._brut is not None:
             return self._brut
         import json
         return json.dumps(self._corps).encode()
 
-    def json(self):
-        return self._corps
+    def iter_content(self, chunk_size=1):
+        b = self._octets()
+        for i in range(0, len(b), 65536):
+            yield b[i:i + 65536]
+
+    def close(self):
+        self.ferme = True
 
 
 class FausseSession:
@@ -105,10 +109,38 @@ def test_erreur_4xx_relayee(env, monkeypatch):
     assert e.value.corps["erreur"] == "version_perimee"
 
 
-def test_reponse_trop_grosse(env, monkeypatch):
-    _session(monkeypatch, reponse=FauxReponse(200, brut=b"x" * (5 * 1024 * 1024 + 1)))
+def test_reponse_trop_grosse_content_length(env, monkeypatch):
+    rep = FauxReponse(200, brut=b"x")
+    rep.headers["Content-Length"] = str(5 * 1024 * 1024 + 1)
+    lus = []
+    rep.iter_content = lambda chunk_size=1: lus.append(1) or iter([b"x"])
+    _session(monkeypatch, reponse=rep)
     with pytest.raises(bibler_pont.BiblerIndisponible):
         bibler_pont.lire("/api/v1/postes")
+    assert lus == [] and rep.ferme
+
+
+def test_reponse_trop_grosse_en_cours_de_lecture(env, monkeypatch):
+    rep = FauxReponse(200, brut=b"x" * (5 * 1024 * 1024 + 1))
+    _session(monkeypatch, reponse=rep)
+    with pytest.raises(bibler_pont.BiblerIndisponible):
+        bibler_pont.lire("/api/v1/postes")
+    assert rep.ferme
+
+
+def test_3xx_indisponible(env, monkeypatch):
+    _session(monkeypatch, reponse=FauxReponse(302, {}))
+    with pytest.raises(bibler_pont.BiblerIndisponible):
+        bibler_pont.lire("/api/v1/postes")
+
+
+def test_cache_params_liste_et_copie(env, monkeypatch):
+    s = _session(monkeypatch, reponse=FauxReponse(200, {"ok": True, "l": [1]}))
+    a = bibler_pont.lire("/api/v1/postes", {"ids": [1, 2]}, ttl=30)
+    a["l"].append(99)
+    b = bibler_pont.lire("/api/v1/postes", {"ids": [1, 2]}, ttl=30)
+    assert len(s.appels) == 1
+    assert b["l"] == [1]
 
 
 def test_cache(env, monkeypatch):
