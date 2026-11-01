@@ -13,6 +13,9 @@
 // modifier et lever. Ecritures : en-tete X-CSRFToken (meta csrf-token),
 // creation avec X-Idempotency-Key (une cle par ouverture du formulaire : un
 // double clic ou un nouvel essai apres erreur reseau rejoue la meme creation).
+// Un formulaire quitte pendant sa publication (autre poste, panneau ferme) est
+// garde avec sa cle : rouvert sur le meme poste, il reprend la meme cle (un
+// nouvel essai ne cree pas de doublon). Annuler est grise pendant l'envoi.
 // Lien direct : /?bibler=consigne:<id> active la couche et surligne la cible.
 //
 // Expose : window.CockpitBibler = { activer, desactiver, ouvrirPoste(numero),
@@ -84,6 +87,7 @@
   var genDetail = 0;
   var surlignage = null;      // { id, cible, ajuste } : postes cibles surlignes
   var formulaire = null;      // formulaire "Donner une consigne" en cours
+  var formulairesGardes = {}; // numero -> formulaire quitte pendant sa publication (meme cle)
   var notePublication = null; // { numero, texte } apres une publication
 
   // ------------------------------------------------------------------------
@@ -148,6 +152,9 @@
   function erreurDe(rep) {
     var c = rep.corps || {};
     var code = c.erreur || c.code || "";
+    if (code === "bibler_refus_service") {
+      return { code: "refus_service", texte: "Bibler refuse l'acces de Cockpit : configuration du pont a verifier" };
+    }
     if (rep.statut === 502 || rep.statut === 503 || code === "bibler_indisponible" ||
         code === "bibler_non_configure") {
       return { code: "indisponible", texte: "Bibler indisponible" };
@@ -982,6 +989,9 @@
     var c = rep.corps || {};
     var code = c.erreur || c.code || "";
     if (code === "bibler_non_configure") return { texte: "Bibler n'est pas configure dans Cockpit." };
+    if (code === "bibler_refus_service") {
+      return { texte: "Bibler refuse l'acces de Cockpit : configuration du pont a verifier (administrateur)." };
+    }
     if (rep.statut === 0 || rep.statut === 502 || rep.statut === 503 || code === "bibler_indisponible") {
       return { texte: creation ?
         "Bibler n'a pas repondu : reessayez, la meme publication ne sera pas doublee." :
@@ -1189,6 +1199,19 @@
   function ouvrirFormulaire(fiche) {
     jeterFormulaire();
     notePublication = null;
+    var garde = formulairesGardes[fiche.numero];
+    if (garde) {
+      // Publication en vol (ou echouee apres que le formulaire a ete quitte) :
+      // meme saisie, meme cle d'idempotence.
+      delete formulairesGardes[fiche.numero];
+      formulaire = garde;
+      var act = document.getElementById("bibler-panneau-actions");
+      if (act && act.dataset.numero === String(fiche.numero)) monterActions(act, fiche);
+      majBoutonPublier(garde);
+      if (garde.formats === null) chargerFormats(garde);
+      planifierApercu(garde);
+      return;
+    }
     var fo = {
       numero: fiche.numero,
       cle: nouvelleCle(),           // une cle par ouverture du formulaire
@@ -1217,6 +1240,7 @@
     var fo = formulaire;
     if (!fo) return;
     formulaire = null;
+    if (fo.enCours) formulairesGardes[fo.numero] = fo;   // la cle survit jusqu'a la reponse
     if (fo.minuteur) clearTimeout(fo.minuteur);
     fo.genApercu++;
     fo.genFormats++;
@@ -1335,7 +1359,10 @@
     fo.el.publier = envoyer;
     var annuler = el("button", "bibler-btn", "Annuler");
     annuler.type = "button";
-    annuler.addEventListener("click", function () { if (formulaire === fo) fermerFormulaire(); });
+    annuler.addEventListener("click", function () {
+      if (formulaire === fo && !fo.enCours) fermerFormulaire();
+    });
+    fo.el.annuler = annuler;
     boutons.appendChild(envoyer);
     boutons.appendChild(annuler);
     form.appendChild(boutons);
@@ -1451,6 +1478,7 @@
   function majBoutonPublier(fo) {
     fo.el.publier.disabled = fo.enCours;
     fo.el.publier.textContent = fo.enCours ? "Publication..." : "Publier";
+    if (fo.el.annuler) fo.el.annuler.disabled = fo.enCours;
   }
 
   function publier(fo) {
@@ -1484,6 +1512,7 @@
     ecrire("POST", "/api/bibler/consignes", corps, { "X-Idempotency-Key": fo.cle }).then(function (rep) {
       fo.enCours = false;
       var ok = (rep.statut === 200 || rep.statut === 201) && rep.corps && rep.corps.ok !== false;
+      if (ok && formulairesGardes[fo.numero] === fo) delete formulairesGardes[fo.numero];
       if (ok) {
         var c = rep.corps.consigne || {};
         var etaitOuvert = formulaire === fo;
@@ -1497,10 +1526,12 @@
         apresEcriture();
         return;
       }
-      if (formulaire !== fo) return;
+      // Echec : le formulaire (garde ou affiche) garde sa cle et montre l'erreur ;
+      // un formulaire garde la retrouvera a sa reouverture sur ce poste.
       majBoutonPublier(fo);
       var m = messageEcriture(rep, true);
       messageFormulaire(fo, m.texte, true);
+      if (formulaire !== fo) return;
       if (m.recharger) apresEcriture();
     });
   }
