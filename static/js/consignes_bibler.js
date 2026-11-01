@@ -15,12 +15,18 @@
   var TITRE_MAX = 120;
   var TEXTE_MAX = 600;
   var ETATS = ["en_vigueur", "programmee", "levee", "expiree"];
-  var LIBELLES_ETAT = { en_vigueur: "En vigueur", programmee: "Programmee", levee: "Levee", expiree: "Expiree" };
+  var LIBELLES_ETAT = { en_vigueur: "En vigueur", programmee: "Programmée", levee: "Levée", expiree: "Expirée" };
   var PRIORITES = [
     { valeur: "information", libelle: "Information" },
     { valeur: "importante", libelle: "Important" },
     { valeur: "urgente", libelle: "Urgent" }
   ];
+  // Icone et libelle du bandeau par priorite (couleurs dans consignes_bibler.css)
+  var PRIO_VUE = {
+    information: { icone: "info", titre: "Information" },
+    importante: { icone: "warning", titre: "Consigne importante" },
+    urgente: { icone: "priority_high", titre: "Consigne urgente" }
+  };
   var RE_ID = /^[0-9a-fA-F]{24}$/;
 
   var canPublish = window.__cbCanPublish === true;
@@ -73,20 +79,20 @@
   function messageErreur(rep, ecriture) {
     var c = rep.corps || {};
     var code = c.erreur || c.code || "";
-    if (code === "bibler_non_configure") return "Bibler n'est pas configure dans Cockpit.";
+    if (code === "bibler_non_configure") return "Bibler n'est pas configuré dans Cockpit.";
     if (code === "bibler_refus_service") {
-      return "Bibler refuse l'acces de Cockpit : configuration du pont a verifier (administrateur).";
+      return "Bibler refuse l'accès de Cockpit : configuration du pont à vérifier (administrateur).";
     }
     if (rep.statut === 0 || rep.statut === 502 || rep.statut === 503 || code === "bibler_indisponible") {
-      return "Bibler n'a pas repondu : reessayez.";
+      return "Bibler n'a pas répondu : réessayez.";
     }
-    if (code === "evenement_inconnu") return "Evenement inconnu de Bibler.";
+    if (code === "evenement_inconnu") return "Événement inconnu de Bibler.";
     if (code === "droit_insuffisant") return "Droit insuffisant.";
-    if (code === "csrf") return "Session expiree : rechargez la page.";
+    if (code === "csrf") return "Session expirée : rechargez la page.";
     if (ecriture && (rep.statut === 409 || code === "version_perimee")) {
-      return "Consigne modifiee entre-temps : elle a ete rechargee.";
+      return "Consigne modifiée entre-temps : elle a été rechargée.";
     }
-    if (code === "consigne_levee") return c.message || "Consigne deja levee.";
+    if (code === "consigne_levee") return c.message || "Consigne déjà levée.";
     return c.message || c.error || ("Erreur Bibler (" + rep.statut + ")");
   }
 
@@ -130,10 +136,43 @@
   function libellePeriode(c) {
     if (!c.debut && !c.fin) return "";
     var t = c.debut ? "Du " + fmtDate(c.debut) : "Depuis la publication";
-    return t + (c.fin ? " au " + fmtDate(c.fin) : ", jusqu'a la levee");
+    return t + (c.fin ? " au " + fmtDate(c.fin) : ", jusqu'à la levée");
+  }
+  function prioCle(c) {
+    var k = classeSure(c && c.priorite);
+    return PRIO_VUE[k] ? k : "information";
   }
   function prioClasse(c) {
-    return "cb-prio cb-prio-" + classeSure(c.priorite);
+    return "cb-prio cb-prio-" + prioCle(c);
+  }
+  function iconePrio(c) {
+    var k = prioCle(c);
+    var i = icon(PRIO_VUE[k].icone);
+    i.classList.add("cb-prio-ico", "cb-prio-ico-" + k);
+    return i;
+  }
+  function info(nom, libelle, valeur) {
+    var d = el("div", "cb-info");
+    d.appendChild(icon(nom));
+    d.appendChild(el("span", "cb-info-lib", libelle));
+    d.appendChild(el("span", "cb-info-val", valeur));
+    return d;
+  }
+  function jauge(libelle, n, total, part) {
+    var d = el("div", "cb-jauge" + (total && n >= total ? " cb-jauge-pleine" : ""));
+    var tete = el("div", "cb-jauge-tete");
+    tete.appendChild(el("span", null, libelle));
+    tete.appendChild(el("b", null, (n || 0) + "/" + (total || 0) + " - " + (part || 0) + " %"));
+    d.appendChild(tete);
+    d.appendChild(barre(part));
+    return d;
+  }
+  function barre(part) {
+    var fond = el("div", "cb-barre");
+    var plein = el("div", "cb-barre-plein");
+    plein.style.width = Math.max(0, Math.min(100, Number(part) || 0)) + "%";
+    fond.appendChild(plein);
+    return fond;
   }
 
   // ----------------------------------------------------------------- liste
@@ -162,20 +201,30 @@
     var lignes = state.items.filter(function (c) { return c.etat === state.etat; });
     if (!lignes.length) {
       zone.appendChild(el("div", "cb-vide", "Aucune consigne " + (LIBELLES_ETAT[state.etat] || "").toLowerCase() + "."));
+      // Seul le mode "Ce shift" d'un shift a venir donne une consigne programmee (debut futur)
+      if (state.etat === "programmee") {
+        zone.appendChild(el("div", "cb-vide", "Pour en programmer une : sur la carte, ouvrez un poste, " +
+          "Donner une consigne, puis dans Quand choisissez un shift qui n'a pas encore commencé. " +
+          "Elle passera en vigueur au début du shift."));
+      }
       return;
     }
     lignes.forEach(function (c) {
-      var b = el("button", "cb-item" + (c.id === state.openId ? " active" : ""));
+      var b = el("button", "cb-item cb-bord-" + prioCle(c) + (c.id === state.openId ? " active" : ""));
       b.type = "button";
       var t = el("div", "cb-item-titre");
-      t.appendChild(el("span", null, c.titre || ""));
+      t.appendChild(iconePrio(c));
+      t.appendChild(el("span", "cb-item-titre-texte", c.titre || ""));
       if (c.priorite_libelle) t.appendChild(el("span", prioClasse(c), c.priorite_libelle));
       b.appendChild(t);
       if (c.cible_libelle) b.appendChild(el("div", "cb-item-meta", c.cible_libelle));
       var s = c.suivi;
       if (s) {
-        b.appendChild(el("div", "cb-item-taux", "Lu " + (s.part_lue || 0) + " % - transmis " +
-          (s.part_transmise || 0) + " %" + (s.total ? " (" + s.total + " encadrant(s))" : "")));
+        var taux = el("div", "cb-item-taux" + ((s.part_lue || 0) >= 100 ? " cb-jauge-pleine" : ""));
+        taux.appendChild(barre(s.part_lue));
+        taux.appendChild(el("span", null, "Lu " + (s.part_lue || 0) + " % - transmis " +
+          (s.part_transmise || 0) + " %" + (s.total ? " - " + s.total + " encadrant(s)" : "")));
+        b.appendChild(taux);
       }
       b.addEventListener("click", function () { ouvrir(c.id); });
       zone.appendChild(b);
@@ -223,21 +272,26 @@
   }
 
   function sectionSuivi(suivi) {
-    var s = section("Accuses de reception");
+    var s = section("Accusés de réception");
     if (!suivi) { s.appendChild(el("div", "cb-vide", "Suivi indisponible")); return s; }
     var total = suivi.total || 0;
-    s.appendChild(el("div", "cb-d-meta", "Lu " + (suivi.lus || 0) + "/" + total + " (" + (suivi.part_lue || 0) +
-      " %) - transmis " + (suivi.transmis || 0) + "/" + total + " (" + (suivi.part_transmise || 0) + " %)"));
+    var jauges = el("div", "cb-jauges");
+    jauges.appendChild(jauge("Lu par les encadrants", suivi.lus, total, suivi.part_lue));
+    jauges.appendChild(jauge("Transmis aux agents", suivi.transmis, total, suivi.part_transmise));
+    s.appendChild(jauges);
     if (suivi.mauvaises_reponses) {
-      s.appendChild(el("div", "cb-d-meta", suivi.mauvaises_reponses + " mauvaise(s) reponse(s) a la question de controle"));
+      s.appendChild(el("div", "cb-msg", suivi.mauvaises_reponses + " mauvaise(s) réponse(s) à la question de contrôle"));
     }
     var lignes = (suivi.lignes || []).map(function (l, i) { return { l: l, i: i }; });
-    if (!lignes.length) { s.appendChild(el("div", "cb-vide", "Aucun encadrant concerne")); return s; }
+    if (!lignes.length) { s.appendChild(el("div", "cb-vide", "Aucun encadrant concerné")); return s; }
     lignes.sort(function (a, b) { return (a.l.lu ? 1 : 0) - (b.l.lu ? 1 : 0) || a.i - b.i; });
     var ul = el("ul", "cb-suivi");
     lignes.forEach(function (x) {
       var l = x.l;
       var li = el("li", l.lu ? "" : "manque");
+      var ico = icon(l.lu ? "check_circle" : "radio_button_unchecked");
+      ico.classList.add("cb-suivi-ico");
+      li.appendChild(ico);
       var qui = el("span", "cb-qui");
       qui.appendChild(el("b", null, l.nom || "?"));
       qui.appendChild(el("small", null, l.cible === false ? "hors cible" : (l.perimetre || "")));
@@ -245,7 +299,7 @@
       var st = el("span", "cb-statuts");
       if (!l.lu) st.appendChild(el("span", "cb-statut cb-statut-manque", "Non lu"));
       else st.appendChild(el("span", "cb-statut", "Lu " + l.lu));
-      if (l.valide) st.appendChild(el("span", "cb-statut cb-statut-ok", "Valide " + l.valide));
+      if (l.valide) st.appendChild(el("span", "cb-statut cb-statut-ok", "Validé " + l.valide));
       if (l.transmis) {
         st.appendChild(el("span", "cb-statut cb-statut-ok", "Transmis " + l.transmis +
           (l.agents_informes ? " (" + l.agents_informes + " agent(s))" : "")));
@@ -267,29 +321,52 @@
     if (!d) { zone.appendChild(el("div", "cb-vide", "Choisissez une consigne dans la liste.")); return; }
     if (d.erreur) { zone.appendChild(el("div", "cb-msg", d.erreur)); return; }
     var c = d.c;
+    var k = prioCle(c);
+    var carte = el("article", "cb-carte cb-carte-" + k + (c.etat === "levee" || c.etat === "expiree" ? " cb-carte-close" : ""));
 
-    zone.appendChild(el("h3", "cb-d-titre", c.titre || ""));
-    var ligne = el("div", "cb-d-ligne");
-    ligne.appendChild(el("span", "cb-etat cb-etat-" + classeSure(c.etat), LIBELLES_ETAT[c.etat] || c.etat || ""));
-    if (c.priorite_libelle) ligne.appendChild(el("span", prioClasse(c), c.priorite_libelle));
-    if (c.modifiee) ligne.appendChild(el("span", "cb-etat", "version " + c.version));
-    zone.appendChild(ligne);
-    if (c.cible_libelle) zone.appendChild(el("div", "cb-d-meta", c.cible_libelle));
-    if (c.texte) zone.appendChild(el("div", "cb-d-texte", c.texte));
-    var meta = [c.auteur, c.heure].filter(Boolean).join(" - ");
-    if (meta) zone.appendChild(el("div", "cb-d-meta", "Par " + meta));
+    // Bandeau a la couleur de la priorite
+    var bandeau = el("div", "cb-bandeau");
+    bandeau.appendChild(icon(PRIO_VUE[k].icone));
+    bandeau.appendChild(el("span", "cb-bandeau-titre", PRIO_VUE[k].titre));
+    bandeau.appendChild(el("span", "cb-etat cb-etat-" + classeSure(c.etat), LIBELLES_ETAT[c.etat] || c.etat || ""));
+    carte.appendChild(bandeau);
+
+    var corps = el("div", "cb-carte-corps");
+    corps.appendChild(el("h2", "cb-d-titre", c.titre || ""));
+    var tags = el("div", "cb-d-ligne");
+    if (c.dans_briefing) tags.appendChild(el("span", "cb-tag", "Dans le briefing"));
+    if (c.modifiee) tags.appendChild(el("span", "cb-tag", "version " + c.version));
+    if (tags.firstChild) corps.appendChild(tags);
+    // Le message d'abord, en grand : c'est ce que l'encadrant recoit
+    if (c.texte) corps.appendChild(el("div", "cb-d-texte", c.texte));
+
+    var infos = el("div", "cb-infos");
+    if (c.cible_libelle) infos.appendChild(info("groups", "Cible", c.cible_libelle));
     var periode = libellePeriode(c);
-    if (periode) zone.appendChild(el("div", "cb-d-meta", periode));
-    if (c.etat === "levee" && c.levee_heure) zone.appendChild(el("div", "cb-d-meta", "Levee a " + c.levee_heure));
-    if (c.dans_briefing) zone.appendChild(el("div", "cb-d-meta", "Dans le briefing"));
-    var qc = c.question_controle;
-    if (qc && qc.question) zone.appendChild(el("div", "cb-d-meta", "Question de controle : " + qc.question));
+    infos.appendChild(info("schedule", "Durée", periode || "Jusqu'à la levée"));
+    if (c.etat === "levee" && c.levee_heure) infos.appendChild(info("block", "Levée", c.levee_heure));
+    var meta = [c.auteur, c.heure].filter(Boolean).join(" - ");
+    if (meta) infos.appendChild(info("person", "Donnée par", meta));
+    corps.appendChild(infos);
 
-    zone.appendChild(sectionSuivi(d.suivi));
+    var qc = c.question_controle;
+    if (qc && qc.question) {
+      var q = el("div", "cb-question");
+      q.appendChild(icon("quiz"));
+      var qt = el("div");
+      qt.appendChild(el("b", null, "Question de contrôle"));
+      qt.appendChild(el("div", null, qc.question));
+      q.appendChild(qt);
+      corps.appendChild(q);
+    }
 
     var actions = el("div", "cb-actions-zone");
-    zone.appendChild(actions);
+    corps.appendChild(actions);
+    carte.appendChild(corps);
+    zone.appendChild(carte);
     rendreActions(actions, c);
+
+    zone.appendChild(sectionSuivi(d.suivi));
   }
 
   function rendreActions(zone, c) {
@@ -355,8 +432,8 @@
       prio.appendChild(o);
     });
     prio.value = c.priorite || "information";
-    form.appendChild(champ("Priorite", prio));
-    form.appendChild(el("div", "cb-d-meta", "Pas de nom, de telephone ni d'e-mail dans la consigne."));
+    form.appendChild(champ("Priorité", prio));
+    form.appendChild(el("div", "cb-d-meta", "Pas de nom, de téléphone ni d'e-mail dans la consigne."));
     var msg = el("div", "cb-msg");
     msg.setAttribute("role", "alert");
     msg.hidden = true;
@@ -374,7 +451,7 @@
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       if (enCours) return;
-      if (!titre.value.trim()) { msg.textContent = "Donnez un titre a la consigne."; msg.hidden = false; return; }
+      if (!titre.value.trim()) { msg.textContent = "Donnez un titre à la consigne."; msg.hidden = false; return; }
       enCours = true;
       ok.disabled = true;
       ok.textContent = "Enregistrement...";
@@ -382,7 +459,7 @@
       ecrire("PATCH", "/api/bibler/consignes/" + encodeURIComponent(c.id), corps).then(function (rep) {
         if (state.openId !== c.id) return;
         if (rep.statut === 200 && rep.corps && rep.corps.ok !== false) {
-          toast("success", "Consigne modifiee");
+          toast("success", "Consigne modifiée");
           apresEcriture(c.id);
           return;
         }
@@ -403,13 +480,13 @@
 
   function confirmLever(zone, c) {
     var conf = el("div", "cb-confirm");
-    conf.appendChild(el("div", null, "Lever cette consigne ? Elle ne sera plus diffusee aux encadrants."));
+    conf.appendChild(el("div", null, "Lever cette consigne ? Elle ne sera plus diffusée aux encadrants."));
     var msg = el("div", "cb-msg");
     msg.setAttribute("role", "alert");
     msg.hidden = true;
     conf.appendChild(msg);
     var barre = el("div", "cb-actions");
-    var oui = el("button", "cb-btn cb-btn-danger", "Confirmer la levee");
+    var oui = el("button", "cb-btn cb-btn-danger", "Confirmer la levée");
     oui.type = "button";
     var non = el("button", "cb-btn", "Annuler");
     non.type = "button";
@@ -419,11 +496,11 @@
       if (enCours) return;
       enCours = true;
       oui.disabled = true;
-      oui.textContent = "Levee...";
+      oui.textContent = "Levée...";
       ecrire("POST", "/api/bibler/consignes/" + encodeURIComponent(c.id) + "/lever", {}).then(function (rep) {
         if (state.openId !== c.id) return;
         if (rep.statut === 200 && rep.corps && rep.corps.ok !== false) {
-          toast("success", "Consigne levee");
+          toast("success", "Consigne levée");
           apresEcriture(c.id);
           return;
         }
@@ -434,7 +511,7 @@
         }
         enCours = false;
         oui.disabled = false;
-        oui.textContent = "Confirmer la levee";
+        oui.textContent = "Confirmer la levée";
         msg.textContent = messageErreur(rep, true);
         msg.hidden = false;
       });
@@ -465,7 +542,7 @@
     });
     resoudreSelection().then(function (sel) {
       if (!sel) {
-        state.erreur = "Evenement courant introuvable.";
+        state.erreur = "Événement courant introuvable.";
         rendreListe();
         return;
       }

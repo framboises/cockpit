@@ -151,7 +151,7 @@
   right: 56px;
   bottom: 10px;
   z-index: 1000;
-  width: 340px;
+  width: 370px;
   max-width: calc(100% - 76px);
   display: flex;
   flex-direction: column;
@@ -282,22 +282,47 @@
 .bibler-shift-agents { color: var(--muted); text-align: right; }
 .bibler-shift-format { font-variant-numeric: tabular-nums; font-weight: 500; }
 
+/* Consignes : couleur par priorite (information, important, urgent) */
 .bibler-consigne {
-  padding: 6px 8px;
-  margin-bottom: 6px;
-  border-left: 3px solid #7c3aed;
-  background: var(--bg);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 4px solid #2563eb;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
-.bibler-consigne-titre { font-weight: 600; display: flex; justify-content: space-between; gap: 6px; }
-.bibler-consigne-priorite { color: var(--muted); font-weight: 500; font-size: 0.72rem; white-space: nowrap; }
-.bibler-consigne-texte { margin-top: 3px; white-space: pre-line; }
-.bibler-consigne-meta { margin-top: 3px; color: var(--muted); font-size: 0.72rem; }
+.bibler-prio-bord-information { border-left-color: #2563eb; }
+.bibler-prio-bord-importante { border-left-color: #d97706; }
+.bibler-prio-bord-urgente { border-left-color: #dc2626; }
+.bibler-consigne.bibler-prio-bord-importante { background: #fffbeb; }
+.bibler-consigne.bibler-prio-bord-urgente { background: #fef2f2; }
+.bibler-consigne-titre { font-weight: 600; display: flex; align-items: center; gap: 6px; color: var(--text); }
+.bibler-consigne-titre-texte { flex: 1 1 auto; min-width: 0; }
+.bibler-consigne-texte { margin-top: 4px; white-space: pre-line; color: var(--text); line-height: 1.4; }
+.bibler-consigne-meta { margin-top: 4px; color: var(--muted); font-size: 0.74rem; }
+.bibler-prio-ico { font-size: 18px; flex: 0 0 auto; }
+.bibler-prio-ico-information { color: #2563eb; }
+.bibler-prio-ico-importante { color: #d97706; }
+.bibler-prio-ico-urgente { color: #dc2626; }
+.bibler-prio-puce {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.bibler-prio-puce-information { background: #dbeafe; color: #1e40af; }
+.bibler-prio-puce-importante { background: #fef3c7; color: #92400e; }
+.bibler-prio-puce-urgente { background: #dc2626; color: #fff; }
 
 .bibler-panneau-actions:empty { display: none; }
 
 /* Consignes : surlignage des postes cibles */
-.bibler-grappe-cible { box-shadow: 0 0 0 4px #2563eb, 0 1px 4px rgba(0, 0, 0, 0.35); }
+.bibler-grappe-cible { box-shadow: 0 0 0 4px #2563eb, 0 0 0 9px rgba(37, 99, 235, 0.25), 0 1px 4px rgba(0, 0, 0, 0.35); }
+.bibler-grappe-cible-importante { box-shadow: 0 0 0 4px #d97706, 0 0 0 9px rgba(217, 119, 6, 0.25), 0 1px 4px rgba(0, 0, 0, 0.35); }
+.bibler-grappe-cible-urgente { box-shadow: 0 0 0 4px #dc2626, 0 0 0 9px rgba(220, 38, 38, 0.25), 0 1px 4px rgba(0, 0, 0, 0.35); }
 .bibler-grappe-estompe { opacity: 0.3; }
 .bibler-cliquable { cursor: pointer; }
 .bibler-cliquable:hover,
@@ -338,38 +363,95 @@
   text-align: left;
   cursor: pointer;
 }
+.bibler-ligne-consigne + .bibler-ligne-consigne { border-top: 1px solid var(--line); }
+.bibler-ligne-btn { gap: 4px; padding: 8px 10px; }
+.bibler-ligne-btn.bibler-prio-bord-information { border-left-color: #2563eb; }
+.bibler-ligne-btn.bibler-prio-bord-importante { border-left-color: #d97706; }
+.bibler-ligne-btn.bibler-prio-bord-urgente { border-left-color: #dc2626; }
 .bibler-ligne-btn:hover,
 .bibler-ligne-btn:focus-visible,
 .bibler-ligne-consigne.active .bibler-ligne-btn {
   outline: none;
   background: var(--brand-light);
-  border-left-color: #2563eb;
 }
+.bibler-ligne-btn .bibler-consigne-meta { margin-top: 0; padding-left: 24px; }
+.bibler-ligne-taux { display: flex; align-items: center; gap: 8px; padding-left: 24px; }
+.bibler-ligne-taux .bibler-jauge-fond { flex: 0 0 60px; height: 5px; }
 .bibler-consigne-taux { color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
-.bibler-prio-importante { color: #b45309; }
-.bibler-prio-urgente { color: var(--danger); font-weight: 700; }
 
 /* Detail d'une consigne */
+.bibler-entete-consigne { justify-content: flex-start; gap: 8px; color: #fff; border-bottom: none; }
+.bibler-entete-consigne .bibler-panneau-titre { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.bibler-entete-consigne .bibler-panneau-fermer { margin-left: auto; color: rgba(255, 255, 255, 0.85); }
+.bibler-entete-consigne .bibler-panneau-fermer:hover { color: #fff; }
+.bibler-entete-consigne > .material-symbols-outlined { font-size: 20px; }
+.bibler-entete-information { background: #2563eb; }
+.bibler-entete-importante { background: #d97706; }
+.bibler-entete-urgente { background: #dc2626; }
+.bibler-consigne-tete { padding: 12px 14px 10px; }
+.bibler-consigne-grand-titre { font-size: 1.08rem; font-weight: 700; line-height: 1.25; margin-bottom: 8px; color: var(--text); }
+.bibler-consigne-message {
+  margin: 12px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #2563eb;
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  color: var(--text);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+.bibler-consigne-message.bibler-prio-bord-importante { background: #fffbeb; border-left-color: #d97706; }
+.bibler-consigne-message.bibler-prio-bord-urgente { background: #fef2f2; border-left-color: #dc2626; }
+.bibler-infos { display: flex; flex-direction: column; gap: 5px; padding: 2px 0 10px; border-bottom: 1px solid var(--line); }
+.bibler-info { display: flex; align-items: flex-start; gap: 8px; color: var(--text); line-height: 1.35; }
+.bibler-info .material-symbols-outlined { font-size: 18px; color: var(--muted); flex: 0 0 auto; }
+.bibler-info-cibles { font-weight: 600; }
+.bibler-info-cibles .material-symbols-outlined { color: var(--brand); }
+.bibler-question summary { display: flex; align-items: center; gap: 4px; }
+.bibler-question summary .material-symbols-outlined { font-size: 18px; color: var(--brand); }
 .bibler-etat-consigne {
-  padding: 1px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
   border-radius: 999px;
   font-size: 0.72rem;
-  border: 1px solid var(--line);
-  color: var(--muted);
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
 }
-.bibler-etat-consigne-en_vigueur { background: #16a34a; border-color: #16a34a; color: #fff; }
+.bibler-etat-consigne::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.bibler-etat-consigne-en_vigueur { background: #dcfce7; color: #166534; }
+.bibler-etat-consigne-programmee { background: #dbeafe; color: #1e40af; }
 .bibler-etat-consigne-levee,
-.bibler-etat-consigne-expiree { text-decoration: line-through; }
+.bibler-etat-consigne-expiree { background: #f1f5f9; color: #64748b; }
+
+/* Suivi : jauges lu / transmis, puis qui manque */
+.bibler-jauge { margin-bottom: 8px; }
+.bibler-jauge-tete { display: flex; justify-content: space-between; gap: 8px; font-size: 0.78rem; margin-bottom: 3px; }
+.bibler-jauge-tete b { font-variant-numeric: tabular-nums; }
+.bibler-jauge-fond { display: block; height: 7px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+.bibler-jauge-plein { display: block; height: 100%; border-radius: 999px; background: #f59e0b; }
+.bibler-jauge-pleine .bibler-jauge-plein { background: #16a34a; }
 .bibler-suivi-taux { font-weight: 600; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
-.bibler-suivi { list-style: none; margin: 0; padding: 0; }
+.bibler-suivi { list-style: none; margin: 4px 0 0; padding: 0; }
+/* Panneau etroit : statuts sous le nom, jamais a cote */
 .bibler-suivi li {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px dashed var(--line);
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 6px;
+  row-gap: 3px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
 }
+.bibler-suivi li .bibler-suivi-etats { grid-column: 2; justify-content: flex-start; }
 .bibler-suivi li:last-child { border-bottom: none; }
+.bibler-suivi-ico { font-size: 18px; color: #16a34a; }
+.bibler-suivi-manque .bibler-suivi-ico { color: var(--danger); }
+.bibler-suivi-manque .bibler-agent-nom { color: var(--danger); font-weight: 600; }
 .bibler-suivi-qui { display: flex; flex-direction: column; min-width: 0; }
 .bibler-suivi-qui small { color: var(--muted); font-size: 0.72rem; }
 .bibler-suivi-etats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; align-content: flex-start; }

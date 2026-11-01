@@ -42,7 +42,7 @@
     incomplet: "Incomplet",
     en_retard: "En retard",
     vide: "Vide",
-    a_venir: "A venir"
+    a_venir: "À venir"
   };
   // Pire etat d'une grappe (le plus urgent l'emporte)
   var RANG_ETAT = { vide: 0, en_retard: 1, incomplet: 2, pourvu: 3, a_venir: 4 };
@@ -153,14 +153,14 @@
     var c = rep.corps || {};
     var code = c.erreur || c.code || "";
     if (code === "bibler_refus_service") {
-      return { code: "refus_service", texte: "Bibler refuse l'acces de Cockpit : configuration du pont a verifier" };
+      return { code: "refus_service", texte: "Bibler refuse l'accès de Cockpit : configuration du pont à vérifier" };
     }
     if (rep.statut === 502 || rep.statut === 503 || code === "bibler_indisponible" ||
         code === "bibler_non_configure") {
       return { code: "indisponible", texte: "Bibler indisponible" };
     }
     if (code === "evenement_inconnu") {
-      return { code: "evenement_inconnu", texte: "Evenement inconnu de Bibler" };
+      return { code: "evenement_inconnu", texte: "Événement inconnu de Bibler" };
     }
     if (code === "droit_insuffisant") return { code: "droit", texte: "Droit insuffisant pour voir les postes Bibler" };
     if (code === "poste_inconnu") return { code: code, texte: "Poste inconnu ou inactif dans Bibler" };
@@ -206,11 +206,11 @@
     var temps = el("div", "bibler-temps");
     btnDirect = el("button", "bibler-btn bibler-direct", "Direct");
     btnDirect.type = "button";
-    btnDirect.title = "Presence en direct, actualisee chaque minute";
+    btnDirect.title = "Présence en direct, actualisée chaque minute";
     btnDirect.addEventListener("click", passerEnDirect);
     champHeure = el("input", "bibler-heure");
     champHeure.type = "datetime-local";
-    champHeure.title = "Jour et heure (passe : presence reelle ; futur : prevu)";
+    champHeure.title = "Jour et heure (passé : présence réelle ; futur : prévu)";
     champHeure.addEventListener("change", function () {
       if (!champHeure.value) { passerEnDirect(); return; }
       direct = false;
@@ -246,7 +246,7 @@
     btnConsignes.id = "bibler-consignes-btn";
     btnConsignes.setAttribute("aria-haspopup", "listbox");
     btnConsignes.setAttribute("aria-expanded", "false");
-    btnConsignes.title = "Consignes en vigueur : suivi et postes cibles";
+    btnConsignes.title = "Consignes en vigueur : suivi et postes ciblés";
     btnConsignes.addEventListener("click", basculerListeConsignes);
     listeConsignes = el("ul", "bibler-consignes-liste");
     listeConsignes.id = "bibler-consignes-liste";
@@ -334,17 +334,17 @@
     bandeau.className = "bibler-bandeau";
     var texte = "";
     if (erreurCode === "indisponible") {
-      texte = donnees ? "Bibler indisponible : derniere situation connue, grisee" : "Bibler indisponible";
+      texte = donnees ? "Bibler indisponible : dernière situation connue, grisée" : "Bibler indisponible";
       bandeau.classList.add("bibler-bandeau-erreur");
     } else if (erreurCode) {
       texte = erreurCode;
       bandeau.classList.add("bibler-bandeau-erreur");
     } else if (donnees && donnees.mode === "prevu") {
-      texte = "Prevu a " + heureEtJour(donnees.instant) +
-        " : planning seulement, aucune presence constatee (vert = prevu)";
+      texte = "Prévu à " + heureEtJour(donnees.instant) +
+        " : planning seulement, aucune présence constatée (vert = prévu)";
       bandeau.classList.add("bibler-bandeau-prevu");
     } else if (donnees && !donnees.direct) {
-      texte = "Presence reelle a " + heureEtJour(donnees.instant);
+      texte = "Présence réelle à " + heureEtJour(donnees.instant);
       bandeau.classList.add("bibler-bandeau-reel");
     }
     var sans = donnees ? donnees.postes.filter(function (p) { return !p.coords; }).length : 0;
@@ -352,7 +352,7 @@
     bandeau.textContent = texte;
     bandeau.hidden = !texte;
     if (btnDirect && donnees && donnees.direct && !erreurCode) {
-      btnDirect.title = "Presence en direct, actualisee chaque minute (maj " + heure(donnees.instant) + ")";
+      btnDirect.title = "Présence en direct, actualisée chaque minute (maj " + heure(donnees.instant) + ")";
     }
   }
 
@@ -450,12 +450,13 @@
     };
     if (surlignage && surlignage.cible) {
       if (estCible(p, surlignage.cible)) {
-        s.color = COULEUR_SURLIGNAGE;
-        s.weight = 5;
-        s.radius = 10;
+        s.color = couleurSurlignage();
+        s.weight = 4;
+        s.radius = 11;
+        s.fillOpacity = grise ? 0.4 : 1;
       } else {
-        s.fillOpacity = 0.2;
-        s.opacity = 0.3;
+        s.fillOpacity = 0.3;
+        s.opacity = 0.35;
       }
     }
     return s;
@@ -467,7 +468,7 @@
     if (p.affectation) d.appendChild(el("div", null, p.affectation));
     var prevu = donnees && donnees.mode === "prevu";
     d.appendChild(el("div", null, (LIBELLES_ETAT[p.etat] || p.etat || "") + " - " +
-      (p.presents || 0) + "/" + (p.planifies || 0) + (prevu ? " prevu(s)" : " present(s)")));
+      (p.presents || 0) + "/" + (p.planifies || 0) + (prevu ? " prévu(s)" : " présent(s)")));
     if (p.consignes) d.appendChild(el("div", "bibler-infobulle-consigne", p.consignes + " consigne(s) en vigueur"));
     return d;
   }
@@ -499,6 +500,14 @@
     var m = L.circleMarker([p.coords.lat, p.coords.lon], styleMarqueur(p, p.numero === posteOuvert));
     m.bindTooltip(infobulle(p), { direction: "top", offset: [0, -6] });
     m.on("click", function () { choisirPoste(p); });
+    if (surlignage && surlignage.cible && estCible(p, surlignage.cible)) {
+      // Halo a la couleur de la priorite : la cible se lit d'un coup d'oeil
+      var c = couleurSurlignage();
+      var halo = L.circleMarker([p.coords.lat, p.coords.lon], {
+        radius: 20, color: c, weight: 2, opacity: 0.9, fillColor: c, fillOpacity: 0.18, interactive: false
+      });
+      return L.layerGroup([halo, m]);
+    }
     return m;
   }
 
@@ -515,7 +524,7 @@
     if (consignes) cls += " bibler-grappe-consigne";
     if (surlignage && surlignage.cible) {
       cls += groupe.some(function (p) { return estCible(p, surlignage.cible); }) ?
-        " bibler-grappe-cible" : " bibler-grappe-estompe";
+        " bibler-grappe-cible bibler-grappe-cible-" + (surlignage.prio || "information") : " bibler-grappe-estompe";
     }
     if (grise) cls += " bibler-grise";
     if (donnees && donnees.mode === "prevu") cls += " bibler-prevu";
@@ -561,7 +570,7 @@
     if (!champRecherche.value.trim()) { fermerSuggestions(); return; }
     if (!suggestionsCourantes.length) {
       listeSuggestions.appendChild(el("li", "bibler-suggestion-vide",
-        donnees ? "Aucun poste" : "Postes non charges"));
+        donnees ? "Aucun poste" : "Postes non chargés"));
     }
     suggestionsCourantes.forEach(function (p, i) {
       var li = el("li", "bibler-suggestion");
@@ -750,9 +759,9 @@
       puce.style.background = COULEURS[resume.etat] || COULEURS.a_venir;
       ligne.appendChild(puce);
       ligne.appendChild(el("span", "bibler-effectif",
-        (resume.presents || 0) + "/" + (resume.planifies || 0) + (prevu ? " prevu(s)" : " present(s)")));
-      if (prevu) ligne.appendChild(el("span", "bibler-tag-prevu", "Prevu a " + heureEtJour(donnees.instant)));
-      else if (donnees && !donnees.direct) ligne.appendChild(el("span", "bibler-tag-reel", "a " + heureEtJour(donnees.instant)));
+        (resume.presents || 0) + "/" + (resume.planifies || 0) + (prevu ? " prévu(s)" : " présent(s)")));
+      if (prevu) ligne.appendChild(el("span", "bibler-tag-prevu", "Prévu à " + heureEtJour(donnees.instant)));
+      else if (donnees && !donnees.direct) ligne.appendChild(el("span", "bibler-tag-reel", "à " + heureEtJour(donnees.instant)));
       if (grise) ligne.appendChild(el("span", "bibler-tag-grise", "Bibler indisponible"));
       tete.appendChild(ligne);
     }
@@ -790,7 +799,7 @@
       }
       if (mi.particuliere) {
         var pp = el("p");
-        pp.appendChild(el("span", "bibler-libelle", "Conduite particuliere : "));
+        pp.appendChild(el("span", "bibler-libelle", "Conduite particulière : "));
         pp.appendChild(document.createTextNode(mi.particuliere));
         dm.appendChild(pp);
       }
@@ -810,7 +819,7 @@
     }
     if (f.materiel && f.materiel.length) {
       var dmat = el("details", "bibler-details");
-      dmat.appendChild(el("summary", null, "Materiel (" + f.materiel.length + ")"));
+      dmat.appendChild(el("summary", null, "Matériel (" + f.materiel.length + ")"));
       var ulm = el("ul");
       f.materiel.forEach(function (m) { ulm.appendChild(el("li", null, m)); });
       dmat.appendChild(ulm);
@@ -819,7 +828,7 @@
 
     // Specimens controles
     if (f.specimens && f.specimens.length) {
-      var ss = section("Specimens controles (" + f.specimens.length + ")");
+      var ss = section("Spécimens contrôlés (" + f.specimens.length + ")");
       var grille = el("div", "bibler-specimens");
       f.specimens.forEach(function (sp) {
         var c = el("figure", "bibler-specimen");
@@ -846,7 +855,7 @@
     }
 
     // Agents en service
-    var sa = section((prevu ? "Agents prevus" : "Agents en service") + " (" + (f.agents || []).length + ")");
+    var sa = section((prevu ? "Agents prévus" : "Agents en service") + " (" + (f.agents || []).length + ")");
     if (!f.agents || !f.agents.length) {
       sa.appendChild(el("div", "bibler-vide", "Aucun agent"));
     } else {
@@ -886,19 +895,22 @@
       sc.appendChild(el("div", "bibler-vide", "Aucune consigne"));
     }
     (f.consignes || []).forEach(function (c) {
-      var li = el("li", "bibler-consigne bibler-priorite-" + sansAccents(c.priorite || "").replace(/[^a-z_]/g, ""));
+      var k = prioConsigne(c);
+      var li = el("li", "bibler-consigne bibler-prio-bord-" + k);
       li.dataset.consigne = c.id || "";
       if (c.id) {
         li.classList.add("bibler-cliquable");
         li.tabIndex = 0;
-        li.title = "Voir le suivi et les postes cibles";
+        li.title = "Voir le suivi et les postes ciblés";
         li.addEventListener("click", function () { surlignerConsigne(c.id); });
         li.addEventListener("keydown", function (e) {
           if (e.key === "Enter") { e.preventDefault(); surlignerConsigne(c.id); }
         });
       }
-      var t = el("div", "bibler-consigne-titre", c.titre || "");
-      if (c.priorite_libelle) t.appendChild(el("span", "bibler-consigne-priorite", c.priorite_libelle));
+      var t = el("div", "bibler-consigne-titre");
+      t.appendChild(iconePrio(k));
+      t.appendChild(el("span", "bibler-consigne-titre-texte", c.titre || ""));
+      t.appendChild(pucePrio(c, k));
       li.appendChild(t);
       if (c.texte) li.appendChild(el("div", "bibler-consigne-texte", c.texte));
       var meta = [c.cible_libelle, c.auteur, c.heure].filter(Boolean).join(" - ");
@@ -936,17 +948,66 @@
     { valeur: "urgente", libelle: "Urgent" }
   ];
   var LIBELLES_ETAT_CONSIGNE = {
-    en_vigueur: "En vigueur", programmee: "Programmee", levee: "Levee",
-    expiree: "Expiree", brouillon: "Brouillon"
+    en_vigueur: "En vigueur", programmee: "Programmée", levee: "Levée",
+    expiree: "Expirée", brouillon: "Brouillon"
   };
   var TITRE_MAX = 120;        // limites de Bibler (TITRE_MAX, TEXTE_MAX)
   var TEXTE_MAX = 600;
   var APERCU_MS = 300;        // anti-rebond de l'apercu des destinataires
-  var COULEUR_SURLIGNAGE = "#2563eb";
+  // Priorite d'une consigne : icone et couleur du bandeau, de la bordure et
+  // du surlignage des postes cibles
+  var PRIORITES_CONSIGNE = {
+    information: { icone: "info", couleur: "#2563eb", libelle: "Information" },
+    importante: { icone: "warning", couleur: "#d97706", libelle: "Important" },
+    urgente: { icone: "priority_high", couleur: "#dc2626", libelle: "Urgent" }
+  };
   var RE_ID = /^[0-9a-fA-F]{24}$/;
   var RE_FORMAT = /^\d{2}:\d{2}-\d{2}:\d{2}$/;
 
   function peutPublier() { return window.BIBLER_PUBLISH === true; }
+
+  function prioConsigne(c) {
+    var k = sansAccents((c && c.priorite) || "").replace(/[^a-z]/g, "");
+    return PRIORITES_CONSIGNE[k] ? k : "information";
+  }
+
+  function couleurSurlignage() {
+    return PRIORITES_CONSIGNE[(surlignage && surlignage.prio) || "information"].couleur;
+  }
+
+  function iconePrio(k) {
+    var i = icone(PRIORITES_CONSIGNE[k].icone);
+    i.classList.add("bibler-prio-ico", "bibler-prio-ico-" + k);
+    return i;
+  }
+
+  function pucePrio(c, k) {
+    return el("span", "bibler-prio-puce bibler-prio-puce-" + k, c.priorite_libelle || PRIORITES_CONSIGNE[k].libelle);
+  }
+
+  // Ligne "icone + texte" des informations d'une consigne
+  function ligneInfo(nom, texte) {
+    var d = el("div", "bibler-info");
+    d.appendChild(icone(nom));
+    var t = el("span", null, texte);
+    d.appendChild(t);
+    return d;
+  }
+
+  // Barre de progression du suivi (lu, transmis)
+  function jauge(libelle, n, total, part) {
+    var d = el("div", "bibler-jauge" + (total && n >= total ? " bibler-jauge-pleine" : ""));
+    var tete = el("div", "bibler-jauge-tete");
+    tete.appendChild(el("span", null, libelle));
+    tete.appendChild(el("b", null, (n || 0) + "/" + (total || 0) + " (" + (part || 0) + " %)"));
+    d.appendChild(tete);
+    var fond = el("div", "bibler-jauge-fond");
+    var plein = el("div", "bibler-jauge-plein");
+    plein.style.width = Math.max(0, Math.min(100, Number(part) || 0)) + "%";
+    fond.appendChild(plein);
+    d.appendChild(fond);
+    return d;
+  }
 
   function jetonCsrf() {
     var m = document.querySelector('meta[name="csrf-token"]');
@@ -988,29 +1049,29 @@
   function messageEcriture(rep, creation) {
     var c = rep.corps || {};
     var code = c.erreur || c.code || "";
-    if (code === "bibler_non_configure") return { texte: "Bibler n'est pas configure dans Cockpit." };
+    if (code === "bibler_non_configure") return { texte: "Bibler n'est pas configuré dans Cockpit." };
     if (code === "bibler_refus_service") {
-      return { texte: "Bibler refuse l'acces de Cockpit : configuration du pont a verifier (administrateur)." };
+      return { texte: "Bibler refuse l'accès de Cockpit : configuration du pont à vérifier (administrateur)." };
     }
     if (rep.statut === 0 || rep.statut === 502 || rep.statut === 503 || code === "bibler_indisponible") {
       return { texte: creation ?
-        "Bibler n'a pas repondu : reessayez, la meme publication ne sera pas doublee." :
-        "Bibler n'a pas repondu : reessayez." };
+        "Bibler n'a pas répondu : réessayez, la meme publication ne sera pas doublee." :
+        "Bibler n'a pas répondu : réessayez." };
     }
     if (code === "requete_en_cours") {
       return { texte: "Publication en cours de traitement par Bibler : reessayez dans quelques secondes " +
         "(sans risque de doublon)." };
     }
     if (code === "idempotence_conflit") {
-      return { texte: "Ce formulaire a deja ete envoye avec un autre contenu : verifiez la liste des " +
+      return { texte: "Ce formulaire a déjà été envoyé avec un autre contenu : vérifiez la liste des " +
         "consignes, puis fermez et rouvrez le formulaire pour une nouvelle consigne.", recharger: true };
     }
-    if (code === "consigne_levee") return { texte: c.message || "Consigne deja levee.", recharger: true };
+    if (code === "consigne_levee") return { texte: c.message || "Consigne déjà levée.", recharger: true };
     if (rep.statut === 409 || code === "version_perimee") {
-      return { texte: "Consigne modifiee entre-temps : elle a ete rechargee.", recharger: true };
+      return { texte: "Consigne modifiée entre-temps : elle a été rechargée.", recharger: true };
     }
     if (code === "droit_insuffisant") return { texte: "Droit insuffisant pour donner des consignes." };
-    if (code === "csrf") return { texte: "Session expiree : rechargez la page." };
+    if (code === "csrf") return { texte: "Session expirée : rechargez la page." };
     return { texte: c.message || c.error || ("Erreur Bibler (" + rep.statut + ")") };
   }
 
@@ -1145,10 +1206,10 @@
     if (st.secteur) liste.push({ cle: "secteur", libelle: "Secteur " + st.secteur, cible: { secteurs: [st.secteur] } });
     if (st.zone) liste.push({ cle: "zone", libelle: "Zone " + st.zone, cible: { zones: [st.zone] } });
     if (st.departement) {
-      liste.push({ cle: "departement", libelle: "Departement " + st.departement,
+      liste.push({ cle: "departement", libelle: "Département " + st.departement,
                    cible: { departements: [st.departement] } });
     }
-    liste.push({ cle: "tout", libelle: "Tout l'evenement", cible: { tout_evenement: true } });
+    liste.push({ cle: "tout", libelle: "Tout l'événement", cible: { tout_evenement: true } });
     return liste;
   }
 
@@ -1266,10 +1327,10 @@
     form.appendChild(el("h4", "bibler-section-titre", "Donner une consigne"));
 
     // 1. A qui
-    form.appendChild(el("div", "bibler-form-libelle", "A qui"));
+    form.appendChild(el("div", "bibler-form-libelle", "À qui"));
     var pc = el("div", "bibler-puces");
     pc.setAttribute("role", "group");
-    pc.setAttribute("aria-label", "A qui");
+    pc.setAttribute("aria-label", "À qui");
     fo.cibles.forEach(function (c) {
       var b = puce(c.libelle, function () {
         if (fo.cible === c.cle) return;
@@ -1309,7 +1370,7 @@
     var prio = selectPriorite("information");
     prio.name = "priorite";
     fo.el.priorite = prio;
-    form.appendChild(champ("Priorite", prio));
+    form.appendChild(champ("Priorité", prio));
 
     // Options repliees : question de controle, dans le briefing
     var opt = el("details", "bibler-details bibler-form-options");
@@ -1318,19 +1379,19 @@
     q.type = "text";
     q.maxLength = 300;
     fo.el.question = q;
-    opt.appendChild(champ("Question de controle", q));
+    opt.appendChild(champ("Question de contrôle", q));
     var bonne = el("input", "bibler-form-saisie");
     bonne.type = "text";
     bonne.maxLength = 200;
     fo.el.bonne = bonne;
-    opt.appendChild(champ("Bonne reponse", bonne));
+    opt.appendChild(champ("Bonne réponse", bonne));
     fo.el.mauvaises = [];
     for (var i = 1; i <= 3; i++) {
       var m = el("input", "bibler-form-saisie");
       m.type = "text";
       m.maxLength = 200;
       fo.el.mauvaises.push(m);
-      opt.appendChild(champ("Mauvaise reponse " + i + (i === 3 ? " (facultative)" : ""), m));
+      opt.appendChild(champ("Mauvaise réponse " + i + (i === 3 ? " (facultative)" : ""), m));
     }
     var lb = el("label", "bibler-form-case");
     var briefing = el("input");
@@ -1347,7 +1408,7 @@
     fo.el.apercu = el("div", "bibler-apercu");
     fo.el.apercu.setAttribute("aria-live", "polite");
     form.appendChild(fo.el.apercu);
-    form.appendChild(el("div", "bibler-rappel", "Pas de nom, de telephone ni d'e-mail dans la consigne"));
+    form.appendChild(el("div", "bibler-rappel", "Pas de nom, de téléphone ni d'e-mail dans la consigne"));
     fo.el.message = el("div", "bibler-note");
     fo.el.message.setAttribute("role", "alert");
     fo.el.message.hidden = true;
@@ -1443,14 +1504,14 @@
         if (formulaire !== fo || gen !== fo.genApercu) return;
         var n = rep.statut === 200 && rep.corps ? rep.corps.encadrants : undefined;
         if (typeof n === "number") {
-          fo.el.apercu.textContent = "Environ " + n + (n > 1 ? " encadrants concernes" : " encadrant concerne");
+          fo.el.apercu.textContent = "Environ " + n + (n > 1 ? " encadrants concernés" : " encadrant concerné");
         } else {
-          fo.el.apercu.textContent = "Apercu indisponible : " + erreurDe(rep).texte;
+          fo.el.apercu.textContent = "Aperçu indisponible : " + erreurDe(rep).texte;
         }
       })
       .catch(function () {
         if (formulaire !== fo || gen !== fo.genApercu) return;
-        fo.el.apercu.textContent = "Apercu indisponible : Bibler indisponible";
+        fo.el.apercu.textContent = "Aperçu indisponible : Bibler indisponible";
       });
   }
 
@@ -1460,7 +1521,7 @@
     fo.el.message.classList.toggle("bibler-note-erreur", !!erreur);
   }
 
-  // Question de controle : null (aucune), objet, ou false (incomplete)
+  // Question de contrôle : null (aucune), objet, ou false (incomplete)
   function questionControle(fo) {
     var question = fo.el.question.value.trim();
     var bonne = fo.el.bonne.value.trim();
@@ -1468,8 +1529,8 @@
     if (!question && !bonne && !mauvaises.length) return null;
     if (!question || !bonne || mauvaises.length < 2) {
       fo.el.options.open = true;
-      messageFormulaire(fo, "La question de controle demande la question, la bonne reponse et 2 ou 3 " +
-        "mauvaises reponses (ou videz ces champs).", true);
+      messageFormulaire(fo, "La question de contrôle demande la question, la bonne réponse et 2 ou 3 " +
+        "mauvaises réponses (ou videz ces champs).", true);
       return false;
     }
     return { question: question, bonne: bonne, mauvaises: mauvaises };
@@ -1485,7 +1546,7 @@
     if (fo.enCours || formulaire !== fo) return;   // double clic : une seule requete
     var titre = fo.el.titre.value.trim();
     if (!titre) {
-      messageFormulaire(fo, "Donnez un titre a la consigne.", true);
+      messageFormulaire(fo, "Donnez un titre à la consigne.", true);
       fo.el.titre.focus();
       return;
     }
@@ -1517,7 +1578,7 @@
         var c = rep.corps.consigne || {};
         var etaitOuvert = formulaire === fo;
         if (etaitOuvert) jeterFormulaire();   // la prochaine ouverture aura une nouvelle cle
-        notePublication = { numero: fo.numero, texte: "Consigne publiee : " + (c.titre || titre) +
+        notePublication = { numero: fo.numero, texte: "Consigne publiée : " + (c.titre || titre) +
           (c.cible_libelle ? " (" + c.cible_libelle + ")" : "") };
         var actions = document.getElementById("bibler-panneau-actions");
         if (etaitOuvert && actions && panneau._fiche && actions.dataset.numero === String(fo.numero)) {
@@ -1571,20 +1632,27 @@
       var li = el("li", "bibler-ligne-consigne");
       li.setAttribute("role", "option");
       if (surlignage && surlignage.id === c.id) li.classList.add("active");
-      var b = el("button", "bibler-ligne-btn");
+      var k = prioConsigne(c);
+      var b = el("button", "bibler-ligne-btn bibler-prio-bord-" + k);
       b.type = "button";
       b.dataset.consigne = c.id;
-      var t = el("span", "bibler-consigne-titre", c.titre || "");
-      if (c.priorite_libelle) {
-        t.appendChild(el("span", "bibler-consigne-priorite bibler-prio-" +
-          sansAccents(c.priorite || "").replace(/[^a-z]/g, ""), c.priorite_libelle));
-      }
+      var t = el("span", "bibler-consigne-titre");
+      t.appendChild(iconePrio(k));
+      t.appendChild(el("span", "bibler-consigne-titre-texte", c.titre || ""));
+      t.appendChild(pucePrio(c, k));
       b.appendChild(t);
       if (c.cible_libelle) b.appendChild(el("span", "bibler-consigne-meta", c.cible_libelle));
       var s = c.suivi;
       if (s) {
-        b.appendChild(el("span", "bibler-consigne-taux", "Lu " + (s.part_lue || 0) + " % - transmis " +
-          (s.part_transmise || 0) + " %" + (s.total ? " (" + s.total + " encadrant(s))" : "")));
+        var taux = el("span", "bibler-ligne-taux" + ((s.part_lue || 0) >= 100 ? " bibler-jauge-pleine" : ""));
+        var fond = el("span", "bibler-jauge-fond");
+        var plein = el("span", "bibler-jauge-plein");
+        plein.style.width = Math.max(0, Math.min(100, Number(s.part_lue) || 0)) + "%";
+        fond.appendChild(plein);
+        taux.appendChild(fond);
+        taux.appendChild(el("span", "bibler-consigne-taux", "Lu " + (s.part_lue || 0) + " % - transmis " +
+          (s.part_transmise || 0) + " %" + (s.total ? " - " + s.total + " encadrant(s)" : "")));
+        b.appendChild(taux);
       }
       b.addEventListener("click", function () { surlignerConsigne(c.id); });
       li.appendChild(b);
@@ -1603,7 +1671,8 @@
     if (!panneau) return;
     fermerListeConsignes();
     var connue = (consignesListe || []).filter(function (c) { return c.id === id; })[0];
-    surlignage = { id: id, cible: connue ? connue.cible || {} : null, ajuste: false };
+    surlignage = { id: id, cible: connue ? connue.cible || {} : null, ajuste: false,
+                   prio: connue ? prioConsigne(connue) : "information" };
     posteOuvert = null;
     genFiche++;
     consigneOuverte = id;
@@ -1643,6 +1712,7 @@
           var c = rep.corps.consigne;
           if (surlignage && surlignage.id === id) {
             surlignage.cible = c.cible || {};
+            surlignage.prio = prioConsigne(c);
             rendre();
             ajusterSurlignage();
           }
@@ -1668,57 +1738,65 @@
   function libellePeriode(c) {
     if (!c.debut && !c.fin) return "";
     var t = c.debut ? "Du " + heureEtJour(c.debut) : "Depuis la publication";
-    return t + (c.fin ? " au " + heureEtJour(c.fin) : ", jusqu'a la levee");
+    return t + (c.fin ? " au " + heureEtJour(c.fin) : ", jusqu'à la levée");
   }
 
   function afficherConsigne(c, suivi, note) {
     viderPanneau();
-    panneau.appendChild(enteteSimple("Consigne"));
+    var k = prioConsigne(c);
+    // Bandeau a la couleur de la priorite (information, important, urgent)
+    var entete = enteteSimple("Consigne - " + (c.priorite_libelle || PRIORITES_CONSIGNE[k].libelle));
+    entete.classList.add("bibler-entete-consigne", "bibler-entete-" + k);
+    entete.insertBefore(icone(PRIORITES_CONSIGNE[k].icone), entete.firstChild);
+    panneau.appendChild(entete);
 
-    var tete = el("div", "bibler-panneau-tete");
-    tete.appendChild(el("div", "bibler-affectation", c.titre || ""));
+    var tete = el("div", "bibler-panneau-tete bibler-consigne-tete");
+    tete.appendChild(el("div", "bibler-consigne-grand-titre", c.titre || ""));
     var ligne = el("div", "bibler-etat-ligne");
-    if (c.priorite_libelle) {
-      ligne.appendChild(el("span", "bibler-consigne-priorite bibler-prio-" +
-        sansAccents(c.priorite || "").replace(/[^a-z]/g, ""), c.priorite_libelle));
-    }
     ligne.appendChild(el("span", "bibler-etat-consigne bibler-etat-consigne-" +
       String(c.etat || "").replace(/[^a-z_]/g, ""), LIBELLES_ETAT_CONSIGNE[c.etat] || c.etat || ""));
+    if (c.dans_briefing) ligne.appendChild(el("span", "bibler-tag-reel", "Dans le briefing"));
     if (c.modifiee) ligne.appendChild(el("span", "bibler-tag-reel", "version " + c.version));
     tete.appendChild(ligne);
-    if (c.cible_libelle) tete.appendChild(el("div", "bibler-chemin", c.cible_libelle));
-    var cibles = el("div", "bibler-consigne-meta");
-    tete.appendChild(cibles);
     panneau.appendChild(tete);
+
+    var corps = el("div", "bibler-panneau-corps");
+    // Le message d'abord, en grand : c'est ce que l'encadrant recoit
+    if (c.texte) corps.appendChild(el("div", "bibler-consigne-message bibler-prio-bord-" + k, c.texte));
+
+    var infos = el("div", "bibler-infos");
+    if (c.cible_libelle) infos.appendChild(ligneInfo("groups", c.cible_libelle));
+    var cibles = ligneInfo("my_location", "");
+    cibles.classList.add("bibler-info-cibles");
+    var ciblesTexte = cibles.lastChild;
+    infos.appendChild(cibles);
+    var periode = libellePeriode(c);
+    if (periode) infos.appendChild(ligneInfo("schedule", periode));
+    if (c.etat === "levee" && c.levee_heure) infos.appendChild(ligneInfo("block", "Levée à " + c.levee_heure));
+    var meta = [c.auteur, c.heure].filter(Boolean).join(" - ");
+    if (meta) infos.appendChild(ligneInfo("person", "Par " + meta));
+    corps.appendChild(infos);
 
     // Nombre de postes surlignes (mis a jour a chaque rechargement de la couche)
     panneau._majCibles = function () {
-      if (!donnees) { cibles.textContent = "Postes non charges"; return; }
+      if (!donnees) { ciblesTexte.textContent = "Postes non chargés"; return; }
       var vises = donnees.postes.filter(function (p) { return estCible(p, c.cible); });
       var sans = vises.filter(function (p) { return !p.coords; }).length;
-      cibles.textContent = vises.length + " poste(s) cible(s) en surbrillance" +
+      ciblesTexte.textContent = vises.length + " poste(s) en surbrillance sur la carte" +
         (sans ? ", " + sans + " sans position" : "");
     };
     panneau._majCibles();
 
-    var corps = el("div", "bibler-panneau-corps");
-    var s0 = section(null);
-    if (c.texte) s0.appendChild(el("div", "bibler-consigne-texte", c.texte));
-    var meta = [c.auteur, c.heure].filter(Boolean).join(" - ");
-    if (meta) s0.appendChild(el("div", "bibler-consigne-meta", "Par " + meta));
-    var periode = libellePeriode(c);
-    if (periode) s0.appendChild(el("div", "bibler-consigne-meta", periode));
-    if (c.etat === "levee" && c.levee_heure) s0.appendChild(el("div", "bibler-consigne-meta", "Levee a " + c.levee_heure));
-    if (c.dans_briefing) s0.appendChild(el("div", "bibler-consigne-meta", "Dans le briefing"));
-    corps.appendChild(s0);
-
     var qc = c.question_controle;
     if (qc && qc.question) {
-      var dq = el("details", "bibler-details");
-      dq.appendChild(el("summary", null, "Question de controle"));
+      var dq = el("details", "bibler-details bibler-question");
+      var sq = el("summary");
+      sq.appendChild(icone("quiz"));
+      sq.appendChild(document.createTextNode(" Question de contrôle"));
+      dq.appendChild(sq);
       dq.appendChild(el("p", null, qc.question));
       var ulq = el("ul");
-      if (qc.bonne) ulq.appendChild(el("li", "bibler-bonne", qc.bonne + " (bonne reponse)"));
+      if (qc.bonne) ulq.appendChild(el("li", "bibler-bonne", qc.bonne + " (bonne réponse)"));
       (qc.mauvaises || qc.choix || []).forEach(function (m) { ulq.appendChild(el("li", null, m)); });
       dq.appendChild(ulq);
       corps.appendChild(dq);
@@ -1735,22 +1813,21 @@
   }
 
   function sectionSuivi(suivi) {
-    var ss = section("Suivi");
+    var ss = section("Accusés de réception");
     if (!suivi) {
       ss.appendChild(el("div", "bibler-vide", "Suivi indisponible"));
       return ss;
     }
     var total = suivi.total || 0;
-    ss.appendChild(el("div", "bibler-suivi-taux", "Lu " + (suivi.lus || 0) + "/" + total + " (" +
-      (suivi.part_lue || 0) + " %) - transmis " + (suivi.transmis || 0) + "/" + total + " (" +
-      (suivi.part_transmise || 0) + " %)"));
+    ss.appendChild(jauge("Lu par les encadrants", suivi.lus, total, suivi.part_lue));
+    ss.appendChild(jauge("Transmis aux agents", suivi.transmis, total, suivi.part_transmise));
     if (suivi.mauvaises_reponses) {
-      ss.appendChild(el("div", "bibler-consigne-meta", suivi.mauvaises_reponses + " mauvaise(s) reponse(s) " +
-        "a la question de controle"));
+      ss.appendChild(el("div", "bibler-note bibler-note-erreur", suivi.mauvaises_reponses + " mauvaise(s) réponse(s) " +
+        "à la question de contrôle"));
     }
     var lignes = (suivi.lignes || []).map(function (l, i) { return { l: l, i: i }; });
     if (!lignes.length) {
-      ss.appendChild(el("div", "bibler-vide", "Aucun encadrant concerne"));
+      ss.appendChild(el("div", "bibler-vide", "Aucun encadrant concerné"));
       return ss;
     }
     // Qui manque d'abord
@@ -1759,6 +1836,9 @@
     lignes.forEach(function (x) {
       var l = x.l;
       var li = el("li", l.lu ? "" : "bibler-suivi-manque");
+      var ico = icone(l.lu ? "check_circle" : "radio_button_unchecked");
+      ico.classList.add("bibler-suivi-ico");
+      li.appendChild(ico);
       var gauche = el("span", "bibler-suivi-qui");
       gauche.appendChild(el("span", "bibler-agent-nom", l.nom || "?"));
       gauche.appendChild(el("small", null, l.cible === false ? "hors cible" : (l.perimetre || "")));
@@ -1766,7 +1846,7 @@
       var etats = el("span", "bibler-suivi-etats");
       if (!l.lu) etats.appendChild(el("span", "bibler-statut bibler-statut-manque", "Non lu"));
       if (l.lu) etats.appendChild(el("span", "bibler-statut", "Lu " + l.lu));
-      if (l.valide) etats.appendChild(el("span", "bibler-statut bibler-statut-ok", "Valide " + l.valide));
+      if (l.valide) etats.appendChild(el("span", "bibler-statut bibler-statut-ok", "Validé " + l.valide));
       if (l.transmis) {
         etats.appendChild(el("span", "bibler-statut bibler-statut-ok", "Transmis " + l.transmis +
           (l.agents_informes ? " (" + l.agents_informes + " agent(s))" : "")));
@@ -1800,8 +1880,8 @@
       var zt = zoneTexte(st.texte !== undefined ? st.texte : (c.texte || ""));
       form.appendChild(champ("Texte", zt.saisie, zt.compteur));
       var prio = selectPriorite(st.priorite || c.priorite);
-      form.appendChild(champ("Priorite", prio));
-      form.appendChild(el("div", "bibler-rappel", "Pas de nom, de telephone ni d'e-mail dans la consigne"));
+      form.appendChild(champ("Priorité", prio));
+      form.appendChild(el("div", "bibler-rappel", "Pas de nom, de téléphone ni d'e-mail dans la consigne"));
       var msg = el("div", "bibler-note bibler-note-erreur");
       msg.setAttribute("role", "alert");
       msg.hidden = true;
@@ -1819,7 +1899,7 @@
       form.addEventListener("submit", function (e) {
         e.preventDefault();
         if (enCours) return;
-        if (!titre.value.trim()) { msg.textContent = "Donnez un titre a la consigne."; msg.hidden = false; return; }
+        if (!titre.value.trim()) { msg.textContent = "Donnez un titre à la consigne."; msg.hidden = false; return; }
         enCours = true;
         ok.disabled = true;
         ok.textContent = "Enregistrement...";
@@ -1827,7 +1907,7 @@
         ecrire("PATCH", "/api/bibler/consignes/" + encodeURIComponent(c.id), corps).then(function (rep) {
           if (consigneOuverte !== c.id) return;
           if (rep.statut === 200 && rep.corps && rep.corps.ok !== false) {
-            chargerDetail(c.id, "Consigne modifiee");
+            chargerDetail(c.id, "Consigne modifiée");
             apresEcriture();
             return;
           }
@@ -1851,13 +1931,13 @@
 
     if (st.mode === "lever") {
       var conf = el("div", "bibler-confirmation");
-      conf.appendChild(el("div", null, "Lever cette consigne ? Elle ne sera plus diffusee aux encadrants."));
+      conf.appendChild(el("div", null, "Lever cette consigne ? Elle ne sera plus diffusée aux encadrants."));
       var msgL = el("div", "bibler-note bibler-note-erreur");
       msgL.setAttribute("role", "alert");
       msgL.hidden = true;
       conf.appendChild(msgL);
       var bl = el("div", "bibler-form-boutons");
-      var oui = el("button", "bibler-btn bibler-btn-danger", "Confirmer la levee");
+      var oui = el("button", "bibler-btn bibler-btn-danger", "Confirmer la levée");
       oui.type = "button";
       oui.id = "bibler-confirmer-levee";
       var annuler = el("button", "bibler-btn", "Annuler");
@@ -1868,11 +1948,11 @@
         if (enCoursL) return;
         enCoursL = true;
         oui.disabled = true;
-        oui.textContent = "Levee...";
+        oui.textContent = "Levée...";
         ecrire("POST", "/api/bibler/consignes/" + encodeURIComponent(c.id) + "/lever", {}).then(function (rep) {
           if (consigneOuverte !== c.id) return;
           if (rep.statut === 200 && rep.corps && rep.corps.ok !== false) {
-            chargerDetail(c.id, "Consigne levee");
+            chargerDetail(c.id, "Consigne levée");
             apresEcriture();
             return;
           }
@@ -1884,7 +1964,7 @@
           }
           enCoursL = false;
           oui.disabled = false;
-          oui.textContent = "Confirmer la levee";
+          oui.textContent = "Confirmer la levée";
           msgL.textContent = m.texte;
           msgL.hidden = false;
         });
