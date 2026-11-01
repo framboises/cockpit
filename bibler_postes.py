@@ -57,6 +57,34 @@ def _role_required(role):
     return deco
 
 
+_RE_CODE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_REFUS_SERVICE = {"ok": False, "erreur": "bibler_refus_service",
+                  "message": "Bibler refuse l'acces de Cockpit (configuration du pont)."}
+
+
+def _code_bibler(corps):
+    """Code d'erreur de Bibler (seul element journalise du corps), '?' s'il est absent ou suspect."""
+    code = (corps.get("erreur") or corps.get("code")) if isinstance(corps, dict) else None
+    return code if isinstance(code, str) and _RE_CODE.match(code) else "?"
+
+
+def _erreur_bibler(e, defaut):
+    """Reponse a une erreur 4xx de Bibler, journalisee (route + code, jamais le corps ni le jeton).
+
+    Un 401 / 403 de Bibler vise le jeton de service de Cockpit (auth_invalide, ip_refusee...) : il
+    n'est jamais relaye tel quel, sinon session_portail.js couperait l'onglet de l'operateur
+    ("reconnectez-vous"). Il devient 502 `bibler_refus_service`.
+    """
+    code = _code_bibler(e.corps)
+    if e.statut in (401, 403):
+        logger.warning("Bibler refuse le jeton de service de Cockpit : %s %s -> %s %s",
+                       request.method, request.path, e.statut, code)
+        return jsonify(dict(_REFUS_SERVICE)), 502
+    logger.warning("Bibler %s %s -> %s %s", request.method, request.path, e.statut, code)
+    corps = e.corps if isinstance(e.corps, (dict, list)) and e.corps else defaut
+    return jsonify(corps), e.statut
+
+
 def _lecture(f):
     """role_required('user') puis droit `bibler_postes`, erreurs du pont mappees."""
     @_role_required("user")
@@ -73,9 +101,7 @@ def _lecture(f):
         except bibler_pont.BiblerIndisponible:
             return jsonify({"error": "Bibler indisponible", "code": "bibler_indisponible"}), 502
         except bibler_pont.BiblerErreur as e:
-            corps = e.corps if isinstance(e.corps, (dict, list)) and e.corps else \
-                {"error": "Erreur Bibler", "code": "bibler_erreur"}
-            return jsonify(corps), e.statut
+            return _erreur_bibler(e, {"error": "Erreur Bibler", "code": "bibler_erreur"})
     return wrapper
 
 
@@ -253,9 +279,7 @@ def _ecriture(f):
         except bibler_pont.BiblerIndisponible:
             return _err("bibler_indisponible", "Bibler indisponible.", 502)
         except bibler_pont.BiblerErreur as e:
-            corps = e.corps if isinstance(e.corps, (dict, list)) and e.corps else \
-                {"ok": False, "erreur": "bibler_erreur", "message": "Erreur Bibler."}
-            return jsonify(corps), e.statut
+            return _erreur_bibler(e, {"ok": False, "erreur": "bibler_erreur", "message": "Erreur Bibler."})
     return wrapper
 
 

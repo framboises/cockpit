@@ -74,6 +74,9 @@
     var c = rep.corps || {};
     var code = c.erreur || c.code || "";
     if (code === "bibler_non_configure") return "Bibler n'est pas configure dans Cockpit.";
+    if (code === "bibler_refus_service") {
+      return "Bibler refuse l'acces de Cockpit : configuration du pont a verifier (administrateur).";
+    }
     if (rep.statut === 0 || rep.statut === 502 || rep.statut === 503 || code === "bibler_indisponible") {
       return "Bibler n'a pas repondu : reessayez.";
     }

@@ -332,3 +332,73 @@ def test_vider_cache_garde_les_visuels():
     bibler_pont.vider_cache()
     assert bibler_pont._cache_get(("bin", "/x")) is not None
     assert bibler_pont._cache_get(("/api/v1/consignes", (), ("consignes:lire",))) is None
+
+
+# --- Refus du jeton de service par Bibler : jamais relaye en 401/403 (session_portail.js) ----------------------------
+
+@pytest.mark.parametrize("statut,code", [(401, "auth_invalide"), (401, "auth_requise"),
+                                         (403, "ip_refusee"), (403, "capacite_manquante")])
+def test_lecture_refus_service_traduit(env, caplog, statut, code):
+    import logging
+
+    def boom(*a, **k):
+        raise bibler_pont.BiblerErreur(statut, {"ok": False, "erreur": code})
+    env.mp.setattr(bibler_pont, "lire", boom)
+    with caplog.at_level(logging.WARNING, logger="bibler_postes"):
+        r = env.client.get("/api/bibler/postes?event=E&year=2026")
+    assert r.status_code == 502
+    assert r.status_code not in (401, 403)
+    assert r.get_json() == {"ok": False, "erreur": "bibler_refus_service",
+                            "message": "Bibler refuse l'acces de Cockpit (configuration du pont)."}
+    assert any(code in m and "/api/bibler/postes" in m for m in caplog.messages)
+
+
+@pytest.mark.parametrize("statut,code", [(401, "auth_invalide"), (403, "ip_refusee")])
+def test_ecriture_refus_service_traduit(ecr, caplog, statut, code):
+    import logging
+
+    def boom(*a, **k):
+        raise bibler_pont.BiblerErreur(statut, {"ok": False, "erreur": code})
+    ecr.mp.setattr(bibler_pont, "envoyer", boom)
+    with caplog.at_level(logging.WARNING, logger="bibler_postes"):
+        r = ecr.client.post("/api/bibler/consignes/%s/lever" % ("a1" * 12))
+    assert r.status_code == 502
+    assert r.get_json()["erreur"] == "bibler_refus_service"
+    assert any(code in m and "/lever" in m for m in caplog.messages)
+
+
+def test_refus_service_corps_vide(env):
+    def boom(*a, **k):
+        raise bibler_pont.BiblerErreur(401, None)
+    env.mp.setattr(bibler_pont, "lire", boom)
+    r = env.client.get("/api/bibler/formats")
+    assert r.status_code == 502 and r.get_json()["erreur"] == "bibler_refus_service"
+
+
+def test_droit_insuffisant_cockpit_reste_403(env, ecr):
+    ecr.who["publier"] = False
+    r = ecr.client.post("/api/bibler/consignes/%s/lever" % ("a1" * 12))
+    assert r.status_code == 403 and r.get_json()["erreur"] == "droit_insuffisant"
+    ecr.who["voir"] = False
+    r = ecr.client.get("/api/bibler/postes")
+    assert r.status_code == 403 and r.get_json()["code"] == "droit_insuffisant"
+
+
+def test_4xx_bibler_journalise(env, ecr, caplog):
+    import logging
+
+    def boom_l(*a, **k):
+        raise bibler_pont.BiblerErreur(404, {"code": "evenement_inconnu", "detail": "secret-texte"})
+
+    def boom_e(*a, **k):
+        raise bibler_pont.BiblerErreur(422, {"ok": False, "erreur": "donnees_personnelles",
+                                             "message": "06 12 34 56 78"})
+    ecr.mp.setattr(bibler_pont, "lire", boom_l)
+    ecr.mp.setattr(bibler_pont, "envoyer", boom_e)
+    with caplog.at_level(logging.WARNING, logger="bibler_postes"):
+        assert ecr.client.get("/api/bibler/postes?event=X").status_code == 404
+        assert ecr.client.patch("/api/bibler/consignes/" + "a1" * 12, json={"version": 1}).status_code == 422
+    msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("evenement_inconnu" in m and "/api/bibler/postes" in m for m in msgs)
+    assert any("donnees_personnelles" in m and "/api/bibler/consignes/" in m for m in msgs)
+    assert not any("secret-texte" in m or "06 12" in m for m in msgs)
