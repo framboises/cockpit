@@ -147,9 +147,6 @@ def test_droits_groupe():
 
 # --- Ecriture ---------------------------------------------------------------------------------------------------
 
-from datetime import datetime, timezone
-
-MAINT = datetime(2026, 6, 13, 9, 30, tzinfo=timezone.utc)
 BASE = {"titre": "T", "texte": "X", "priorite": "information", "event": "SAISON", "year": 2026,
         "cible": {"departements": ["D"], "zones": [], "secteurs": [], "postes": [1], "tout_evenement": False},
         "dans_briefing": True}
@@ -160,8 +157,8 @@ def _form(duree):
 
 
 def test_duree_permanente():
-    c = BP.consigne_depuis_formulaire(_form({"mode": "permanente"}), MAINT)
-    assert c["debut"] == "2026-06-13T09:30:00+00:00" and "fin" not in c
+    c = BP.consigne_depuis_formulaire(_form({"mode": "permanente"}))
+    assert "debut" not in c and "fin" not in c
     assert c["cible"]["formats"] == [] and c["statut"] == "publiee"
     assert c["titre"] == "T" and c["event"] == "SAISON" and c["year"] == 2026
     assert c["cible"]["postes"] == [1] and c["dans_briefing"] is True
@@ -170,20 +167,20 @@ def test_duree_permanente():
 def test_duree_shift():
     d = {"mode": "shift", "debut": "2026-06-13T10:00:00+02:00", "fin": "2026-06-13T18:00:00+02:00",
          "format": "10:00-18:00"}
-    c = BP.consigne_depuis_formulaire(_form(d), MAINT)
+    c = BP.consigne_depuis_formulaire(_form(d))
     assert c["debut"] == d["debut"] and c["fin"] == d["fin"] and c["cible"]["formats"] == ["10:00-18:00"]
 
 
 def test_duree_format():
-    c = BP.consigne_depuis_formulaire(_form({"mode": "format", "format": "10:00-18:00"}), MAINT)
-    assert c["debut"] == "2026-06-13T09:30:00+00:00" and "fin" not in c
+    c = BP.consigne_depuis_formulaire(_form({"mode": "format", "format": "10:00-18:00"}))
+    assert "debut" not in c and "fin" not in c
     assert c["cible"]["formats"] == ["10:00-18:00"]
 
 
 def test_duree_shift_passe_minuit():
     d = {"mode": "shift", "debut": "2026-06-13T18:00:00+02:00", "fin": "2026-06-14T02:00:00+02:00",
          "format": "18:00-02:00"}
-    assert BP.consigne_depuis_formulaire(_form(d), MAINT)["fin"] == d["fin"]
+    assert BP.consigne_depuis_formulaire(_form(d))["fin"] == d["fin"]
 
 
 @pytest.mark.parametrize("debut,fin", [
@@ -195,14 +192,14 @@ def test_duree_shift_passe_minuit():
 ])
 def test_duree_shift_invalide(debut, fin):
     with pytest.raises(ValueError, match="shift_invalide"):
-        BP.consigne_depuis_formulaire(_form({"mode": "shift", "debut": debut, "fin": fin, "format": "f"}), MAINT)
+        BP.consigne_depuis_formulaire(_form({"mode": "shift", "debut": debut, "fin": fin, "format": "f"}))
 
 
 def test_duree_invalide():
     with pytest.raises(ValueError, match="duree_invalide"):
-        BP.consigne_depuis_formulaire(_form({"mode": "x"}), MAINT)
+        BP.consigne_depuis_formulaire(_form({"mode": "x"}))
     with pytest.raises(ValueError, match="duree_invalide"):
-        BP.consigne_depuis_formulaire(_form({"mode": "format"}), MAINT)
+        BP.consigne_depuis_formulaire(_form({"mode": "format"}))
 
 
 @pytest.fixture
@@ -247,13 +244,13 @@ def test_relais_transmet_cle_idempotence(ecr):
                     headers={"X-Idempotency-Key": "k-1"})
     assert ecr.envois[0][3] == "k-1"
     r = ecr.client.post("/api/bibler/consignes", json=_form({"mode": "permanente"}))
-    assert r.status_code == 400 and r.get_json()["code"] == "idempotence_requise"
+    assert r.status_code == 400 and r.get_json()["erreur"] == "idempotence_requise"
     assert len(ecr.envois) == 1
 
 
 def test_creation_duree_invalide_422(ecr):
     r = ecr.client.post("/api/bibler/consignes", json=_form({"mode": "x"}), headers={"X-Idempotency-Key": "k"})
-    assert r.status_code == 422 and r.get_json()["code"] == "duree_invalide"
+    assert r.status_code == 422 and r.get_json()["erreur"] == "duree_invalide"
 
 
 def test_modifier_et_lever(ecr):
@@ -282,3 +279,21 @@ def test_ecriture_journalisee(ecr, caplog):
     with caplog.at_level(logging.INFO, logger="bibler_postes"):
         ecr.client.post("/api/bibler/consignes/%s/lever" % ("a1" * 12))
     assert any("Consigne Bibler levee " + "a1" * 12 + " par op@aco.fr" in m for m in caplog.messages)
+
+
+def test_rejeu_meme_cle_corps_identique(ecr):
+    import json
+    import time
+    form = _form({"mode": "permanente"})
+    ecr.client.post("/api/bibler/consignes", json=form, headers={"X-Idempotency-Key": "k"})
+    time.sleep(0.01)
+    ecr.client.post("/api/bibler/consignes", json=form, headers={"X-Idempotency-Key": "k"})
+    a, b = ecr.envois[0][2], ecr.envois[1][2]
+    assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def test_cible_non_liste_ignoree():
+    f = _form({"mode": "permanente"})
+    f["cible"] = {"departements": "ABC", "zones": 5, "secteurs": None, "postes": [1]}
+    c = BP.consigne_depuis_formulaire(f)["cible"]
+    assert c["departements"] == [] and c["zones"] == [] and c["secteurs"] == [] and c["postes"] == [1]

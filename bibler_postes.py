@@ -10,7 +10,7 @@ est valide avant l'appel (404 sinon).
 """
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import Blueprint, Response, jsonify, request
@@ -163,8 +163,12 @@ _CHAMPS_CIBLE = ("departements", "zones", "secteurs", "postes")
 _DUREE_SHIFT_MAX = timedelta(hours=24)
 
 
-def _iso(dt):
-    return dt.astimezone(timezone.utc).isoformat()
+# Permanente et format : pas de `debut` (Bibler retient l'instant de publication), pour que le corps
+# reste identique d'un rejeu a l'autre et que l'Idempotency-Key rejoue la reponse (R11).
+
+
+def _err(code, message, statut):
+    return jsonify({"ok": False, "erreur": code, "message": message}), statut
 
 
 def _lire_iso(valeur):
@@ -179,7 +183,7 @@ def _lire_iso(valeur):
     return dt
 
 
-def consigne_depuis_formulaire(form, maintenant):
+def consigne_depuis_formulaire(form):
     """Corps de POST /api/v1/consignes depuis le formulaire ; ValueError(code) si la duree est invalide."""
     form = form if isinstance(form, dict) else {}
     duree = form.get("duree")
@@ -189,19 +193,17 @@ def consigne_depuis_formulaire(form, maintenant):
     cible_in = form.get("cible") if isinstance(form.get("cible"), dict) else {}
     cible = {"tout_evenement": bool(cible_in.get("tout_evenement"))}
     for champ in _CHAMPS_CIBLE:
-        cible[champ] = list(cible_in.get(champ) or [])
+        v = cible_in.get(champ)
+        cible[champ] = list(v) if isinstance(v, list) else []
     corps = {}
     if mode == "permanente":
         cible["formats"] = []
-        corps["debut"] = _iso(maintenant)
     else:
         fmt = duree.get("format")
         if not isinstance(fmt, str) or not fmt.strip():
             raise ValueError("duree_invalide")
         cible["formats"] = [fmt.strip()]
-        if mode == "format":
-            corps["debut"] = _iso(maintenant)
-        else:
+        if mode == "shift":
             debut, fin = _lire_iso(duree.get("debut")), _lire_iso(duree.get("fin"))
             if fin <= debut or fin - debut > _DUREE_SHIFT_MAX:
                 raise ValueError("shift_invalide")
@@ -227,19 +229,21 @@ def _ecriture(f):
         from app import _user_can_publish_consigne
         payload = getattr(request, "user_payload", None) or {}
         if payload.get("type_compte") == "borne" or not _user_can_publish_consigne(payload):
-            return jsonify({"error": "Droit insuffisant", "code": "droit_insuffisant"}), 403
+            return _err("droit_insuffisant", "Droit insuffisant.", 403)
         try:
             return f(payload, *args, **kwargs)
         except ValueError as e:
             code = str(e) or "requete_invalide"
-            return jsonify({"error": "Requete invalide", "code": code}), 422
+            if code == "corps_invalide":
+                return _err(code, "Corps JSON attendu.", 400)
+            return _err(code, "Duree de la consigne invalide.", 422)
         except bibler_pont.BiblerNonConfigure:
-            return jsonify({"error": "Bibler non configure", "code": "bibler_non_configure"}), 503
+            return _err("bibler_non_configure", "Bibler non configure.", 503)
         except bibler_pont.BiblerIndisponible:
-            return jsonify({"error": "Bibler indisponible", "code": "bibler_indisponible"}), 502
+            return _err("bibler_indisponible", "Bibler indisponible.", 502)
         except bibler_pont.BiblerErreur as e:
             corps = e.corps if isinstance(e.corps, (dict, list)) and e.corps else \
-                {"error": "Erreur Bibler", "code": "bibler_erreur"}
+                {"ok": False, "erreur": "bibler_erreur", "message": "Erreur Bibler."}
             return jsonify(corps), e.statut
     return wrapper
 
@@ -270,8 +274,8 @@ def _relayer(methode, chemin, corps, payload, action, cid=None, idempotence=None
 def consigne_creer(payload):
     cle = (request.headers.get("X-Idempotency-Key") or "").strip()
     if not cle:
-        return jsonify({"error": "Cle d'idempotence requise", "code": "idempotence_requise"}), 400
-    corps = consigne_depuis_formulaire(_json_corps(), datetime.now(timezone.utc))
+        return _err("idempotence_requise", "Cle d'idempotence requise.", 400)
+    corps = consigne_depuis_formulaire(_json_corps())
     return _relayer("POST", "/api/v1/consignes", _avec_auteur(corps, payload), payload, "creee",
                     idempotence=cle)
 
