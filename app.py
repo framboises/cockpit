@@ -667,6 +667,7 @@ PAGE_REGISTRY = [
     {"id": "wiki",         "label": "Wiki procedures",    "icon": "menu_book",       "role": "user",    "paths": ["/wiki"]},
     {"id": "dispatch",     "label": "File du service",    "icon": "assignment_ind",  "role": "user",    "paths": ["/dispatch-service", "/api/dispatch/board"]},
     {"id": "declarations", "label": "Constats terrain",   "icon": "report",          "role": "user",    "paths": ["/declarations", "/api/declarations"]},
+    {"id": "consignes_bibler", "label": "Consignes Bibler", "icon": "campaign", "role": "user", "paths": ["/consignes-bibler"]},
     {"id": "assistant_ia", "label": "Assistant IA",       "icon": "smart_toy",       "role": "manager", "paths": []},
     {"id": "circulation",  "label": "Circulation",        "icon": "moving",          "role": "manager", "paths": ["/circulation"]},
     {"id": "meteo_mur",    "label": "Mur meteo",          "icon": "radar",           "role": "manager", "paths": ["/meteo-mur"]},

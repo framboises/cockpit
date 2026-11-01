@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <script src="{{ url_for('static', filename='js/session_portail.js') }}"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="theme-color" content="#1f2937">
+  <title>Consignes Bibler -- COCKPIT</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/consignes_bibler.css') }}">
+</head>
+
+{#
+  Consignes Bibler (/consignes-bibler, bibler_postes.py) : liste par etat des
+  consignes donnees aux postes (Bibler en est proprietaire), detail avec
+  accuses, modifier / lever pour qui a le droit "Donner des consignes".
+  Rendu : static/js/consignes_bibler.js. Docs : docs/claude/bibler.md.
+#}
+{% set _u = user or {} %}
+{% set user_roles = _u.get('roles') or [] %}
+{% set user_firstname = _u.get('firstname') or '' %}
+{% set user_lastname = _u.get('lastname') or '' %}
+{% set user_email = _u.get('email') or '' %}
+
+<body>
+<div class="app-layout cb-page">
+
+  {% set sidebar_active = '/consignes-bibler' %}
+  {% include '_sidebar.html' %}
+
+  <div class="app-main cb-app">
+
+    <header class="app-header cb-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <span class="material-symbols-outlined cb-header-ico">campaign</span>
+      <span class="header-event-name">Consignes Bibler</span>
+      <span class="cb-header-sub" id="cb-event-label"></span>
+      <div class="header-spacer"></div>
+      <button class="cb-icon-btn" id="cb-refresh" type="button" title="Actualiser" aria-label="Actualiser">
+        <span class="material-symbols-outlined">refresh</span>
+      </button>
+    </header>
+
+    <main class="cb-main" id="cb-main">
+      <aside class="cb-side" aria-label="Consignes">
+        <div class="cb-filters">
+          <div class="cb-seg" id="cb-tabs" role="tablist" aria-label="Etat des consignes">
+            <button type="button" class="cb-seg-btn active" data-etat="en_vigueur">En vigueur <b id="cb-c-en_vigueur">0</b></button>
+            <button type="button" class="cb-seg-btn" data-etat="programmee">Programmees <b id="cb-c-programmee">0</b></button>
+            <button type="button" class="cb-seg-btn" data-etat="levee">Levees <b id="cb-c-levee">0</b></button>
+            <button type="button" class="cb-seg-btn" data-etat="expiree">Expirees <b id="cb-c-expiree">0</b></button>
+          </div>
+          {% if not bibler_publish_allowed() %}
+          <div class="cb-note">
+            <span class="material-symbols-outlined">visibility</span>
+            Consultation seule (droit <em>Donner des consignes</em> requis pour modifier ou lever).
+          </div>
+          {% endif %}
+        </div>
+        <div class="cb-list" id="cb-list" aria-live="polite"></div>
+      </aside>
+
+      <section class="cb-detail" id="cb-detail" aria-live="polite">
+        <div class="cb-vide">Choisissez une consigne dans la liste.</div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  window.__cbCanPublish = {{ "true" if bibler_publish_allowed() else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/consignes_bibler.js') }}"></script>
+</body>
+</html>

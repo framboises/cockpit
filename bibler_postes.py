@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta
 from functools import wraps
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, render_template, request
 
 import bibler_pont
 
@@ -85,6 +85,17 @@ def _non_trouve():
 
 def _params(*noms):
     return {n: request.args[n] for n in noms if request.args.get(n) not in (None, "")}
+
+
+@bibler_bp.route("/consignes-bibler")
+@_role_required("user")
+def page_consignes():
+    """Page Terrain : liste des consignes Bibler (rendu : static/js/consignes_bibler.js)."""
+    from app import _user_can_view_bibler
+    payload = getattr(request, "user_payload", None) or {}
+    if not _user_can_view_bibler(payload):
+        return "Droit insuffisant", 403
+    return render_template("consignes_bibler.html", user=payload)
 
 
 @bibler_bp.route("/api/bibler/postes")
@@ -263,6 +274,7 @@ def _avec_auteur(corps, payload):
 def _relayer(methode, chemin, corps, payload, action, cid=None, idempotence=None):
     rep, statut = bibler_pont.envoyer(methode, chemin, corps, idempotence=idempotence)
     if statut < 400:
+        bibler_pont.vider_cache()
         if cid is None and isinstance(rep, dict):
             cid = (rep.get("consigne") or {}).get("id") or "?"
         logger.info("Consigne Bibler %s %s par %s", action, cid, payload.get("email"))

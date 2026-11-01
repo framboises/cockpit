@@ -203,6 +203,13 @@ def _cache_set(cle, valeur, ttl):
         _CACHE[cle] = (time.time() + ttl, copy.deepcopy(valeur))
 
 
+def vider_cache():
+    """Vide le cache des lectures JSON (apres une ecriture reussie) ; garde les visuels binaires."""
+    with _CACHE_LOCK:
+        for cle in [k for k in _CACHE if not (isinstance(k, tuple) and k and k[0] == "bin")]:
+            del _CACHE[cle]
+
+
 def lire(chemin, params=None, capacites=("postes:lire",), ttl=0):
     """GET JSON ; ttl > 0 active un cache memoire par (chemin, parametres)."""
     cle = None

@@ -297,3 +297,38 @@ def test_cible_non_liste_ignoree():
     f["cible"] = {"departements": "ABC", "zones": 5, "secteurs": None, "postes": [1]}
     c = BP.consigne_depuis_formulaire(f)["cible"]
     assert c["departements"] == [] and c["zones"] == [] and c["secteurs"] == [] and c["postes"] == [1]
+
+
+def test_page_sans_droit_403(env):
+    env.who["voir"] = False
+    r = env.client.get("/consignes-bibler")
+    assert r.status_code == 403
+    assert env.appels == []
+
+
+def test_ecriture_reussie_vide_le_cache(ecr):
+    vidages = []
+    ecr.mp.setattr(bibler_pont, "vider_cache", lambda: vidages.append(1), raising=False)
+    cid = "a1" * 12
+    ecr.client.post("/api/bibler/consignes", json=_form({"mode": "permanente"}),
+                    headers={"X-Idempotency-Key": "k-1"})
+    ecr.client.patch("/api/bibler/consignes/" + cid, json={"titre": "N", "version": 2})
+    ecr.client.post("/api/bibler/consignes/%s/lever" % cid, json={})
+    assert len(vidages) == 3
+
+
+def test_ecriture_en_echec_ne_vide_pas_le_cache(ecr):
+    vidages = []
+    ecr.mp.setattr(bibler_pont, "vider_cache", lambda: vidages.append(1), raising=False)
+    ecr.mp.setattr(bibler_pont, "envoyer",
+                   lambda *a, **k: ({"ok": False, "erreur": "version_perimee"}, 409))
+    r = ecr.client.patch("/api/bibler/consignes/" + "a1" * 12, json={"titre": "N", "version": 1})
+    assert r.status_code == 409 and vidages == []
+
+
+def test_vider_cache_garde_les_visuels():
+    bibler_pont._cache_set(("bin", "/x"), (b"1", "image/png"), 60)
+    bibler_pont._cache_set(("/api/v1/consignes", (), ("consignes:lire",)), {"a": 1}, 60)
+    bibler_pont.vider_cache()
+    assert bibler_pont._cache_get(("bin", "/x")) is not None
+    assert bibler_pont._cache_get(("/api/v1/consignes", (), ("consignes:lire",))) is None

@@ -136,6 +136,10 @@
             <span class="material-symbols-outlined">report</span>
             <span class="label">Constats terrain</span>
         </a>{% endif %}
+        {% if (page_allowed is not defined or page_allowed('consignes_bibler')) and bibler_allowed is defined and bibler_allowed() %}<a href="/consignes-bibler" class="{{ nav_class('/consignes-bibler') }}" title="Consignes Bibler donnees aux postes : suivi, modification, levee" data-nav-item>
+            <span class="material-symbols-outlined">campaign</span>
+            <span class="label">Consignes Bibler</span>
+        </a>{% endif %}
         {% if _adm or (admin_page_allowed is defined and admin_page_allowed('field_dispatch')) %}<a href="/field-dispatch" class="{{ nav_class('/field-dispatch') }}" data-nav-item>
             <span class="material-symbols-outlined">tablet_android</span>
             <span class="label">Field dispatch</span>
