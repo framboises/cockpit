@@ -296,6 +296,153 @@
 
 .bibler-panneau-actions:empty { display: none; }
 
+/* Consignes : surlignage des postes cibles */
+.bibler-grappe-cible { box-shadow: 0 0 0 4px #2563eb, 0 1px 4px rgba(0, 0, 0, 0.35); }
+.bibler-grappe-estompe { opacity: 0.3; }
+.bibler-cliquable { cursor: pointer; }
+.bibler-cliquable:hover,
+.bibler-cliquable:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* Liste "Consignes (n)" de la barre */
+.bibler-consignes-boite { position: relative; flex: 0 0 auto; }
+.bibler-consignes-liste {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  max-height: 360px;
+  overflow-y: auto;
+  z-index: 2;
+}
+.bibler-consignes-liste.open { display: block; }
+.bibler-ligne-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-left: 3px solid transparent;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bibler-ligne-btn:hover,
+.bibler-ligne-btn:focus-visible,
+.bibler-ligne-consigne.active .bibler-ligne-btn {
+  outline: none;
+  background: var(--brand-light);
+  border-left-color: #2563eb;
+}
+.bibler-consigne-taux { color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.bibler-prio-importante { color: #b45309; }
+.bibler-prio-urgente { color: var(--danger); font-weight: 700; }
+
+/* Detail d'une consigne */
+.bibler-etat-consigne {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.bibler-etat-consigne-en_vigueur { background: #16a34a; border-color: #16a34a; color: #fff; }
+.bibler-etat-consigne-levee,
+.bibler-etat-consigne-expiree { text-decoration: line-through; }
+.bibler-suivi-taux { font-weight: 600; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.bibler-suivi { list-style: none; margin: 0; padding: 0; }
+.bibler-suivi li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.bibler-suivi li:last-child { border-bottom: none; }
+.bibler-suivi-qui { display: flex; flex-direction: column; min-width: 0; }
+.bibler-suivi-qui small { color: var(--muted); font-size: 0.72rem; }
+.bibler-suivi-etats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; align-content: flex-start; }
+.bibler-statut {
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  white-space: nowrap;
+  background: var(--brand-light);
+  color: var(--brand);
+}
+.bibler-statut-ok { background: #dcfce7; color: #166534; }
+.bibler-statut-manque { background: var(--danger-light); color: var(--danger); }
+.bibler-bonne { font-weight: 600; }
+
+/* Formulaire de consigne, modifier, lever */
+.bibler-panneau-actions { padding-top: 10px; }
+.bibler-form { display: flex; flex-direction: column; gap: 8px; }
+.bibler-form-libelle {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.bibler-form-champ { display: flex; flex-direction: column; gap: 3px; }
+.bibler-form-saisie {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  padding: 5px 8px;
+}
+textarea.bibler-form-saisie { resize: vertical; min-height: 70px; }
+.bibler-form-saisie:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--brand); }
+.bibler-compteur { font-weight: 400; font-variant-numeric: tabular-nums; }
+.bibler-form-case { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.bibler-form-options { display: flex; flex-direction: column; }
+.bibler-form-options[open] { padding-bottom: 8px; }
+.bibler-form-options .bibler-form-champ { margin-top: 6px; }
+.bibler-puces { display: flex; flex-wrap: wrap; gap: 4px; }
+.bibler-puce {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.bibler-puce:hover { border-color: var(--brand); color: var(--brand); }
+.bibler-puce.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.bibler-puce:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.bibler-puces-info { color: var(--muted); font-size: 0.72rem; font-style: italic; align-self: center; }
+.bibler-apercu { font-weight: 600; }
+.bibler-rappel { color: #92400e; background: var(--warning-light); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 0.75rem; }
+.bibler-note { padding: 5px 8px; border-radius: var(--radius-sm); font-size: 0.78rem; margin-bottom: 6px; }
+.bibler-note[hidden] { display: none; }
+.bibler-note-ok { background: #dcfce7; color: #166534; }
+.bibler-note-erreur { background: var(--danger-light); color: var(--danger); }
+.bibler-form-boutons { display: flex; gap: 6px; flex-wrap: wrap; }
+.bibler-btn-principal { background: var(--brand); border-color: var(--brand); color: #fff; }
+.bibler-btn-principal:hover:not(:disabled) { color: #fff; filter: brightness(1.1); }
+.bibler-btn-principal:disabled { background: var(--muted); border-color: var(--muted); color: #fff; }
+.bibler-btn-danger { color: var(--danger); border-color: var(--danger); }
+.bibler-btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; border-color: var(--danger); }
+.bibler-confirmation { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--danger); border-radius: var(--radius-sm); }
+
 /* Telephone : barre pleine largeur, panneau en bas */
 @media (max-width: 700px) {
   .bibler-haut { top: 52px; width: calc(100% - 20px); }
