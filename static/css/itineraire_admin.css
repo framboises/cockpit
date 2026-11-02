@@ -167,6 +167,24 @@
 .it-m-rulesbox { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
 .it-m-rulesbox summary { cursor: pointer; font-weight: 600; font-size: .88rem; }
 .it-m-rulesbox .it-ed-rules { border-top: none; max-height: 260px; overflow-y: auto; }
+/* Portails hors reseau (on_network = false) */
+.it-offnet { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #dc2626; color: #fff; border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.it-offnet .material-symbols-outlined { font-size: 11px; line-height: 1; font-variation-settings: "FILL" 1; }
+.it-offnet-info { background: #64748b; opacity: .85; }
+.it-b-offnet { background: #fee2e2; color: #7f1d1d; border: 1px solid #fca5a5; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: .82rem; }
+.it-b-offnet-titre { display: flex; gap: 6px; align-items: flex-start; }
+.it-b-offnet-titre .material-symbols-outlined { font-size: 18px; color: #dc2626; }
+.it-b-offnet .it-hint { color: #7f1d1d; }
+.it-b-offnet .btn { display: inline-flex; align-items: center; gap: 4px; }
+.it-b-snap { display: flex; gap: 4px; align-items: center; }
+.it-b-prefill { background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: .8rem; }
+.it-b-prefill .material-symbols-outlined { font-size: 15px; vertical-align: -3px; }
+.it-m-offbox summary { display: flex; align-items: center; gap: 6px; }
+.it-m-offbox summary .material-symbols-outlined { font-size: 18px; color: #dc2626; }
+.it-off-count { background: #dc2626; color: #fff; border-radius: 999px; padding: 0 7px; font-size: .74rem; font-weight: 700; line-height: 18px; }
+.it-off-table { width: 100%; font-size: .8rem; }
+.it-off-row { cursor: pointer; }
+.it-off-row:hover { background: var(--bg); }
 @media (max-width: 720px) {
   .it-bubble { position: static; width: 100%; max-width: none; margin-top: 8px; }
   .it-m-help { display: none; }

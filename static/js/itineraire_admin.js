@@ -621,6 +621,12 @@
           (p.rules_applied != null ? p.rules_applied + " regle(s) appliquee(s), " : "") +
           (p.raceway_ways != null ? p.raceway_ways + " troncons de piste, " : "") +
           (p.service_speed_patched != null ? p.service_speed_patched + " voies de service a vitesse par defaut" : "") }));
+        // valhalla-admin recent seulement : rattachement des portails hors
+        // reseau a moins de 1 m d'une voie (absent = rien a afficher)
+        if (typeof p.barriers_snapped === "number") {
+          out.appendChild(h("p", { className: "it-hint" }, [icon("link"), " " + p.barriers_snapped +
+            (p.barriers_snapped > 1 ? " portails rattaches" : " portail rattache") + " automatiquement a leur voie"]));
+        }
       }
     } else if (ll.state === "rolled_back") {
       out.appendChild(h("div", { className: "it-alert is-warn" }, [icon("undo"),
@@ -866,6 +872,8 @@
       ruled: L.layerGroup().addTo(M.map),
       overlay: L.layerGroup().addTo(M.map),
       sel: L.layerGroup().addTo(M.map),
+      // Voie la plus proche d'un portail hors reseau (surlignage)
+      hint: L.layerGroup().addTo(M.map),
       test: L.layerGroup().addTo(M.map),
     };
     M.map.on("moveend", function () {
@@ -898,6 +906,7 @@
       redrawOverlay();
       syncBarriersVisibility();
     });
+    loadOffNetwork();
     // Objets portant une regle : visibles meme hors de la vue chargee
     ["highways", "barriers"].forEach(function (kind) {
       api("GET", "/features", { query: Object.assign({ kind: kind, only_rules: "true" }, q) }).then(function (res) {
@@ -935,6 +944,8 @@
       drawFeature(f);
     });
     redrawOverlay();
+    // Nom de la voie la plus proche, connu une fois la voie chargee
+    if (M.offNet && M.offNet.length) renderOffNetwork();
   }
 
   function waysVisible(f) {
@@ -1002,6 +1013,114 @@
 
   function hasRule(r) { return !!(r && Object.keys(r).some(function (k) { return k !== "comment" && r[k] != null; })); }
 
+  // ---------------- portails hors reseau (valhalla-admin, Feature) ----------------
+  // on_network = false : portail dessine sur un mur / une cloture, une regle
+  // posee dessus n'a aucun effet. auto_snap = true : valhalla-admin le
+  // rattache lui-meme a la voie (a 1 m au plus) au chargement. Proprietes
+  // absentes (service pas a jour) : null, rien n'est affiche.
+  function offNetwork(p) {
+    if (!p || p.on_network !== false) return null;
+    if (p.auto_snap === true) return "info";
+    return p.auto_snap === false ? "alerte" : null;
+  }
+
+  function wayLengthM(f) {
+    var c = ((f || {}).geometry || {}).coordinates || [];
+    var total = 0;
+    for (var i = 1; i < c.length; i++) {
+      var la = (c[i][1] + c[i - 1][1]) / 2 * Math.PI / 180;
+      var dx = (c[i][0] - c[i - 1][0]) * Math.cos(la) * 111320, dy = (c[i][1] - c[i - 1][1]) * 110540;
+      total += Math.sqrt(dx * dx + dy * dy);
+    }
+    return Math.round(total);
+  }
+
+  function fmtDist(m) { return (Math.round(Number(m) * 10) / 10).toString().replace(".", ",") + " m"; }
+
+  // Voie la plus proche d'un portail : chargee autour de lui si elle n'est pas
+  // deja dans la vue (le relais exige une bbox pour les voies)
+  function ensureWay(wayId, pt) {
+    var M = S.m;
+    if (M.feats[wayId]) return Promise.resolve(M.feats[wayId]);
+    var d = 0.0012;
+    var bbox = [pt[0] - d * 1.5, pt[1] - d, pt[0] + d * 1.5, pt[1] + d].map(function (x) { return x.toFixed(5); }).join(",");
+    return api("GET", "/features", { query: Object.assign({ kind: "highways", bbox: bbox }, mQuery()) }).then(function (res) {
+      if (res.ok) addFeatures((res.body && res.body.features) || []);
+      return M.feats[wayId] || null;
+    });
+  }
+
+  function wayName(wayId, nw) {
+    var f = S.m.feats[wayId];
+    return (nw && nw.name) || (f && ((f.properties || {}).osm_tags || {}).name) || "";
+  }
+
+  // Bandeau du panneau d'un portail hors reseau non rattache
+  function offNetBlock(portalId, p0, own) {
+    var M = S.m;
+    var nw = p0.nearest_way;
+    var bloc = h("div", { className: "it-b-offnet" }, [
+      h("div", { className: "it-b-offnet-titre" }, [icon("warning"),
+        h("strong", { text: "Portail relié à aucune voie : une règle posée ici n'a aucun effet sur les itinéraires." })]),
+    ]);
+    if (!nw || !nw.id) {
+      bloc.appendChild(h("div", { className: "it-hint", text: "Aucune voie à moins de 50 m : la voie franchie est peut-être absente d'OSM." }));
+      return bloc;
+    }
+    var ligne = h("div", { className: "it-b-offnet-voie" });
+    var remplir = function () {
+      clear(ligne);
+      var nom = wayName(nw.id, nw);
+      ligne.appendChild(h("span", { className: "it-k", text: "Voie la plus proche : " }));
+      ligne.appendChild(h("a", { href: "https://www.openstreetmap.org/" + nw.id, target: "_blank", rel: "noopener", className: "it-mono", text: nw.id }));
+      if (nom) ligne.appendChild(document.createTextNode(" " + nom));
+      if (nw.distance_m != null) ligne.appendChild(document.createTextNode(" à " + fmtDist(nw.distance_m)));
+    };
+    remplir();
+    bloc.appendChild(ligne);
+    var g = M.feats[portalId] && M.feats[portalId].geometry;
+    var pt = g ? g.coordinates : null;
+    var bouton = h("button", { type: "button", className: "btn btn-secondary" }, [icon("alt_route"), "Poser la règle sur cette voie"]);
+    bouton.addEventListener("click", function () {
+      ensureWay(nw.id, pt).then(function (way) {
+        if (!way) { toast("warning", "Voie " + nw.id + " introuvable dans le scénario"); return; }
+        var src = own || p0.effective_rule || {};
+        M.prefill = {
+          wayId: nw.id, portalId: portalId, distance_m: nw.distance_m,
+          portalName: (p0.osm_tags || {}).name || portalId,
+          access: src.access || "", interdire_pour: (src.interdire_pour || []).slice(), comment: src.comment || "",
+        };
+        selectIds([nw.id], false);
+      }).catch(function () { toast("error", "Réseau indisponible"); });
+    });
+    bloc.appendChild(h("div", { className: "it-ed-btns" }, [bouton]));
+    bloc.appendChild(h("div", { className: "it-hint", text: "La règle du portail n'est pas supprimée : à retirer vous-même une fois la voie réglée." }));
+    // Surlignage de la voie (chargee au besoin)
+    if (pt) {
+      ensureWay(nw.id, pt).then(function (way) {
+        if (!way || S.m.sel[0] !== portalId) return;
+        remplir();
+        var c = (way.geometry || {}).coordinates || [];
+        L.polyline(c.map(function (x) { return [x[1], x[0]]; }), { color: "#ea580c", weight: 9, opacity: 0.75, dashArray: "8 6", interactive: false })
+          .addTo(M.groups.hint);
+      });
+    }
+    return bloc;
+  }
+
+  // Rappel du formulaire de voie ouvert depuis un portail hors reseau
+  function prefillBlock(way, pf) {
+    var lignes = [
+      h("div", null, [icon("info"), " Règle reprise du portail " + pf.portalName + " : à vérifier puis Appliquer."]),
+      h("div", { text: "Une règle de voie s'applique à toute la voie OSM (" + wayLengthM(way) + " m), pas seulement à l'endroit du portail." }),
+    ];
+    if (pf.distance_m != null && Number(pf.distance_m) > 5) {
+      lignes.push(h("div", { className: "it-b-warn", text: "Voie à " + fmtDist(pf.distance_m) + " du portail : ce n'est peut-être pas celle qu'il franchit " +
+        "(portail sur une clôture qui longe une route, chemin absent d'OSM...)." }));
+    }
+    return h("div", { className: "it-b-prefill" }, lignes);
+  }
+
   function pourLabels(list) {
     return (list || []).map(function (v) {
       for (var i = 0; i < INTERDIRE_POUR.length; i++) if (INTERDIRE_POUR[i][0] === v) return INTERDIRE_POUR[i][1];
@@ -1056,6 +1175,20 @@
           var i = Math.max(0, Math.floor(c.length / 2) - 1);
           arrowMarker(c[i], c[i + 1], ow === "-1", "#1e3a8a", 16).addTo(M.groups.overlay);
         }
+      }
+      // Portail hors reseau : alerte s'il n'est pas rattache (regle sans
+      // effet), information discrete s'il l'est au chargement (auto_snap).
+      // Sans regle, seulement quand les barrieres sont affichees.
+      var hors = offNetwork(p);
+      if (g.type === "Point" && hors && (hasRule(eff) || M.map.hasLayer(M.groups.barriers))) {
+        // Icone et classe : constantes du code, jamais de donnee tierce
+        L.marker([c[1], c[0]], { interactive: false, icon: L.divIcon({
+          className: "",
+          html: hors === "alerte"
+            ? "<div class='it-offnet'><span class='material-symbols-outlined'>warning</span></div>"
+            : "<div class='it-offnet it-offnet-info'><span class='material-symbols-outlined'>link</span></div>",
+          iconSize: [16, 16], iconAnchor: [-2, 18],
+        }) }).addTo(M.groups.overlay);
       }
       if (eff.access === "interdire" && Array.isArray(eff.interdire_pour)) {
         var icons = INTERDIRE_POUR.filter(function (x) { return eff.interdire_pour.indexOf(x[0]) >= 0; })
@@ -1262,6 +1395,9 @@
     var M = S.m;
     var box = $("#it-m-bubble");
     clear(box);
+    if (M.groups) M.groups.hint.clearLayers();
+    // Pre-remplissage "Poser la regle sur cette voie" : seulement pour la voie visee
+    if (M.prefill && !(M.sel.length === 1 && M.sel[0] === M.prefill.wayId)) M.prefill = null;
     if (M.test) { renderTestPanel(box); box.hidden = false; return; }
     if (!M.sel.length || !M.doc) { box.hidden = true; return; }
     box.hidden = false;
@@ -1276,6 +1412,8 @@
       BUBBLE.access = own.access || "";
       BUBBLE.piste = own.piste === true ? "true" : own.piste === false ? "false" : "";
     }
+    var pf = M.prefill;
+    if (pf) BUBBLE.access = pf.access || BUBBLE.access;
 
     // En-tete
     var names = [];
@@ -1301,7 +1439,18 @@
         "Pour empecher seulement la traversee, fermer plutot les troncons d'acces de part et d'autre." }));
     }
     if (single && f0 && (f0.geometry || {}).type === "LineString") {
+      if (pf) box.appendChild(prefillBlock(f0, pf));
       box.appendChild(h("div", { className: "it-hint", text: "Pour poser un portail sur cette voie : cliquer l'un de ses points blancs sur la carte." }));
+    }
+    if (single && f0 && (f0.geometry || {}).type === "Point") {
+      var hors = offNetwork(p0);
+      if (hors === "alerte") box.appendChild(offNetBlock(single, p0, own));
+      else if (hors === "info") {
+        var nwi = p0.nearest_way || {};
+        box.appendChild(h("div", { className: "it-hint it-b-snap" }, [icon("link"),
+          " Portail hors réseau rattaché automatiquement" + (nwi.id ? " à " + (wayName(nwi.id, nwi) || nwi.id) : "") +
+          " au chargement du scénario : la règle s'applique."]));
+      }
     }
 
     // Regles en place
@@ -1327,7 +1476,8 @@
     var boxes = h("div", { className: "it-seg" });
     INTERDIRE_POUR.forEach(function (c) {
       var cb = h("input", { type: "checkbox", name: "it-b-ipour", value: c[0] });
-      cb.checked = !!(own && own.access === "interdire" && (own.interdire_pour || []).indexOf(c[0]) >= 0);
+      cb.checked = pf ? (pf.access === "interdire" && pf.interdire_pour.indexOf(c[0]) >= 0)
+        : !!(own && own.access === "interdire" && (own.interdire_pour || []).indexOf(c[0]) >= 0);
       var lab = h("label", { className: cb.checked ? "is-checked" : "" }, [cb, icon(c[2]), c[3]]);
       cb.addEventListener("change", function () { lab.classList.toggle("is-checked", cb.checked); });
       boxes.appendChild(lab);
@@ -1383,7 +1533,7 @@
 
     // Motif
     box.appendChild(h("label", { className: "it-b-field" }, ["Motif",
-      h("input", { id: "it-b-comment", className: "form-input", maxlength: "300", value: (own && own.comment) || "",
+      h("input", { id: "it-b-comment", className: "form-input", maxlength: "300", value: (pf && pf.comment) || (own && own.comment) || "",
         placeholder: single ? "ex. Portail condamne" : "vide = inchange" })]));
 
     // Plus d'options
@@ -1489,6 +1639,7 @@
         return;
       }
       M.doc = res.body && res.body.rules ? res.body : M.doc;
+      M.prefill = null;
       toast("success", okMsg + " (effet au prochain chargement du scenario)");
       var keep = M.sel.slice();
       reloadEditorDoc().then(function () { M.sel = keep; renderSelection(); renderBubble(); });
@@ -1535,6 +1686,65 @@
         h("span", { className: "it-ed-rule-txt" }, [name || (f ? featureKind(f) : k), " : ", ruleSummary(r), r.comment ? " (" + r.comment + ")" : ""]),
       ]));
     });
+  }
+
+  // ---------------- regles sans effet (portails hors reseau) ----------------
+  // only_rules + off_network : barrieres hors reseau portant une regle, pour la
+  // saison / l'epreuve editee ; on garde celles que valhalla-admin ne rattache
+  // pas (auto_snap = false). Service pas a jour (proprietes absentes, filtre
+  // off_network ignore) : la liste reste masquee, sans erreur.
+  function loadOffNetwork() {
+    var M = S.m;
+    var boite = $("#it-m-offbox");
+    if (!boite) return;
+    var req = M.offReq = (M.offReq || 0) + 1;
+    api("GET", "/features", { query: Object.assign({ kind: "barriers", only_rules: "true", off_network: "true" }, mQuery()) })
+      .then(function (res) {
+        if (req !== M.offReq) return;
+        var liste = (res.ok && res.body && res.body.features) || [];
+        var connu = liste.some(function (f) { return f.properties && "on_network" in f.properties; });
+        if (!res.ok || (liste.length && !connu)) { boite.hidden = true; return; }
+        M.offNet = liste.filter(function (f) { return offNetwork(f.properties) === "alerte"; });
+        M.offNet.forEach(function (f) {
+          if (!M.feats[f.id]) { M.feats[f.id] = f; drawFeature(f); }
+        });
+        boite.hidden = false;
+        renderOffNetwork();
+        redrawOverlay();
+      }).catch(function () { boite.hidden = true; });
+  }
+
+  function renderOffNetwork() {
+    var M = S.m;
+    var liste = M.offNet || [];
+    var badge = $("#it-m-off-count");
+    badge.textContent = String(liste.length);
+    badge.hidden = !liste.length;
+    var corps = clear($("#it-m-off"));
+    if (!liste.length) {
+      corps.appendChild(h("div", { className: "it-hint", text: "Aucune règle sans effet : toutes les règles de portail sont posées sur une voie." }));
+      return;
+    }
+    var t = h("table", { className: "it-table it-off-table" });
+    t.appendChild(h("thead", null, h("tr", null, ["Portail", "Id", "Règle effective", "Voie la plus proche", "Distance"].map(function (x) {
+      return h("th", { text: x });
+    }))));
+    var tb = h("tbody");
+    liste.forEach(function (f) {
+      var p = f.properties || {};
+      var nw = p.nearest_way || null;
+      var tr = h("tr", { className: "it-off-row", title: "Centrer la carte sur ce portail" }, [
+        h("td", { text: (p.osm_tags || {}).name || "(sans nom)" }),
+        h("td", { className: "it-mono", text: f.id }),
+        h("td", { text: ruleSummary(p.effective_rule) || "-" }),
+        h("td", null, nw && nw.id ? [h("span", { className: "it-mono", text: nw.id }), wayName(nw.id, nw) ? " " + wayName(nw.id, nw) : ""] : "aucune à moins de 50 m"),
+        h("td", { text: nw && nw.distance_m != null ? fmtDist(nw.distance_m) : "-" }),
+      ]);
+      tr.addEventListener("click", function () { focusIds([f.id]); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    corps.appendChild(t);
   }
 
   function focusIds(ids) {

@@ -209,7 +209,8 @@ def route_recipe(mode):
 
 LAYERS = ("seasons", "events")
 OSM_KINDS = ("node", "way")
-FEATURE_PARAMS = ("kind", "bbox", "highway", "season", "event", "only_rules")
+# off_network (barrieres hors reseau, avec only_rules : les regles sans effet)
+FEATURE_PARAMS = ("kind", "bbox", "highway", "season", "event", "only_rules", "off_network")
 _DOC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,119}$")
 
 
