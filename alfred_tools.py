@@ -543,6 +543,17 @@ def t_lieux(db, args, ctx):
     return alfred_lieux.t_lieux(db, args, ctx)
 
 
+def t_meteo_ou_vent(db, args, ctx):
+    """cockpit_meteo : le mur meteo sans parametre, le vent (alfred_vent) des
+    qu'un parametre de vent est passe. Fusionne pour garder 9 outils visibles."""
+    args = args or {}
+    if (str(args.get("sujet") or "").strip().lower() == "vent"
+            or any(args.get(k) not in (None, "") for k in ("lieu", "horizon_h", "seuil_rafale_kmh"))):
+        import alfred_vent
+        return alfred_vent.t_vent(db, args, ctx)
+    return t_meteo(db, args, ctx)
+
+
 def t_frequentation(db, args, ctx):
     import alfred_frequentation
     return alfred_frequentation.t_frequentation(db, args, ctx)
@@ -743,11 +754,27 @@ TOOLS = {
         "parameters": {"type": "object", "properties": {}},
     },
     "cockpit_meteo": {
-        "fn": t_meteo,
-        "capacite": "la météo du site : conditions actuelles, prochaine pluie, vigilance, consignes",
-        "description": "Meteo du site identique au mur meteo : conditions actuelles, prochaine "
-                       "pluie, vigilance, consignes et contraintes (vent, chaleur, orage, sol).",
-        "parameters": {"type": "object", "properties": {}},
+        "fn": t_meteo_ou_vent,
+        "capacite": "la météo du site : conditions actuelles, prochaine pluie, vigilance, consignes ; "
+                    "le vent mesuré et prévu (direction, vitesse, rafales) jusqu'à 42 h en un lieu de "
+                    "la carte, et quand les rafales dépasseront un seuil (tentes, structures, aérien)",
+        "description": "Meteo du site. SANS parametre : identique au mur meteo (conditions actuelles, "
+                       "prochaine pluie, vigilance, consignes et contraintes vent, chaleur, orage, sol). "
+                       "VENT (memes donnees que la couche Vent de la carte, AROME-PI au quart d'heure "
+                       "sur 6 h puis AROME horaire jusqu'a 42 h) : sujet=\"vent\" pour le vent actuel ; "
+                       "horizon_h pour la serie direction / vitesse / rafales (<< le vent cet "
+                       "apres-midi >>, << demain >>) ; lieu pour un point de la carte tel que dit "
+                       "(tribune, porte, parking) ; seuil_rafale_kmh pour les premieres heures ou la "
+                       "rafale depasse le seuil sur l'enceinte (<< quand passe-t-on 60 km/h >>, "
+                       "demontage de tentes, drones). Recopier le champ resume sans le reformuler.",
+        "parameters": {"type": "object", "properties": {
+            "sujet": {"type": "string", "enum": ["vent"], "description": "vent : le vent actuel ; "
+                                                                        "omettre pour le mur meteo"},
+            "lieu": {"type": "string", "description": "lieu de la carte TEL QUE DIT, omettre = circuit"},
+            "horizon_h": {"type": "integer", "description": "heures de prevision de vent, 1 a 42"},
+            "seuil_rafale_kmh": {"type": "number", "description": "seuil de rafale en km/h cite par "
+                                                                  "l'operateur"},
+        }},
     },
     # Remplaces par cockpit_situation (sujet=alertes / sujet=evenement) ;
     # gardes executables pour un wrapper qui les appellerait encore.

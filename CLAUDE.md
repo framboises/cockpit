@@ -149,6 +149,7 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/taches.md` : Taches de preparation des vignettes (collection timeline_tasks, chaine `todo` = vue calculee, merge qui ne touche jamais les ajouts manuels, tracabilite, recommandation IA -> tache, historique entre editions, analyse et suggestions IA sur les modeles)
 - `docs/claude/waze.md` : Publication des fermetures du moteur d'itineraire vers Waze for Cities (flux CIFS public en Basic auth, horaires, desynchronisation avec les regles, jamais de flux vide sur panne)
 - `docs/claude/vision.md` : Integration Vision (tablettes scan billets vehicule, JWT RS256, CORS, sync Firestore facturee)
+- `docs/claude/meteo-vent.md` : Couche Vent de la carte d'accueil (AROME-PI au quart d'heure sur 6 h puis AROME horaire jusqu'a 42 h, collecte tools/Meteo/collecte_vent.py, bascule Pluie / Vent / Rafales / Pluie + Vent avec curseur commun au radar, /api/meteo/vent/*, alerte de rafale sur l'enceinte, vent dans l'outil Alfred cockpit_meteo)
 - `docs/claude/ia-resume-pcorg.md` : Assistant IA : resume de periode pcorg, rapport matinal, couts et budget IA, prompt caching
 - `docs/claude/crise.md` : Exercices de crise : auth PIN animateur, sessions JWT, anti-bruteforce
 - `docs/claude/routing.md` : Routing Valhalla : 4 modes (normal, piste, god, god + piste) et leurs recettes, regles saison / epreuve du service valhalla-admin, page /admin/itineraire (chargement des scenarios), acces piste par groupe de balises

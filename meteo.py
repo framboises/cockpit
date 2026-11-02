@@ -208,11 +208,17 @@ def etat_collecte():
     # futur, donc valid_at donnerait un age negatif -- et surtout, un flux
     # arrete continuerait a paraitre frais tant que sa derniere prevision n'est
     # pas echue, soit deux heures d'angle mort.
-    for nom, libelle, seuil_min, champ in (
-        ("obs_lame_eau", "Radar observe", 20, "valid_at"),
-        ("piaf", "Prevision PIAF", 30, "run_at"),
+    # Le vent se juge aussi sur run_at : AROME-PI a un run par heure (seuil
+    # 2 h, latence comprise), AROME un toutes les 3 h (seuil 8 h).
+    for nom, libelle, seuil_min, champ, collection in (
+        ("obs_lame_eau", "Radar observe", 20, "valid_at", "meteo_grilles"),
+        ("piaf", "Prevision PIAF", 30, "run_at", "meteo_grilles"),
+        ("vent_aromepi", "Rafales AROME-PI", 120, "run_at", "meteo_vent"),
+        ("vent_arome", "Vent AROME", 480, "run_at", "meteo_vent"),
     ):
-        dernier = db["meteo_grilles"].find_one({"flux": nom}, sort=[(champ, -1)])
+        dernier = db[collection].find_one({"flux": nom}, {"valeurs": 0, "u": 0, "v": 0, "rafale": 0,
+                                                          "u_rafale": 0, "v_rafale": 0},
+                                          sort=[(champ, -1)])
         if not dernier or not dernier.get(champ):
             flux.append({"flux": nom, "libelle": libelle, "etat": "absent"})
             continue
@@ -448,3 +454,66 @@ def sequence_radar():
             bornes = reference.get("bbox")
 
     return jsonify({"images": images, "bbox": bornes, "n": len(images)})
+
+
+# ---------------------------------------------------------------------------
+# Vent (meteo_vent.py, collecte tools/Meteo/collecte_vent.py)
+# ---------------------------------------------------------------------------
+
+def _float_arg(nom, defaut, mini, maxi):
+    try:
+        valeur = float(request.args.get(nom, defaut))
+    except (TypeError, ValueError):
+        return None
+    return valeur if mini <= valeur <= maxi else None
+
+
+@meteo_bp.route("/vent/sequence", methods=["GET"])
+@lecture_required
+def vent_sequence():
+    """Ligne du temps de la couche Vent (sans les grilles) et points cles."""
+    import meteo_vent
+    db = _db()
+    donnees = meteo_vent.trames(db)
+    donnees["points_cles"] = meteo_vent.points_cles(db)
+    return jsonify(donnees)
+
+
+@meteo_bp.route("/vent/trame", methods=["GET"])
+@lecture_required
+def vent_trame():
+    """Grilles U/V (vent moyen) et rafales d'une trame, facon grib2json."""
+    import meteo_vent
+    donnees = meteo_vent.champ(_db(), str(request.args.get("id") or "")[:40])
+    if not donnees:
+        return jsonify({"ok": False, "error": "trame_inconnue"}), 404
+    reponse = jsonify(donnees)
+    # Une trame d'un run donne ne change jamais : le navigateur peut la garder.
+    reponse.headers["Cache-Control"] = "private, max-age=3600"
+    return reponse
+
+
+@meteo_bp.route("/vent/point", methods=["GET"])
+@lecture_required
+def vent_point():
+    """Serie direction / vitesse / rafales au point (defaut : centre du circuit)."""
+    import meteo_vent
+    lat = _float_arg("lat", meteo_vent.LAT_CIRCUIT, 47.0, 49.0)
+    lon = _float_arg("lon", meteo_vent.LON_CIRCUIT, -1.0, 1.5)
+    horizon = _float_arg("horizon_h", meteo_vent.HORIZON_H, 1, meteo_vent.HORIZON_H)
+    if lat is None or lon is None or horizon is None:
+        return jsonify({"ok": False, "error": "parametre_invalide"}), 400
+    db = _db()
+    return jsonify({"actuel": meteo_vent.actuel(db, lat, lon),
+                    "prevision": meteo_vent.serie(db, lat, lon, horizon)})
+
+
+@meteo_bp.route("/vent/alerte", methods=["GET"])
+@lecture_required
+def vent_alerte():
+    """Premieres echeances ou la rafale depasse le seuil sur l'enceinte."""
+    import meteo_vent
+    seuil = _float_arg("seuil_kmh", 60, 10, 250)
+    if seuil is None:
+        return jsonify({"ok": False, "error": "seuil_invalide"}), 400
+    return jsonify(meteo_vent.alerte_rafale(_db(), seuil))

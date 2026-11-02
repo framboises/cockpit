@@ -155,6 +155,10 @@
       radar.couche.setUrl(image.url);
     }
     majBarreRadar(image);
+    // La couche Vent (meteo_vent.js) suit le meme curseur en mode Pluie + Vent.
+    document.dispatchEvent(new CustomEvent("cockpit:radar-image", {
+      detail: { valid_at: image.valid_at, flux: image.flux }
+    }));
   }
 
   function majBarreRadar(image) {
@@ -237,9 +241,10 @@
       majBoutonRadar();
       var barre = document.getElementById("radar-barre");
       if (barre) barre.style.display = "none";
-      return;
+      document.dispatchEvent(new CustomEvent("cockpit:radar-etat", { detail: { actif: false } }));
+      return Promise.resolve(false);
     }
-    chargerSequence().then(function () {
+    return chargerSequence().then(function () {
       if (!radar.images.length) {
         if (window.showToast) window.showToast("Aucune image radar disponible", "error");
         return;
@@ -252,11 +257,21 @@
       majBoutonRadar();
       if (radar.rafraichissement) clearInterval(radar.rafraichissement);
       radar.rafraichissement = setInterval(rafraichirSequence, RADAR_RAFRAICHISSEMENT_MS);
+      document.dispatchEvent(new CustomEvent("cockpit:radar-etat", { detail: { actif: true } }));
+      return true;
     }).catch(function (e) {
       console.error("[Meteo] sequence radar:", e);
       if (window.showToast) window.showToast("Radar indisponible", "error");
+      return false;
     });
   }
+
+  // Pilotage par la couche Vent (bascule Pluie / Vent / Rafales / Pluie + Vent).
+  window.CockpitMeteoRadar = {
+    actif: function () { return radar.actif; },
+    activer: function () { return Promise.resolve(radar.actif ? true : basculerRadar()); },
+    desactiver: function () { return Promise.resolve(radar.actif ? basculerRadar() : false); }
+  };
 
   function majBoutonRadar() {
     var b = document.getElementById("radar-toggle");

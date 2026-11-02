@@ -145,11 +145,51 @@
 }
 .meteo-bouton:hover { background: rgba(57, 135, 229, 0.26); }
 
+/* --- Couche Vent (meteo_vent.js) : reutilise la barre du radar ---------- */
+.vent-modes { display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: rgba(148, 163, 184, 0.16); flex: 0 0 auto; }
+.vent-mode {
+  border: none; background: transparent; color: inherit; cursor: pointer;
+  padding: 4px 10px; border-radius: 5px; font-size: 0.74rem; font-weight: 600; white-space: nowrap;
+}
+.vent-mode:hover { background: rgba(57, 135, 229, 0.18); }
+.vent-mode.active { background: #3987e5; color: #fff; }
+.vent-observation, .vent-radar-info { font-size: 0.72rem; color: #94a3b8; margin-left: auto; text-align: right; }
+.vent-infos { min-width: 210px; }
+
+.vent-legende { align-items: center; }
+.vent-legende-echelle { position: relative; flex: 1 1 auto; min-width: 160px; padding-bottom: 12px; }
+.vent-legende-degrade { height: 9px; border-radius: 3px; }
+.vent-legende-graduations { position: absolute; left: 0; right: 0; top: 11px; height: 10px; }
+.vent-legende-graduations .radar-legende-valeur { position: absolute; transform: translateX(-50%); }
+.vent-legende-graduations .radar-legende-valeur:first-child { transform: none; }
+.vent-unite {
+  border: 1px solid rgba(148, 163, 184, 0.35); background: transparent; color: inherit; cursor: pointer;
+  border-radius: 5px; padding: 1px 7px; font-size: 0.66rem; white-space: nowrap;
+}
+
+/* Fleches de direction : blanches cernees de sombre, lisibles sur le fond colore. */
+.vent-fleche-conteneur { background: none; border: none; }
+/* width max-content : l'icone Leaflet est de taille nulle, sans cela la boite
+   s'ecrase et l'etiquette recouvre la fleche. */
+.vent-fleche { position: relative; width: max-content; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; pointer-events: none; }
+.vent-fleche-ico { display: block; flex: 0 0 auto; overflow: visible; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.85)); }
+.vent-fleche-ico path { fill: none; stroke: rgba(255, 255, 255, 0.85); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.vent-fleche-cle .vent-fleche-ico path { fill: #fff; stroke: #0f172a; stroke-width: 1.2; }
+/* Etiquette hors flux : la fleche reste centree sur le point, pas l'ensemble. */
+.vent-fleche-etiquette {
+  position: absolute; left: 100%; top: 50%; transform: translateY(-50%); margin-left: 5px;
+  white-space: nowrap; font-size: 0.7rem; font-weight: 700; color: #0f172a;
+  background: rgba(255, 255, 255, 0.9); border-radius: 4px; padding: 1px 5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.vent-particules { position: absolute; pointer-events: none; }
+
 /* Le mur du PC Orga est un ecran clair : les fonds sombres y sont illisibles. */
 @media (prefers-color-scheme: light) {
   .radar-barre { background: rgba(255, 255, 255, 0.94); color: #1e293b; }
   .radar-source { color: #64748b; }
   .radar-legende-titre, .radar-legende-valeur { color: #475569; }
+  .vent-observation, .vent-radar-info { color: #475569; }
 }
 
 /* ==========================================================================
