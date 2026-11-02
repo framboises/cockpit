@@ -29,8 +29,8 @@ def _doc(flux, run, echeance, ident, **champs):
 def _db():
     docs = [
         # AROME : vent d'ouest qui forcit de 2 a 4 m/s entre 12 h et 13 h
-        _doc(meteo_vent.FLUX_AROME, RUN_AR, 360, "a6", u=2.0, v=0.0, rafale=5.0, rafale_max_site_ms=5.0),
-        _doc(meteo_vent.FLUX_AROME, RUN_AR, 420, "a7", u=4.0, v=0.0, rafale=7.0, rafale_max_site_ms=7.0),
+        _doc(meteo_vent.FLUX_AROME, RUN_AR, 360, "a6", u=2.0, v=0.0, rafale=5.0, nuages=20.0, rafale_max_site_ms=5.0),
+        _doc(meteo_vent.FLUX_AROME, RUN_AR, 420, "a7", u=4.0, v=0.0, rafale=7.0, nuages=60.0, rafale_max_site_ms=7.0),
         _doc(meteo_vent.FLUX_AROME, RUN_AR, 480, "a8", u=4.0, v=0.0, rafale=20.0, rafale_max_site_ms=20.0),
         _doc(meteo_vent.FLUX_AROME, RUN_AR, 540, "a9", u=4.0, v=0.0, rafale=8.0, rafale_max_site_ms=8.0),
         # AROME-PI : rafales au quart d'heure, une echeance deja passee
@@ -65,6 +65,11 @@ class TestTrames:
         assert c["moyen"] == "AROME interpole"
         assert c["u"][0] == 3.0
         assert c["u_rafale"][0] == 8.0
+
+    def test_nuages_arome_et_interpoles(self):
+        assert meteo_vent.champ(_db(), "pi|20261102T1100|90")["nuages"][0] == 40.0
+        # Run collecte avant l'ajout des nuages : champ absent, pas d'erreur
+        assert meteo_vent.champ(_db(), "ar|20261102T0600|480")["nuages"] is None
 
     def test_trame_inconnue(self):
         assert meteo_vent.champ(_db(), "pi|20261102T1100|999") is None

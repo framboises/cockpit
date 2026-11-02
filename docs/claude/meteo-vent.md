@@ -23,7 +23,9 @@ Couche Vent de la carte, sur la même carte que le radar de pluie, et outil Alfr
 
 ## Carte (`static/js/meteo_vent.js`)
 
-- Bouton `air` à côté du bouton radar. Bascule **Pluie / Vent / Rafales / Pluie + Vent**, dans la barre du vent et greffée dans celle du radar.
+- **Un seul bouton « Météo »** sur la carte (icône `partly_cloudy_day`, posé par `meteo_avance.js`, délégué à `CockpitMeteoVent.bouton()`). Si une couche est affichée, il éteint tout ; sinon il rouvre le dernier mode utilisé (`localStorage` `cockpit_meteo_mode`, Pluie par défaut). Bascule **Pluie / Vent / Rafales / Nuages / Pluie + Vent**, dans la barre du vent et greffée dans celle du radar.
+- **Fond coloré masqué au zoom ≥ 15** (`FOND_ZOOM_MAX`) en Vent et Rafales : il nuisait à la lecture de la carte de l'enceinte. Les particules et les flèches restent.
+- **Nuages** : couverture nuageuse totale AROME (`TOTAL_CLOUD_COVER`, %, champ `nuages` des documents AROME, interpolé sur les trames AROME-PI). Voile gris-bleu dont l'opacité suit la couverture (rien sous 5 %), sans particules ni flèches. Un run collecté avant l'ajout n'a pas de nuages : la barre affiche « Couverture nuageuse indisponible pour cette heure ». AROME-PI ne sert que les nuages bas, non utilisés pour garder une seule définition.
 - **Vent :**
   - fond coloré par vitesse (palette type Windy, opacité 0,6, interpolation bilinéaire) ;
   - particules sur un canvas dans le pane `ventParticules` (z 455) ;

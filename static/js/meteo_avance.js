@@ -270,7 +270,8 @@
   window.CockpitMeteoRadar = {
     actif: function () { return radar.actif; },
     activer: function () { return Promise.resolve(radar.actif ? true : basculerRadar()); },
-    desactiver: function () { return Promise.resolve(radar.actif ? basculerRadar() : false); }
+    desactiver: function () { return Promise.resolve(radar.actif ? basculerRadar() : false); },
+    majBouton: majBoutonRadar
   };
 
   function majBoutonRadar() {
@@ -278,9 +279,12 @@
     if (!b) return;
     // "active" et non "actif" : c'est la classe que style.css applique deja
     // aux autres bascules de la carte (.cockpit-tile-switcher .tile-btn.active).
-    b.classList.toggle("active", radar.actif);
-    b.title = radar.actif ? "Masquer le radar de precipitations"
-                          : "Radar de precipitations";
+    // Bouton unique de la meteo sur la carte (pluie, vent, rafales, nuages) :
+    // actif des qu'une des couches l'est.
+    var vent = window.CockpitMeteoVent && window.CockpitMeteoVent.actif();
+    b.classList.toggle("active", radar.actif || !!vent);
+    b.title = (radar.actif || vent) ? "Masquer la météo de la carte"
+                                    : "Météo sur la carte : pluie, vent, rafales, nuages";
   }
 
   function construireBarre() {
@@ -366,13 +370,17 @@
       var bouton = document.createElement("button");
       bouton.className = "tile-btn";
       bouton.id = "radar-toggle";
-      bouton.title = "Radar de precipitations";
-      var icone = el("span", "material-symbols-outlined", "radar");
+      bouton.title = "Météo sur la carte : pluie, vent, rafales, nuages";
+      var icone = el("span", "material-symbols-outlined", "partly_cloudy_day");
       icone.style.fontSize = "20px";
       bouton.appendChild(icone);
       div.appendChild(bouton);
       L.DomEvent.disableClickPropagation(div);
-      bouton.addEventListener("click", basculerRadar);
+      // Un seul bouton : meteo_vent.js choisit la couche (dernier mode utilise)
+      bouton.addEventListener("click", function () {
+        if (window.CockpitMeteoVent && window.CockpitMeteoVent.bouton) window.CockpitMeteoVent.bouton();
+        else basculerRadar();
+      });
       return div;
     };
     controle.addTo(m);

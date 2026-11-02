@@ -32,10 +32,20 @@
   ];
   var GRADUATIONS_MS = [0, 3, 5, 9, 13, 17, 21, 27, 36];
 
+  // A partir de ce zoom, plus de fond colore en Vent / Rafales : il masquait
+  // la carte de l'enceinte ; particules et fleches suffisent a lire le vent.
+  var FOND_ZOOM_MAX = 15;
+
+  // Nuages : couverture totale AROME (%) -> gris bleute de plus en plus opaque
+  var NUAGES_RGB = [72, 84, 102];
+  var NUAGES_ALPHA_MAX = 0.62;
+  var NUAGES_SEUIL = 5;
+
   var MODES = [
     { cle: "pluie", libelle: "Pluie" },
     { cle: "vent", libelle: "Vent" },
     { cle: "rafales", libelle: "Rafales" },
+    { cle: "nuages", libelle: "Nuages" },
     { cle: "pluie_vent", libelle: "Pluie + Vent" }
   ];
 
@@ -110,6 +120,8 @@
     this.v = gust ? d.v_rafale : d.v;
     this.vecteurRafale = !!gust;
     this.intensite = mode === "rafales" ? d.rafale : null;
+    // Couverture nuageuse (%), seulement en mode Nuages
+    this.nuages = mode === "nuages" ? d.nuages : null;
   }
   Champ.prototype.interp = function (grille, lat, lon) {
     if (!grille) return null;
@@ -151,8 +163,16 @@
       var lat = h.la1 + h.dy / 2 - (py + 0.5) / k * h.dy;
       for (var px = 0; px < cv.width; px++) {
         var lon = h.lo1 - h.dx / 2 + (px + 0.5) / k * h.dx;
-        var c = couleur(ch.force(lat, lon));
         var o = (py * cv.width + px) * 4;
+        if (ch.nuages) {
+          // Nuages : teinte fixe, opacite proportionnelle a la couverture
+          var n = ch.interp(ch.nuages, lat, lon);
+          if (n === null || n < NUAGES_SEUIL) { img.data[o + 3] = 0; continue; }
+          img.data[o] = NUAGES_RGB[0]; img.data[o + 1] = NUAGES_RGB[1]; img.data[o + 2] = NUAGES_RGB[2];
+          img.data[o + 3] = Math.round(Math.min(100, n) / 100 * NUAGES_ALPHA_MAX * 255);
+          continue;
+        }
+        var c = couleur(ch.force(lat, lon));
         if (!c) { img.data[o + 3] = 0; continue; }
         img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
       }
@@ -164,16 +184,21 @@
   function majFond() {
     var m = carte();
     if (!m) return;
-    var voir = vent.champ && vent.mode !== "pluie_vent";
+    var nuages = vent.mode === "nuages";
+    var voir = vent.champ && vent.mode !== "pluie_vent" &&
+      (nuages ? !!vent.champ.nuages : m.getZoom() < FOND_ZOOM_MAX);
     if (!voir) {
       if (vent.fond) { m.removeLayer(vent.fond); vent.fond = null; }
       return;
     }
     var url = imageFond(vent.champ);
+    // Nuages : l'opacite est dans l'image (fonction de la couverture)
+    var opacite = nuages ? 1 : 0.6;
     if (!vent.fond) {
-      vent.fond = L.imageOverlay(url, vent.champ.bornes(), { opacity: 0.6, interactive: false, zIndex: 440 }).addTo(m);
+      vent.fond = L.imageOverlay(url, vent.champ.bornes(), { opacity: opacite, interactive: false, zIndex: 440 }).addTo(m);
     } else {
       vent.fond.setUrl(url);
+      vent.fond.setOpacity(opacite);
       vent.fond.setBounds(L.latLngBounds(vent.champ.bornes()));
     }
   }
@@ -210,6 +235,8 @@
   };
   Particules.prototype.demarrer = function () {
     this.arreter();
+    // Nuages : ni particules ni fleches, la couverture seule
+    if (vent.mode === "nuages") { this.effacer(); return; }
     if (!vent.champ || document.hidden) return;
     var m = this.m, taille = m.getSize();
     this.cv.width = taille.x;
@@ -304,7 +331,7 @@
     }
     vent.fleches.clearLayers();
     var ch = vent.champ;
-    if (!ch) return;
+    if (!ch || vent.mode === "nuages") return;
     var taille = m.getSize(), pas = ESPACEMENT_FLECHES_PX;
     for (var y = pas / 2; y < taille.y; y += pas) {
       for (var x = pas / 2; x < taille.x; x += pas) {
@@ -399,6 +426,32 @@
     });
   }
 
+  function legendeNuages() {
+    var l = el("div", "radar-legende vent-legende");
+    l.appendChild(el("span", "radar-legende-titre vent-legende-unite", "Nuages"));
+    var echelle = el("div", "vent-legende-echelle");
+    var degrade = el("div", "vent-legende-degrade");
+    var rgb = NUAGES_RGB.join(",");
+    degrade.style.background = "linear-gradient(to right, rgba(" + rgb + ",0.04), rgba(" + rgb + "," + NUAGES_ALPHA_MAX + "))";
+    degrade.style.border = "1px solid rgba(148,163,184,0.4)";
+    echelle.appendChild(degrade);
+    var graduations = el("div", "vent-legende-graduations");
+    [0, 25, 50, 75, 100].forEach(function (p) {
+      var g = el("span", "radar-legende-valeur", p + " %");
+      g.style.left = p + "%";
+      graduations.appendChild(g);
+    });
+    echelle.appendChild(graduations);
+    l.appendChild(echelle);
+    return l;
+  }
+
+  // La legende suit le mode : force du vent ou couverture nuageuse
+  function majLegende() {
+    var vieille = document.querySelector("#vent-barre .vent-legende");
+    if (vieille) vieille.parentNode.replaceChild(vent.mode === "nuages" ? legendeNuages() : legende(), vieille);
+  }
+
   function legende() {
     var l = el("div", "radar-legende vent-legende");
     l.appendChild(el("span", "radar-legende-titre vent-legende-unite", libelleUnite()));
@@ -424,8 +477,7 @@
     u.addEventListener("click", function () {
       vent.unite = vent.unite === "kt" ? "kmh" : "kt";
       ecrireUnite(vent.unite);
-      var vieille = document.querySelector("#vent-barre .vent-legende");
-      if (vieille) vieille.parentNode.replaceChild(legende(), vieille);
+      majLegende();
       majFleches();
       majBarre();
     });
@@ -473,7 +525,7 @@
     barre.appendChild(controles);
 
     var bas = el("div", "radar-ligne radar-ligne-bas");
-    bas.appendChild(legende());
+    bas.appendChild(vent.mode === "nuages" ? legendeNuages() : legende());
     bas.appendChild(el("span", "radar-source", "Source : Météo-France (AROME-PI, AROME)"));
     barre.appendChild(bas);
     conteneur.appendChild(barre);
@@ -488,6 +540,10 @@
     var ch = vent.champ;
     if (!ch) return "";
     var lat = 47.945, lon = 0.224;
+    if (vent.mode === "nuages") {
+      var n = new Champ(ch.d, "nuages").interp(ch.d.nuages, lat, lon);
+      return n === null ? "Couverture nuageuse indisponible pour cette heure" : "Circuit : nuages " + Math.round(n) + " %";
+    }
     var moyen = ch.d.u ? new Champ(ch.d, "vent") : null;
     var w = moyen ? moyen.vecteur(lat, lon) : null;
     var r = new Champ(ch.d, "rafales").force(lat, lon);
@@ -503,12 +559,15 @@
     if (barre && t) {
       barre.querySelector(".vent-heure").textContent = heureEtJour(t.valid_at);
       var src = barre.querySelector(".vent-source");
-      src.textContent = t.source + " · run " + heure(t.run_at) +
-        (t.source === "AROME-PI" && vent.mode !== "rafales" ? " · moyen AROME" : "");
+      // Nuages : toujours AROME (interpole sur les trames AROME-PI)
+      src.textContent = vent.mode === "nuages"
+        ? (t.source === "AROME-PI" ? "AROME interpolé" : "AROME · run " + heure(t.run_at))
+        : t.source + " · run " + heure(t.run_at) +
+          (t.source === "AROME-PI" && vent.mode !== "rafales" ? " · moyen AROME" : "");
       src.style.color = t.source === "AROME-PI" ? "#f59628" : "#3987e5";
       var maxi = t.rafale_max_site_kmh;
       barre.querySelector(".vent-circuit").textContent = texteCircuit() +
-        (maxi !== null && maxi !== undefined ? " · max enceinte " + convertir(maxi / 3.6) : "");
+        (vent.mode !== "nuages" && maxi !== null && maxi !== undefined ? " · max enceinte " + convertir(maxi / 3.6) : "");
       var c = barre.querySelector(".vent-curseur");
       c.max = Math.max(0, vent.seq.trames.length - 1);
       c.value = vent.index;
@@ -566,6 +625,7 @@
     if (vent.particules) { vent.particules.detruire(); vent.particules = null; }
     if (m && vent.fond) { m.removeLayer(vent.fond); vent.fond = null; }
     if (m && vent.fleches) { m.removeLayer(vent.fleches); vent.fleches = null; }
+    if (m) m.off("zoomend", majFond);
     vent.actif = false;
     vent.champ = null;
     var b = document.getElementById("vent-barre");
@@ -584,6 +644,9 @@
       }
       vent.actif = true;
       if (!vent.particules) vent.particules = new Particules(m);
+      // Fond colore masque au zoom rapproche (FOND_ZOOM_MAX)
+      m.off("zoomend", majFond);
+      m.on("zoomend", majFond);
       construireBarre();
       majBoutonVent();
       if (vent.rafraichissement) clearInterval(vent.rafraichissement);
@@ -608,6 +671,7 @@
 
   function choisirMode(mode) {
     var radar = window.CockpitMeteoRadar;
+    try { localStorage.setItem("cockpit_meteo_mode", mode); } catch (e) { /* stockage indisponible */ }
     if (mode === "pluie") {
       arreterVent();
       if (radar) radar.activer().then(function () { greffeBarreRadar(); majModes(); });
@@ -631,43 +695,29 @@
       } else {
         if (radar && radar.actif()) radar.desactiver();
         if (b) b.style.display = "flex";
+        majLegende();
         afficherTrame(vent.index);
       }
     });
   }
 
-  function basculerVent() {
-    if (vent.actif) { arreterVent(); return; }
-    choisirMode(vent.mode === "pluie_vent" ? "vent" : vent.mode);
+  // Bouton unique "Meteo" de la carte (pose par meteo_avance.js) : eteint
+  // tout si une couche est affichee, sinon rouvre le dernier mode utilise.
+  function bouton() {
+    var radar = window.CockpitMeteoRadar;
+    if (vent.actif || (radar && radar.actif())) {
+      if (vent.actif) arreterVent();
+      if (radar && radar.actif()) radar.desactiver();
+      return;
+    }
+    var mode = "pluie";
+    try { mode = localStorage.getItem("cockpit_meteo_mode") || "pluie"; } catch (e) { /* stockage indisponible */ }
+    if (!MODES.some(function (m) { return m.cle === mode; })) mode = "pluie";
+    choisirMode(mode);
   }
 
   function majBoutonVent() {
-    var b = document.getElementById("vent-toggle");
-    if (!b) return;
-    b.classList.toggle("active", vent.actif);
-    b.title = vent.actif ? "Masquer le vent" : "Vent et rafales";
-  }
-
-  function poserBouton() {
-    var m = carte();
-    if (!m || document.getElementById("vent-toggle")) return !!m;
-    var controle = L.control({ position: "topright" });
-    controle.onAdd = function () {
-      var div = L.DomUtil.create("div", "leaflet-bar cockpit-tile-switcher cockpit-vent-ctrl");
-      var bouton = document.createElement("button");
-      bouton.className = "tile-btn";
-      bouton.id = "vent-toggle";
-      bouton.title = "Vent et rafales";
-      var icone = el("span", "material-symbols-outlined", "air");
-      icone.style.fontSize = "20px";
-      bouton.appendChild(icone);
-      div.appendChild(bouton);
-      L.DomEvent.disableClickPropagation(div);
-      bouton.addEventListener("click", basculerVent);
-      return div;
-    };
-    controle.addTo(m);
-    return true;
+    if (window.CockpitMeteoRadar && window.CockpitMeteoRadar.majBouton) window.CockpitMeteoRadar.majBouton();
   }
 
   // ------------------------------------------------------------- evenements
@@ -696,10 +746,9 @@
     else vent.particules.demarrer();
   });
 
-  var essais = 0;
-  var attente = setInterval(function () {
-    if (poserBouton() || ++essais > 60) clearInterval(attente);
-  }, 500);
-
-  window.CockpitMeteoVent = { mode: choisirMode, etat: function () { return vent; } };
+  window.CockpitMeteoVent = {
+    mode: choisirMode, bouton: bouton,
+    actif: function () { return vent.actif; },
+    etat: function () { return vent; }
+  };
 })();

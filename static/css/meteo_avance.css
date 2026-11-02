@@ -160,8 +160,9 @@
 .vent-legende-echelle { position: relative; flex: 1 1 auto; min-width: 160px; padding-bottom: 12px; }
 .vent-legende-degrade { height: 9px; border-radius: 3px; }
 .vent-legende-graduations { position: absolute; left: 0; right: 0; top: 11px; height: 10px; }
-.vent-legende-graduations .radar-legende-valeur { position: absolute; transform: translateX(-50%); }
+.vent-legende-graduations .radar-legende-valeur { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .vent-legende-graduations .radar-legende-valeur:first-child { transform: none; }
+.vent-legende-graduations .radar-legende-valeur:last-child { transform: translateX(-100%); }
 .vent-unite {
   border: 1px solid rgba(148, 163, 184, 0.35); background: transparent; color: inherit; cursor: pointer;
   border-radius: 5px; padding: 1px 7px; font-size: 0.66rem; white-space: nowrap;

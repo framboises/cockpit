@@ -88,7 +88,7 @@ def _dernier_run(db, flux):
 
 
 def _docs_run(db, flux, run_at, avec_grilles=False):
-    projection = None if avec_grilles else {"u": 0, "v": 0, "rafale": 0, "u_rafale": 0, "v_rafale": 0}
+    projection = None if avec_grilles else {"u": 0, "v": 0, "rafale": 0, "u_rafale": 0, "v_rafale": 0, "nuages": 0}
     return list(db[COLLECTION].find({"flux": flux, "run_at": run_at}, projection).sort("echeance_min", 1))
 
 
@@ -184,21 +184,36 @@ def _grilles_trame(db, ident):
     if flux == FLUX_AROME:
         return doc, _tableau(doc, "u"), _tableau(doc, "v"), _tableau(doc, "rafale"), None, None, "AROME"
 
-    u = v = None
-    moyen = None
+    i = _interpole_arome(db, doc, ("u", "v"))
+    return (doc, i.get("u"), i.get("v"), _tableau(doc, "rafale"), _tableau(doc, "u_rafale"),
+            _tableau(doc, "v_rafale"), "AROME interpole" if i.get("u") is not None else None)
+
+
+def _interpole_arome(db, doc, champs):
+    """Champs AROME a l'instant d'un document AROME-PI, interpoles entre les
+    deux heures encadrantes du dernier run. {champ: grille} (absents omis)."""
     run_ar = _dernier_run(db, FLUX_AROME)
-    if run_ar:
-        enc = _encadrants(_docs_run(db, FLUX_AROME, run_ar), doc["valid_at"])
-        if enc:
-            avant, apres, poids = enc
-            a = db[COLLECTION].find_one({"_id": avant["_id"]})
-            b = a if apres["_id"] == avant["_id"] else db[COLLECTION].find_one({"_id": apres["_id"]})
-            if a and b and a["nx"] == doc["nx"] and a["ny"] == doc["ny"]:
-                u = _tableau(a, "u") * (1 - poids) + _tableau(b, "u") * poids
-                v = _tableau(a, "v") * (1 - poids) + _tableau(b, "v") * poids
-                moyen = "AROME interpole"
-    return (doc, u, v, _tableau(doc, "rafale"), _tableau(doc, "u_rafale"),
-            _tableau(doc, "v_rafale"), moyen)
+    enc = _encadrants(_docs_run(db, FLUX_AROME, run_ar), doc["valid_at"]) if run_ar else None
+    if not enc:
+        return {}
+    avant, apres, poids = enc
+    a = db[COLLECTION].find_one({"_id": avant["_id"]})
+    b = a if apres["_id"] == avant["_id"] else db[COLLECTION].find_one({"_id": apres["_id"]})
+    if not (a and b and a["nx"] == doc["nx"] and a["ny"] == doc["ny"]):
+        return {}
+    sortie = {}
+    for c in champs:
+        ta, tb = _tableau(a, c), _tableau(b, c)
+        if ta is not None and tb is not None:
+            sortie[c] = ta * (1 - poids) + tb * poids
+    return sortie
+
+
+def _nuages(db, doc):
+    """Couverture nuageuse totale (%) d'AROME, interpolee pour une trame AROME-PI."""
+    if doc.get("flux") == FLUX_AROME:
+        return _tableau(doc, "nuages")
+    return _interpole_arome(db, doc, ("nuages",)).get("nuages")
 
 
 def champ(db, ident):
@@ -219,6 +234,8 @@ def champ(db, ident):
                    "unite": "m/s"},
         "u": _arrondir(u), "v": _arrondir(v), "rafale": _arrondir(rafale),
         "u_rafale": _arrondir(ur), "v_rafale": _arrondir(vr),
+        # Couverture nuageuse totale en % (AROME) : couche Nuages
+        "nuages": _arrondir(_nuages(db, doc)),
     }
 
 
