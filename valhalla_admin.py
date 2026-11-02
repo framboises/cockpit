@@ -447,7 +447,16 @@ def api_osm_restore(archive_id):
     if not _ARCHIVE_ID_RE.match(archive_id):
         return jsonify({"detail": "archive inconnue"}), 404
     logger.warning("valhalla_admin: restauration de l'archive OSM %s par %s", archive_id, _author())
-    return _relay("POST", "/osm/archives/%s/restore" % archive_id, json_body={"load": True})
+    resp = _relay("POST", "/osm/archives/%s/restore" % archive_id, json_body={"load": True})
+    if resp.status_code == 200:
+        # D'autres donnees OSM en service : les documents touches ne sont pas
+        # connus, on relit ceux de toutes les fermetures publiees vers Waze
+        try:
+            import waze_feed
+            waze_feed.resync_all()
+        except Exception:
+            logger.exception("valhalla_admin: verification Waze apres restauration OSM")
+    return resp
 
 
 @valhalla_admin_bp.route("/api/admin/itineraire/<layer>", methods=["GET", "POST"])

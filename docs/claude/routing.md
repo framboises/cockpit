@@ -79,7 +79,8 @@ Données OSM (Le Mans)  →  Saison  →  Épreuve (facultative)  =  Scénario c
     - Le résultat affiche `applied` et `conflicts` (règle déjà présente, non écrasée), puis le suivi du chargement dans la feuille existante.
     - Le relais revérifie ensuite les fermetures Waze des documents modifiés, comme après une écriture de l'éditeur.
   - **Rejeter** : `DELETE /osm/candidate`, après confirmation.
-  - **Archives** : bouton Restaurer (`load: true`), refusé si un candidat est ouvert. Avertissement : les règles modifiées par une acceptation ne sont **pas** remises en l'état ; passer par l'historique des documents.
+  - **Archives** : bouton Restaurer (`load: true`), refusé si un candidat est ouvert. Avertissement : les règles modifiées par une acceptation ne sont **pas** remises en l'état ; passer par l'historique des documents. Après une restauration réussie, le relais lance `waze_feed.resync_all()` : les documents touchés ne sont pas connus, il relit ceux de toutes les fermetures publiées.
+  - **Résumé du candidat** : `summary` est imbriqué (`{"ways": {"before", "after", "added", "removed"}, "barriers": {...}}`), affiché « Voies routables : 15 234 → 15 295 (+61 / −0) » ; une clé inconnue s'affiche telle quelle.
   - **Pendant une opération OSM**, décisions, acceptation, restauration et chargement de scénario sont désactivés (`ItOsm.occupe()`, garde dans `openLoad` / `startLoad` : le 409 du service se lirait à tort comme « chargement déjà en cours »).
   - **Service pas à jour** (`GET /osm` en 404) : bandeau masqué, onglet explicatif.
 - **Chargement** : saison + épreuve, avertissement et confirmation, `POST /load` puis `GET /status` toutes les 3 s, trajets de contrôle (`reference_routes`) en cas de succès. 409 = chargement déjà en cours → affichage de son suivi.

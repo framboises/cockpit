@@ -46,12 +46,10 @@
     ignore: ["Ignorer", "visibility_off"],
   };
   var COUCHES = { seasons: "Saison", events: "Épreuve" };
-  // Libelles des cles connues du resume du candidat ; les autres s'affichent telles quelles
-  var RESUME = {
-    ways_added: "voies ajoutées", ways_removed: "voies supprimées", ways_modified: "voies modifiées",
-    barriers_added: "barrières ajoutées", barriers_removed: "barrières supprimées", barriers_modified: "barrières modifiées",
-    ways: "voies", barriers: "barrières",
-  };
+  // Resume du candidat : {"ways": {"before", "after", "added", "removed"}, "barriers": {...}}.
+  // Cles inconnues : affichees telles quelles.
+  var RESUME = { ways: "Voies routables", barriers: "Barrières" };
+  var RESUME_CHAMPS = { before: "Avant", after: "Après", added: "Ajoutées", removed: "Supprimées" };
 
   var O = {
     etat: null, indispo: false, rapport: null, sel: null, filtreType: "", filtreDoc: "",
@@ -167,7 +165,7 @@
       h("div", { className: "it-osm-date", text: fmtDate(cur.osm_timestamp) || "?" }),
       h("div", { className: "it-sub", text: [
         cur.accepted_at ? "Mises en service le " + fmtDate(cur.accepted_at) + (cur.accepted_by ? " par " + cur.accepted_by : "") : "",
-        cur.ways != null ? cur.ways + " voies, " + (cur.barriers || 0) + " barrières" : "",
+        cur.ways != null ? nb(cur.ways) + " voies, " + nb(cur.barriers || 0) + " barrières" : "",
       ].filter(Boolean).join(" · ") }),
     ]));
     var amont = h("div", null, [h("div", { className: "it-k", text: "OpenStreetMap" })]);
@@ -249,11 +247,25 @@
     z.appendChild(carte);
   }
 
+  function nb(x) { return typeof x === "number" ? x.toLocaleString("fr-FR") : String(x); }
+
+  // "Voies routables : 15 234 → 15 295 (+61 / −0)"
   function resumeLignes(s) {
     if (!s) return [];
     if (typeof s === "string") return [h("span", { text: s })];
-    return Object.keys(s).filter(function (k) { return typeof s[k] === "number" || typeof s[k] === "string"; }).map(function (k) {
-      return h("span", { className: "it-osm-resume-item" }, [h("b", { text: String(s[k]) }), " " + (RESUME[k] || k.replace(/_/g, " "))]);
+    return Object.keys(s).map(function (k) {
+      var v = s[k], lib = RESUME[k] || k;
+      if (v && typeof v === "object") {
+        var texte;
+        if (v.before != null && v.after != null) {
+          texte = nb(v.before) + " → " + nb(v.after) +
+            (v.added != null || v.removed != null ? " (+" + nb(v.added || 0) + " / −" + nb(v.removed || 0) + ")" : "");
+        } else {
+          texte = Object.keys(v).map(function (c) { return (RESUME_CHAMPS[c] || c) + " " + nb(v[c]); }).join(", ");
+        }
+        return h("span", { className: "it-osm-resume-item" }, [h("b", { text: lib + " : " }), texte]);
+      }
+      return h("span", { className: "it-osm-resume-item" }, [h("b", { text: lib + " : " }), nb(v)]);
     });
   }
 
@@ -732,8 +744,8 @@
         if (candidat()) bt.title = "Impossible tant qu'un candidat est ouvert";
         bt.addEventListener("click", function () { restaurer(a); });
         tb.appendChild(h("tr", null, [h("td", { text: fmtDate(a.osm_timestamp) }), h("td", { text: fmtDate(a.archived_at) }),
-          h("td", { text: a.archived_by || "" }), h("td", { text: a.ways != null ? String(a.ways) : "" }),
-          h("td", { text: a.barriers != null ? String(a.barriers) : "" }), h("td", null, bt)]));
+          h("td", { text: a.archived_by || "" }), h("td", { text: a.ways != null ? nb(a.ways) : "" }),
+          h("td", { text: a.barriers != null ? nb(a.barriers) : "" }), h("td", null, bt)]));
       });
       t.appendChild(tb);
       bloc.appendChild(t);
