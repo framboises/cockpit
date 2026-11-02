@@ -63,6 +63,7 @@
           <div class="it-health" id="it-health"></div>
         </div>
       </section>
+      <div class="it-osm-banner" id="it-osm-banner" hidden></div>
       <div class="it-alert is-warn" id="it-pending" hidden>
         <span class="material-symbols-outlined">sync_problem</span>
         <div><strong>Modifications non appliquees.</strong> <span id="it-pending-txt"></span>
@@ -79,9 +80,17 @@
           <span class="material-symbols-outlined">flag</span> Epreuves</button>
         <button type="button" class="it-tab" data-tab="waze" role="tab">
           <span class="material-symbols-outlined">campaign</span> Waze</button>
+        <button type="button" class="it-tab" data-tab="osm" role="tab">
+          <span class="material-symbols-outlined">public</span> Données OSM
+          <span class="it-osm-tabbadge" id="it-osm-tabbadge" hidden></span></button>
         <button type="button" class="it-tab" data-tab="guide" role="tab">
           <span class="material-symbols-outlined">menu_book</span> Guide</button>
       </nav>
+
+      <!-- Donnees OSM du moteur : candidat, rapport d'impact, archives (itineraire_osm.js) -->
+      <section class="it-pane" data-pane="osm" hidden>
+        <div id="it-osm"></div>
+      </section>
 
       <!-- Fermetures publiees vers Waze (waze_feed.py) -->
       <section class="it-pane" data-pane="waze" hidden>
@@ -298,11 +307,24 @@
   </div>
 </div>
 
+<!-- Acceptation du candidat OSM : recapitulatif puis resultat -->
+<div class="it-overlay" id="it-osm-accept" hidden>
+  <div class="it-sheet it-sheet-wide" role="dialog" aria-modal="true" aria-labelledby="it-osm-accept-title">
+    <header class="it-sheet-head">
+      <h3 id="it-osm-accept-title">Accepter les nouvelles données OSM</h3>
+      <button type="button" class="it-close" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="it-sheet-body" id="it-osm-accept-body"></div>
+    <div class="it-sheet-foot" id="it-osm-accept-foot"></div>
+  </div>
+</div>
+
 <div id="toast-container"></div>
 <script>window.__itModeLabels = {{ mode_labels | tojson }};</script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/itineraire_admin.js') }}"></script>
+<script src="{{ url_for('static', filename='js/itineraire_osm.js') }}"></script>
 </body>
 </html>

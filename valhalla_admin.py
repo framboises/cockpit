@@ -34,7 +34,7 @@ import threading
 import time
 import unicodedata
 from functools import wraps
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 from flask import Blueprint, Response, jsonify, render_template, request
@@ -344,6 +344,110 @@ def api_load():
     logger.warning("valhalla_admin: chargement du scenario %s + %s par %s",
                    season_id, event_id or "aucune epreuve", _author())
     return _relay("POST", "/load", json_body={"season_id": season_id, "event_id": event_id})
+
+
+# ---------------------------------------------------------------------------
+# Donnees OSM : candidat, rapport d'impact, decisions, acceptation, archives
+# ---------------------------------------------------------------------------
+# Routes statiques : elles passent avant /<layer> (qui refuserait "osm").
+
+_ARCHIVE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm", methods=["GET"])
+@admin_required
+def api_osm():
+    return _relay("GET", "/osm")
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/refresh", methods=["POST"])
+@admin_required
+def api_osm_refresh():
+    logger.warning("valhalla_admin: telechargement d'un extrait OSM candidat par %s", _author())
+    return _relay("POST", "/osm/refresh", json_body={})
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/candidate", methods=["GET", "DELETE"])
+@admin_required
+def api_osm_candidate():
+    if request.method == "DELETE":
+        logger.warning("valhalla_admin: candidat OSM rejete par %s", _author())
+        return _relay("DELETE", "/osm/candidate")
+    return _relay("GET", "/osm/candidate", timeout=FEATURES_TIMEOUT)
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/candidate/alerts/ignore", methods=["POST"])
+@admin_required
+def api_osm_ignore():
+    data = request.get_json(silent=True) or {}
+    corps = {k: data[k] for k in ("level", "type") if data.get(k)}
+    return _relay("POST", "/osm/candidate/alerts/ignore", json_body=corps)
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/candidate/alerts/<path:alert_id>", methods=["PUT"])
+@admin_required
+def api_osm_decision(alert_id):
+    # L'id contient ":" et "/" (ex. way_split:way/123) : transmis tel quel
+    if len(alert_id) > 200 or ".." in alert_id:
+        return jsonify({"detail": "identifiant d'alerte invalide"}), 404
+    path = "/osm/candidate/alerts/" + quote(alert_id, safe=":/")
+    return _relay("PUT", path, json_body=request.get_json(silent=True) or {})
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/candidate/reanalyze", methods=["POST"])
+@admin_required
+def api_osm_reanalyze():
+    return _relay("POST", "/osm/candidate/reanalyze", json_body={})
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/candidate/accept", methods=["POST"])
+@admin_required
+def api_osm_accept():
+    data = request.get_json(silent=True) or {}
+    load = bool(data.get("load"))
+    logger.warning("valhalla_admin: candidat OSM accepte par %s (rechargement : %s)", _author(), load)
+    status, body, headers = admin_call("POST", "/osm/candidate/accept", json_body={"load": load},
+                                       timeout=FEATURES_TIMEOUT)
+    if status == 200 and isinstance(body, dict):
+        _waze_apres_acceptation(body.get("applied") or [])
+    resp = jsonify(body if body is not None else {})
+    resp.status_code = status
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _waze_apres_acceptation(applied):
+    """Les decisions ont reecrit des regles (nouvelle version des documents) :
+    meme verification des fermetures publiees vers Waze qu'apres une ecriture
+    de l'editeur (_notify_waze), document par document."""
+    vus = set()
+    for a in applied:
+        cle = (a.get("layer"), a.get("doc_id"))
+        if cle in vus or cle[0] not in LAYERS or not _DOC_ID_RE.match(str(cle[1] or "")):
+            continue
+        vus.add(cle)
+        try:
+            status, doc, _ = admin_call("GET", "/%s/%s" % cle)
+            if status == 200 and isinstance(doc, dict) and "rules" in doc:
+                import waze_feed
+                waze_feed.on_doc_written(cle[0], cle[1], doc)
+        except Exception:
+            logger.exception("valhalla_admin: verification Waze apres acceptation OSM (%s/%s)", *cle)
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/archives", methods=["GET"])
+@admin_required
+def api_osm_archives():
+    return _relay("GET", "/osm/archives")
+
+
+@valhalla_admin_bp.route("/api/admin/itineraire/osm/archives/<archive_id>/restore", methods=["POST"])
+@admin_required
+def api_osm_restore(archive_id):
+    if not _ARCHIVE_ID_RE.match(archive_id):
+        return jsonify({"detail": "archive inconnue"}), 404
+    logger.warning("valhalla_admin: restauration de l'archive OSM %s par %s", archive_id, _author())
+    return _relay("POST", "/osm/archives/%s/restore" % archive_id, json_body={"load": True})
 
 
 @valhalla_admin_bp.route("/api/admin/itineraire/<layer>", methods=["GET", "POST"])

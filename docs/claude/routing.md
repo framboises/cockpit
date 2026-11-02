@@ -60,6 +60,28 @@ Données OSM (Le Mans)  →  Saison  →  Épreuve (facultative)  =  Scénario c
     - appel `only_rules=true&off_network=true` + `season` / `event`, filtré sur `auto_snap === false` ;
     - badge du nombre ; un clic sur une ligne centre la carte et ouvre la bulle.
   - **Service pas à jour** (propriétés absentes, `off_network` ignoré) : rien ne s'affiche, l'encadré reste masqué. Le chargement affiche `last_load.patch.barriers_snapped` s'il est présent.
+- **Données OSM** (onglet, `static/js/itineraire_osm.js`, utilitaires partagés par `window.ItAdmin`) : mise à jour de l'extrait OSM du moteur, figé jusque-là.
+  - **Bandeau au tableau de bord.** Il affiche :
+    - la date des données en service, la date et l'auteur de leur mise en service ;
+    - « Nouvelles données disponibles » (`upstream.newer`), ou « Candidat en attente de décision ».
+  - **Télécharger les données à jour** : `POST /osm/refresh`, qui prend 5 à 10 min (~370 Mo). L'écran suit `GET /osm` toutes les 3 s tant que `job.state == "running"`, toutes les 60 s sinon. En `failed`, il affiche l'erreur ; en `interrupted`, il propose de relancer.
+  - **Rapport du candidat** (`GET /osm/candidate`) :
+    - une synthèse et les compteurs par niveau ;
+    - les alertes groupées par niveau, filtrables par type et par document ;
+    - une carte : géométrie avant (gris pointillé), après (couleur du niveau), successeurs numérotés.
+  - **Décisions** : `PUT /osm/candidate/alerts/<id>` (id avec `:` et `/`, encodé ; le relais le retransmet tel quel).
+    - `reassign` : successeurs pré-cochés et saisie libre, avec contrôle du type `way/` ou `node/` ; badge « sens inversé ».
+    - `extend` : liste des morceaux qui recevront la règle.
+    - « Tout ignorer » : niveaux attention et info.
+  - **Accepter** : actif seulement si `blocking_open == 0` et `stale` faux ; sinon « Relancer l'analyse » (`reanalyze`).
+    - Le récapitulatif est reconstruit côté Cockpit à partir des décisions (règles supprimées, réaffectées, étendues).
+    - La case « Recharger le scénario actif » est cochée par défaut, avec l'avertissement des 30 s.
+    - Le résultat affiche `applied` et `conflicts` (règle déjà présente, non écrasée), puis le suivi du chargement dans la feuille existante.
+    - Le relais revérifie ensuite les fermetures Waze des documents modifiés, comme après une écriture de l'éditeur.
+  - **Rejeter** : `DELETE /osm/candidate`, après confirmation.
+  - **Archives** : bouton Restaurer (`load: true`), refusé si un candidat est ouvert. Avertissement : les règles modifiées par une acceptation ne sont **pas** remises en l'état ; passer par l'historique des documents.
+  - **Pendant une opération OSM**, décisions, acceptation, restauration et chargement de scénario sont désactivés (`ItOsm.occupe()`, garde dans `openLoad` / `startLoad` : le 409 du service se lirait à tort comme « chargement déjà en cours »).
+  - **Service pas à jour** (`GET /osm` en 404) : bandeau masqué, onglet explicatif.
 - **Chargement** : saison + épreuve, avertissement et confirmation, `POST /load` puis `GET /status` toutes les 3 s, trajets de contrôle (`reference_routes`) en cas de succès. 409 = chargement déjà en cours → affichage de son suivi.
 - **Historique** : comparaison de deux versions (règles ajoutées / modifiées / supprimées, réglages), restauration = `PATCH` avec `rules` + `settings` de la version (nouvelle version).
 

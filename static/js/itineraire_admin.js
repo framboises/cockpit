@@ -532,6 +532,7 @@
   // ------------------------------------------------------------------
 
   function openLoad() {
+    if (osmOccupe()) return;
     var ov = $("#it-load");
     var act = activeIds();
     var ss = clear($("#it-load-season"));
@@ -559,6 +560,7 @@
     var season = $("#it-load-season").value;
     if (!season) { toast("warning", "Choisir une saison"); return; }
     if (!$("#it-load-confirm").checked) return;
+    if (osmOccupe()) return;
     var ev = $("#it-load-event").value || null;
     $("#it-load-go").disabled = true;
     api("POST", "/load", { body: { season_id: season, event_id: ev } }).then(function (res) {
@@ -2244,14 +2246,42 @@
   // ------------------------------------------------------------------
 
   function switchTab(tab) {
-    if (["seasons", "events", "carte", "waze", "guide"].indexOf(tab) < 0) tab = "carte";
+    if (["seasons", "events", "carte", "waze", "guide", "osm"].indexOf(tab) < 0) tab = "carte";
     S.tab = tab;
     $all(".it-tab").forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-tab") === tab); });
     $all(".it-pane").forEach(function (p) { p.hidden = p.getAttribute("data-pane") !== tab; });
     try { localStorage.setItem("it-admin-tab", tab); } catch (e) { /* stockage indisponible */ }
     if (tab === "carte") { initMap(); editorDefault(); }
     if (tab === "waze") api("POST", "/waze/resync").then(loadWaze);
+    if (tab === "osm" && window.ItOsm) window.ItOsm.afficher();
   }
+
+  // Une operation OSM en cours (telechargement, analyse) bloque le chargement
+  // de scenario : le service repondrait 409, lu a tort comme "chargement deja
+  // en cours".
+  function osmOccupe() {
+    if (window.ItOsm && window.ItOsm.occupe()) {
+      toast("warning", "Opération sur les données OSM en cours : chargement de scénario impossible pour l'instant");
+      return true;
+    }
+    return false;
+  }
+
+  // Utilitaires partages avec itineraire_osm.js (ecran Donnees OSM)
+  window.ItAdmin = {
+    api: api, h: h, icon: icon, clear: clear, toast: toast, errMsg: errMsg, fmtDate: fmtDate,
+    baseLayers: baseLayers, ruleSummary: ruleSummary, docName: docName, switchTab: switchTab,
+    // Suivi d'un chargement lance par le service (acceptation, restauration)
+    suivreChargement: function (initial) {
+      $("#it-load").hidden = false;
+      showLoadProgress(initial && initial.state ? initial : null);
+    },
+    apresDonnees: function () {
+      loadLists();
+      loadStatus();
+      if (S.m.map && S.m.seasonId) reloadEditorDoc();
+    },
+  };
 
   function wire() {
     $all(".it-tab").forEach(function (b) {
