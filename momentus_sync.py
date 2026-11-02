@@ -81,6 +81,12 @@ SETUP_LISTS = {
     "genres": "/v1/event-setup/genres",
     "task_types": "/v1/general-setup/task-types",
     "users": "/v1/general-setup/users",
+    # Unites et dossiers de documents (aucun referentiel financier : pas de
+    # finance-setup ni de grilles tarifaires, regle "rien qui touche a l'argent").
+    "document_folders": "/v1/event-setup/document-folders",
+    "labor_units": "/v1/finance-setup/labor-units",
+    "event_service_units": "/v1/finance-setup/event-service-units",
+    "food_beverage_units": "/v1/finance-setup/food-beverage-units",
 }
 
 log = logging.getLogger("momentus_sync")
@@ -525,7 +531,18 @@ def main(argv=None):
             db["momentus_sync_runs"].update_one({"_id": owner}, {"$set": {"stats": stats}})
         except Exception:
             log.exception("Timeline SAISON non mise a jour")
-        msg = (f"{mode} : {stats.get('events', 0)} evenements, {stats.get('functions', 0)} fonctions, "
+        # Detail operationnel (materiel, personnel, espaces + pilote, plans) :
+        # meme tache, apres la timeline. Budget d'appels borne (~3 min), verrou
+        # propre ; un echec ne fait pas echouer la synchro de base.
+        try:
+            import momentus_details
+            rc = momentus_details.run(argparse.Namespace(
+                db=args.db, dry_run=False, all=False, event=None,
+                budget=momentus_details.CALL_BUDGET, verbose=False))
+            stats["details_rc"] = rc
+        except Exception:
+            log.exception("Details Momentus non mis a jour")
+        msg =(f"{mode} : {stats.get('events', 0)} evenements, {stats.get('functions', 0)} fonctions, "
                f"{api.calls} appels, {duration} s")
         log.info("OK %s | %s", msg, json.dumps(stats, default=str))
         _update_cron_status("ok", msg)

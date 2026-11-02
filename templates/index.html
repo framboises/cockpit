@@ -948,6 +948,8 @@ window.__operatorPost = {{ (operator_post or none)|tojson }};
 <script src="{{ url_for('static', filename='js/meteo_vent.js') }}"></script>
 <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
 <script src="{{ url_for('static', filename='js/momentus_lieu.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/momentus_fiche.css') }}">
+<script src="{{ url_for('static', filename='js/momentus_fiche.js') }}"></script>
 <script nonce="{{ nonce }}">
 if (window.MomentusLieu) {
   MomentusLieu.currentEvent = function () {

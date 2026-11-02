@@ -163,7 +163,7 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/alfred.md` : Alfred (agent IA WhatsApp) : webhook WAHA, breaker, resumes Ollama ; chat Alfred des operateurs (widget, outils exposes a la VM, jeton de portee). Brief du wrapper VM : `docs/alfred-vm-brief.md`
 - `docs/claude/ai-reports.md` : Briefing de situation et RETEX de fin d'edition (ai_reports.py)
 - `docs/claude/frequentation-live.md` : Frequentation depuis l'archive du controle d'acces live (live_frequentation.py)
-- `docs/claude/momentus.md` : Momentus Elite : synchro, reservations par lieu ; contient aussi le rapport de scans depuis l'archive live (live_scan_units.py)
+- `docs/claude/momentus.md` : Momentus Elite : synchro, detail operationnel (materiel, personnel commande au format planning Bibler, pilote des espaces, plans / etats des lieux ; RIEN QUI TOUCHE A L'ARGENT, ni comptes ni contacts), reservations par lieu ; contient aussi le rapport de scans depuis l'archive live (live_scan_units.py)
 - `docs/claude/saison-indicateurs.md` : Indicateurs SAISON de la barre des jours (visites, pistes utilisees, blackouts comptes, config globale admin)
 - `docs/claude/voisins.md` : Evenements voisins (Antares, MSB, Le Mans FC) : sources publiques, voisins_events, timeline SAISON, indicateurs du calendrier
 - `docs/claude/musee.md` : Musee des 24 Heures : bloc autonome de l'accueil, collecte HSH dediee (musee_collect.py), visiteurs du jour (compteurs entree seule), PDA mobile, configuration dans /live-controle onglet Musee (horaires par jour, perimetre HSH, aucune valeur en dur)

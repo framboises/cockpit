@@ -159,12 +159,17 @@
             (f.attendance ? "~" + esc(f.attendance) : "") + "</td>" + (multiRoom ? "<td>" + esc(f.room) + "</td>" : "") + "</tr>";
         }).join("") + "</table></details>";
     }
+    // Fiche d'exploitation : seulement si l'app la fournit (Cockpit, momentus_fiche.js),
+    // ouverte par delegation sur data-mf-event. Identifiant valide avant ecriture.
+    var fiche = window.MomentusFiche && /^event-[0-9]{1,9}-[A-Z]{1,3}$/.test(String(b.event_id || ""))
+      ? '<button type="button" class="mlz-btn" data-mf-event="' + esc(b.event_id) + '" title="Personnel, materiel, pilote, plans">' +
+        '<span class="material-symbols-outlined">assignment</span>Fiche d\'exploitation</button>' : "";
     return '<div class="mlz-card" style="border-left-color:' + st.color + '">' +
       '<div class="mlz-card-top"><span class="mlz-name">' + esc(b.name) + "</span>" +
       '<span class="mlz-badge" style="background:' + st.color + '">' + st.label + "</span>" +
       '<span class="mlz-meta">' + meta.join(" · ") + "</span></div>" +
       '<div class="mlz-bar">' + bar + "</div>" +
-      '<div class="mlz-phases">' + phases + "</div>" + fns + "</div>";
+      '<div class="mlz-phases">' + phases + "</div>" + fns + fiche + "</div>";
   }
 
   function render(res) {

@@ -16,6 +16,8 @@ reports/
 uploads/scan_imports/
 # Captures des cameras, reecrites en continu (fiches, carte, capture de masse)
 uploads/camera_snapshots/
+# Plans et etats des lieux telecharges de Momentus (momentus_details.py) : fichiers clients
+uploads/momentus_documents/
 
 # Images radar generees toutes les 5 minutes par tools/Meteo/collecte_radar.py
 static/meteo/

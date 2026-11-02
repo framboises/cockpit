@@ -1009,7 +1009,20 @@ function _plCardBtnHtml(item, small) {
   if (!item || !item.momentus_event_id) return '';
   return '<button type="button" class="pl-open-btn' + (small ? ' is-sm' : '') + '" title="Planning du client"'
     + ' aria-label="Planning du client"><span class="material-symbols-outlined" aria-hidden="true">view_timeline</span>'
-    + (small ? '' : '<span class="pl-open-lbl">Planning</span>') + '</button>';
+    + (small ? '' : '<span class="pl-open-lbl">Planning</span>') + '</button>'
+    + _mfCardBtnHtml(item, small);
+}
+
+// Bouton "Fiche d'exploitation" (momentus_fiche.js : personnel, materiel,
+// pilote, plans). Ouvert par delegation sur data-mf-event : pas de cablage ici.
+// L'identifiant Momentus est valide (event-123-A) avant d'etre ecrit.
+function _mfCardBtnHtml(item, small) {
+  const id = String(item.momentus_event_id || '');
+  if (!window.MomentusFiche || !/^event-[0-9]{1,9}-[A-Z]{1,3}$/.test(id)) return '';
+  return '<button type="button" class="mf-open-btn' + (small ? ' is-sm' : '') + '" data-mf-event="' + id + '"'
+    + ' title="Fiche d\'exploitation : personnel, materiel, pilote, plans" aria-label="Fiche d\'exploitation">'
+    + '<span class="material-symbols-outlined" aria-hidden="true">assignment</span>'
+    + (small ? '' : '<span>Fiche</span>') + '</button>';
 }
 
 function _plWireCardBtn(btn, item, date) {
