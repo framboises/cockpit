@@ -34,7 +34,7 @@
 
   // A partir de ce zoom, plus de fond colore en Vent / Rafales : il masquait
   // la carte de l'enceinte ; particules et fleches suffisent a lire le vent.
-  var FOND_ZOOM_MAX = 15;
+  var FOND_ZOOM_MAX = 18;
 
   // Nuages : couverture totale AROME (%) -> gris bleute de plus en plus opaque
   var NUAGES_RGB = [72, 84, 102];
