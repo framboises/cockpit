@@ -1,6 +1,6 @@
 # Vent sur la carte d'accueil (meteo_vent.py, meteo_vent.js)
 
-Couche Vent de la carte, sur la même carte que le radar de pluie, et outil Alfred. Cockpit est **lecteur seul** : `meteo_vent` et `meteo_vent_obs` sont écrites par `E:\TITAN\tools\Meteo\collecte_vent.py`, via la tâche `TITAN Meteo` toutes les 15 min. Voir le README de la brique pour les sources et les pièges de l'API.
+Couche Vent de la carte, sur la même carte que le radar de pluie, et outil Alfred. ⚠️ `meteo_vent.py` est **copié à l'identique dans Looker** (racine, « Radar météo » de la carte, `tests/v2/test_meteo_vent.py` vérifie la copie) : reporter toute modification dans les deux dépôts. Cockpit est **lecteur seul** : `meteo_vent` et `meteo_vent_obs` sont écrites par `E:\TITAN\tools\Meteo\collecte_vent.py`, via la tâche `TITAN Meteo` toutes les 15 min. Voir le README de la brique pour les sources et les pièges de l'API.
 
 ## Ligne du temps (`meteo_vent.trames`)
 
