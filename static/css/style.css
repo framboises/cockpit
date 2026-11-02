@@ -1239,6 +1239,25 @@ img { max-width: 100%; }
 }
 
 .meteo-panel-tab:hover { background: var(--brand-light); color: var(--brand); }
+/* Meteo fusionnee (02/11/2026) : 15 onglets (defilement), jours de tendance ECMWF en italique ; bande ciel / vent /
+   source au-dessus du graphique horaire ; ciel et vent du jour dans le bandeau. */
+.meteo-panel-tabs { overflow-x: auto; scrollbar-width: thin; }
+.meteo-panel-tab { white-space: nowrap; flex: none; }
+.meteo-panel-tab.tendance { font-style: italic; }
+.meteo-panel-ciel { display: flex; flex-wrap: wrap; gap: 0; margin: 0 0 6px; }
+.meteo-panel-ciel-heure { flex: 1 1 0; min-width: 22px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 0 3px; border-bottom: 3px solid transparent; }
+.meteo-panel-ciel-heure small { font-size: 0.65rem; color: var(--muted); }
+.meteo-panel-ciel-heure.source-mesure { border-bottom-color: #16a34a; }
+.meteo-panel-ciel-heure.source-prevision { border-bottom-color: var(--brand); }
+.meteo-panel-ciel-heure.source-tendance { border-bottom-color: var(--muted); }
+.meteo-panel-ciel-source { flex-basis: 100%; margin: 4px 0 0; font-size: 0.7rem; color: var(--muted); }
+.meteo-ciel { font-size: 18px; color: var(--muted); }
+.meteo-ciel-clair, .meteo-ciel-peu-nuageux { color: #f59e0b; }
+.meteo-ciel-pluie, .meteo-ciel-averses, .meteo-ciel-bruine { color: #3b82f6; }
+.meteo-ciel-orage { color: #dc2626; }
+.meteo-fleche-vent { font-size: 13px; color: var(--text); }
+.meteo-jour-ciel { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; vertical-align: middle; }
+.meteo-jour-ciel .meteo-ciel { font-size: 16px; }
 
 .meteo-panel-tab.active {
   background: var(--brand);

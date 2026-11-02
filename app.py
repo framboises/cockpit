@@ -2295,6 +2295,19 @@ def set_preparation_ready():
 def get_meteo_details(date):
     try:
         day_data = db.meteo_previsions.find_one({'Date': date})
+        # Heures fusionnees (meteo_horaire.py, 02/11/2026) : mesure pour le passe, prevision Meteo-France, puis
+        # tendance ECMWF jusqu'a ~15 jours. Un jour sans prevision (au-dela de 4 jours, ou passe) est servi quand
+        # meme ; chaque heure gagne Source, Ciel, Jour, nuages par etage et direction du vent.
+        try:
+            import meteo_horaire
+            jour = datetime.strptime(date, '%Y-%m-%d').date()
+            fusion = meteo_horaire.jours(db, jour, jour).get(date) or []
+        except ValueError:
+            fusion = []
+        if fusion:
+            day_data = {'_id': str(day_data['_id']) if day_data else None, 'Date': date, 'Heures': fusion,
+                        'Sources': sorted({h['Source'] for h in fusion}),
+                        'LibellesSources': meteo_horaire.LIBELLES_SOURCES}
         if not day_data:
             return jsonify({'error': 'No data found for the given date'}), 404
         day_data['_id'] = str(day_data['_id'])
@@ -2370,6 +2383,27 @@ def get_meteo_previsions():
             'Variation Pluviométrie (mm)': round(variation_pluie, 1),
             'Heures': day['Heures']
         })
+
+    # Ciel, rafale, direction et source de chaque jour, et jours suivants jusqu'a ?jours= (15 au plus) par la
+    # tendance ECMWF (meteo_horaire.py, 02/11/2026). Les 4 premiers jours gardent la forme historique ci-dessus.
+    try:
+        import meteo_horaire
+        nb_jours = max(4, min(15, int(request.args.get('jours', 4))))
+        debut = datetime.now().date()
+        fusion = meteo_horaire.jours(db, debut, debut + timedelta(days=nb_jours - 1))
+        connus = {r['Date']: r for r in results}
+        for jour in sorted(fusion):
+            heures = fusion[jour]
+            if not heures:
+                continue
+            resume = meteo_horaire.resume_jour(jour, heures)
+            if jour in connus:
+                connus[jour].update({k: resume[k] for k in ('Ciel', 'Source', 'Direction vent (°)', 'Rafale max (km/h)')})
+            else:
+                results.append({**resume, 'Variation Température (°C)': 0, 'Variation Pluviométrie (mm)': 0})
+        results.sort(key=lambda r: r['Date'])
+    except Exception as e:  # la synthese historique reste servie si la fusion echoue
+        print(f"Meteo fusionnee indisponible : {e}")
 
     return jsonify(results)
 

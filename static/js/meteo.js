@@ -250,20 +250,89 @@ function collapseMeteoPanel() {
   }
 }
 
+// Ciel fusionne (meteo_horaire.py, 02/11/2026) : pictogramme [jour, nuit] et libelle. Memes cles que Looker.
+var METEO_CIEL = {
+  'clair': ['clear_day', 'clear_night', 'Ciel clair'], 'peu-nuageux': ['partly_cloudy_day', 'partly_cloudy_night', 'Peu nuageux'],
+  'nuageux': ['cloud', 'cloud', 'Nuageux'], 'couvert': ['cloud', 'cloud', 'Couvert'], 'brouillard': ['foggy', 'foggy', 'Brouillard'],
+  'bruine': ['rainy_light', 'rainy_light', 'Bruine'], 'pluie': ['rainy', 'rainy', 'Pluie'], 'averses': ['rainy_heavy', 'rainy_heavy', 'Averses'],
+  'neige': ['weather_snowy', 'weather_snowy', 'Neige'], 'orage': ['thunderstorm', 'thunderstorm', 'Orage']
+};
+var METEO_SOURCES = { mesure: 'Mesuré (station du Mans)', prevision: 'Prévision Météo-France', tendance: 'Tendance ECMWF (Open-Meteo)' };
+var METEO_ROSE = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
+var METEO_JOURS_PANNEAU = 15;
+
+function _meteoIconeCiel(ciel, jour) {
+  var c = METEO_CIEL[ciel];
+  if (!c) return null;
+  var s = document.createElement('span');
+  s.className = 'material-symbols-outlined meteo-ciel meteo-ciel-' + ciel;
+  s.textContent = c[jour === false ? 1 : 0];
+  s.title = c[2];
+  return s;
+}
+
+function _meteoFlecheVent(direction) {
+  if (direction === null || direction === undefined || isNaN(direction)) return null;
+  var s = document.createElement('span');
+  s.className = 'material-symbols-outlined meteo-fleche-vent';
+  s.textContent = 'navigation';
+  // Fleche vers ou va le vent (direction meteo = d'ou il vient, + 180).
+  s.style.transform = 'rotate(' + Math.round((Number(direction) + 180) % 360) + 'deg)';
+  s.title = 'Vent de ' + METEO_ROSE[Math.round(Number(direction) / 22.5) % 16] + ' (' + Math.round(direction) + '°)';
+  return s;
+}
+
+/* Bande au-dessus du graphique horaire : ciel, direction du vent et source de chaque heure (mesure, prevision,
+   tendance). Les jours au-dela de 4 jours viennent de la tendance ECMWF. */
+function renderMeteoPanelCiel(dayData) {
+  var canvas = document.getElementById('meteo-panel-chart');
+  if (!canvas) return;
+  var wrap = canvas.closest('.meteo-chart-wrap');
+  var bande = document.getElementById('meteo-panel-ciel');
+  if (!bande) {
+    bande = document.createElement('div');
+    bande.id = 'meteo-panel-ciel';
+    bande.className = 'meteo-panel-ciel';
+    wrap.parentNode.insertBefore(bande, wrap);
+  }
+  bande.innerHTML = '';
+  var heures = (dayData && dayData.Heures) || [];
+  heures.forEach(function (h) {
+    var cel = document.createElement('div');
+    cel.className = 'meteo-panel-ciel-heure' + (h.Source ? ' source-' + h.Source : '');
+    cel.title = (METEO_SOURCES[h.Source] || '');
+    var heure = document.createElement('small');
+    heure.textContent = String(h.Heure || '').slice(0, 2);
+    cel.appendChild(heure);
+    var icone = _meteoIconeCiel(h.Ciel, h.Jour);
+    if (icone) cel.appendChild(icone);
+    var fleche = _meteoFlecheVent(h['Direction vent (°)']);
+    if (fleche) cel.appendChild(fleche);
+    bande.appendChild(cel);
+  });
+  var sources = (dayData && dayData.Sources) || [];
+  var legende = document.createElement('p');
+  legende.className = 'meteo-panel-ciel-source';
+  legende.textContent = sources.length ? 'Source : ' + sources.map(function (s) { return METEO_SOURCES[s] || s; }).join(', ') + '. Ciel déduit.' : '';
+  bande.appendChild(legende);
+}
+
 function buildMeteoPanelTabs(activeDate) {
   var tabsDiv = document.getElementById('meteo-panel-tabs');
   if (!tabsDiv) return;
   tabsDiv.innerHTML = '';
 
   var today = new Date();
-  for (var i = 0; i < 4; i++) {
+  // 15 jours : Meteo-France jusqu'a J+3, puis la tendance ECMWF (onglets en italique).
+  for (var i = 0; i < METEO_JOURS_PANNEAU; i++) {
     var d = new Date(today);
     d.setDate(d.getDate() + i);
     var dateStr = d.toISOString().split('T')[0];
     var label = i === 0 ? "Aujourd'hui" : d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
 
     var btn = document.createElement('button');
-    btn.className = 'meteo-panel-tab' + (dateStr === activeDate ? ' active' : '');
+    btn.className = 'meteo-panel-tab' + (dateStr === activeDate ? ' active' : '') + (i >= 4 ? ' tendance' : '');
+    if (i >= 4) btn.title = 'Tendance ECMWF (Open-Meteo)';
     btn.textContent = label;
     btn.setAttribute('data-date', dateStr);
     btn.addEventListener('click', function() {
@@ -287,7 +356,10 @@ function loadMeteoPanelData(date) {
       var histData = results[1];
 
       if (!dayData.error) {
+        renderMeteoPanelCiel(dayData);
         renderMeteoPanelChart(dayData);
+      } else {
+        renderMeteoPanelCiel(null);
       }
       renderMeteoPanelHistory(histData);
       renderMeteoYoyChart(histData);
@@ -965,7 +1037,7 @@ function fetchMeteoPrevisions() {
 
                 // Création du bloc HTML avec le min/max des températures
                 dayElement.innerHTML = `
-                    <div class="meteo-date">${formattedDate}</div>
+                    <div class="meteo-date">${formattedDate}<span class="meteo-jour-ciel"></span></div>
                     <div class="meteo-item">
                         <span class="meteo-icon">🌡️</span> 
                         ${day['Température Min (°C)']}° / ${day['Température Max (°C)']}°
@@ -977,6 +1049,13 @@ function fetchMeteoPrevisions() {
                         <span class="material-symbols-outlined">${pluieArrow}</span>
                     </div>
                 `;
+
+                // Ciel et direction du vent du jour (meteo_horaire.py) : absents tant que la route n'est pas a jour.
+                var zoneCiel = dayElement.querySelector('.meteo-jour-ciel');
+                var icone = _meteoIconeCiel(day.Ciel, true);
+                if (icone) zoneCiel.appendChild(icone);
+                var fleche = _meteoFlecheVent(day['Direction vent (°)']);
+                if (fleche) zoneCiel.appendChild(fleche);
 
                 meteoPrevisionsDiv.appendChild(dayElement);
 
