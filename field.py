@@ -1244,6 +1244,7 @@ def field_manifest():
 _SHELL_FILES = (
     ("static", "js", "field.js"),
     ("static", "js", "field_install_hint.js"),
+    ("static", "js", "tuiles_ign.js"),
     ("static", "css", "field.css"),
     ("static", "css", "field_manuel.css"),
     ("static", "img", "field-icon.svg"),

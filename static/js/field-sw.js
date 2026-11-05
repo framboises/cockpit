@@ -34,6 +34,7 @@ const APP_SHELL_URLS = [
   "/static/img/field-icon.svg",
   "/static/img/field-icon-192.png",
   "/static/js/field_install_hint.js",
+  "/static/js/tuiles_ign.js",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
 ];

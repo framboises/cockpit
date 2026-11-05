@@ -140,6 +140,7 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 ## Règles strictes
 
 - **JAMAIS de guillemets typographiques** dans le code JS/CSS/Python. Utiliser uniquement les apostrophes droites `'` et guillemets droits `"`. Les curly quotes `'`, `'`, `"`, `"` provoquent des SyntaxError silencieuses.
+- **Toute page avec une carte Leaflet charge `static/js/tuiles_ign.js` juste apres `leaflet.js`** : une tuile IGN refusee est redemandee, avec la couche ACO dessous en attendant (`secoursAco: false` si la carte a deja un fond dessous).
 
 ## Documentation par domaine
 

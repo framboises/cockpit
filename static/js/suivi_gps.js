@@ -165,8 +165,8 @@
       couchesFond = [
         L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
           { maxNativeZoom: 19, maxZoom: 20, zIndex: 1 }),
-        reessayer(L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-          { attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 20, zIndex: 2 }))];
+        L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+          { attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 20, zIndex: 2, secoursAco: false })];
     } else {
       couchesFond = [reessayer(L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         { attribution: "&copy; OpenStreetMap", maxNativeZoom: 19, maxZoom: 20, zIndex: 1 }))];
