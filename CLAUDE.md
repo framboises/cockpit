@@ -140,6 +140,7 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 ## Règles strictes
 
 - **JAMAIS de guillemets typographiques** dans le code JS/CSS/Python. Utiliser uniquement les apostrophes droites `'` et guillemets droits `"`. Les curly quotes `'`, `'`, `"`, `"` provoquent des SyntaxError silencieuses.
+- **Tout mur TV charge `static/css/mur_echelle.css` et ecrit ses tailles en rem, jamais en px au-dela des filets** : le rendu est dessine pour 1920 x 1080 et grandit a l'identique en 2K / 4K (afficheur Raspberry en 4K natif, sans mise a l'echelle). Tailles passees a Leaflet : multiplier par `echelle()`. Accueil `?tv=1` : racine agrandie par `timeline_v2.css`. `/doors` (page operateur en px, `style.css`) : zoom reserve aux ecrans TV (`ecran_tv()`, afficheur ou `?tv=1`).
 - **Toute page avec une carte Leaflet charge `static/js/tuiles_ign.js` juste apres `leaflet.js`** : une tuile IGN refusee est redemandee, avec la couche ACO dessous en attendant (`secoursAco: false` si la carte a deja un fond dessous).
 
 ## Documentation par domaine

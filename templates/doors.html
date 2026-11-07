@@ -11,6 +11,20 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/doors.css') }}">
+  {% if ecran_tv is defined and ecran_tv() %}
+  <!-- Ecran TV (afficheur, ?tv=1) : au-dela du Full HD, la page garde son rendu 1080p, agrandi -->
+  <script>
+    (function () {
+      var k = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      if (k <= 1) return;
+      document.documentElement.style.zoom = k;
+      // Sous zoom, 100vh vaut k ecrans : le cadre de page et la barre laterale debordaient
+      var s = document.createElement("style");
+      s.textContent = ".app-layout, .sidebar { height: calc(100vh / " + k + "); }";
+      document.head.appendChild(s);
+    })();
+  </script>
+  {% endif %}
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 

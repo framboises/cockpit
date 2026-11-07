@@ -1098,6 +1098,11 @@ def _admin_page_allowed_for_request(page_id):
     return page_id in g._admin_pages
 
 
+def _ecran_tv():
+    """Page affichee par un afficheur du portail, ou demandee en mode TV (?tv=1)."""
+    return request.args.get("tv") == "1" or est_afficheur(_request_payload_peek())
+
+
 @app.context_processor
 def _inject_page_access():
     """page_allowed('<id>') / admin_page_allowed('<id>') dans les gabarits
@@ -1106,7 +1111,8 @@ def _inject_page_access():
             "admin_page_allowed": _admin_page_allowed_for_request,
             "alfred_chat_allowed": _alfred_chat_allowed_for_request,
             "bibler_allowed": _bibler_allowed_for_request,
-            "bibler_publish_allowed": _bibler_publish_allowed_for_request}
+            "bibler_publish_allowed": _bibler_publish_allowed_for_request,
+            "ecran_tv": _ecran_tv}
 
 
 def _user_dispatch_categories(payload):

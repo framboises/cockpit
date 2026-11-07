@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mur_echelle.css') }}">
+
   <style>
   /* ==========================================================================
      MUR DE SUIVI GPS - TV du poste de commandement
@@ -57,12 +59,12 @@
     display:inline-block; font-variation-settings:'FILL' 1; vertical-align:-0.12em}
   .libelle{font-size:var(--t-libelle); font-weight:700; text-transform:uppercase; letter-spacing:0.09em; color:var(--muted)}
   .une-ligne{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
-  .puce{width:0.8vw; height:0.8vw; min-width:12px; min-height:12px; border-radius:50%; display:inline-block; flex:0 0 auto}
+  .puce{width:0.8vw; height:0.8vw; min-width:0.75rem; min-height:0.75rem; border-radius:50%; display:inline-block; flex:0 0 auto}
   .clign{animation:clign 1.2s ease-in-out infinite}
   @keyframes clign{0%,100%{opacity:1}50%{opacity:0.45}}
 
   /* En-tete */
-  .tete{display:flex; align-items:center; gap:clamp(12px,1.6vw,32px); padding:0.8vh 1.4vw;
+  .tete{display:flex; align-items:center; gap:clamp(0.75rem,1.6vw,2rem); padding:0.8vh 1.4vw;
     background:var(--bg-2); border-bottom:1px solid var(--line); flex:0 0 auto}
   .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted); white-space:nowrap}
   .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
@@ -89,7 +91,7 @@
     background:rgba(11,18,32,0.85); border-radius:0.6vw; font-size:var(--t-libelle); font-weight:700; color:var(--muted)}
   .legende span{display:flex; align-items:center; gap:0.4vw}
   .legende .sep{width:1px; align-self:stretch; background:var(--line-2)}
-  .legende .tr{display:inline-block; width:2vw; height:0.5vh; min-height:3px; border-radius:2px;
+  .legende .tr{display:inline-block; width:2vw; height:0.5vh; min-height:0.1875rem; border-radius:0.125rem;
     background:linear-gradient(90deg, rgba(148,163,184,0), var(--muted))}
   .vide-carte{position:absolute; inset:0; z-index:600; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:1vh;
     color:var(--muted); font-size:var(--t-moyen); background:rgba(11,18,32,0.55); pointer-events:none; text-align:center}
@@ -98,38 +100,38 @@
   /* Marqueurs : pastille du groupe, fleche de cap, onde en mouvement */
   .bal{position:relative; width:100%; height:100%}
   .bal .rond{position:absolute; inset:0; border-radius:50%; display:flex; align-items:center; justify-content:center;
-    border:3px solid #0b1220; box-shadow:0 0 0 2px rgba(255,255,255,0.85), 0 4px 12px rgba(0,0,0,0.55); color:#fff}
-  .bal .rond .ms{font-size:20px}
+    border:0.1875rem solid #0b1220; box-shadow:0 0 0 0.125rem rgba(255,255,255,0.85), 0 0.25rem 0.75rem rgba(0,0,0,0.55); color:#fff}
+  .bal .rond .ms{font-size:1.25rem}
   /* Activite Field / PC Org : pastille en haut a droite, anneau si engagee */
-  .bal .act{position:absolute; right:-18%; top:-18%; width:46%; height:46%; min-width:12px; min-height:12px; border-radius:50%;
-    background:var(--a); border:2px solid #0b1220; box-shadow:0 0 0 1.5px #fff; z-index:2}
-  .bal.eng .rond{box-shadow:0 0 0 2px #fff, 0 0 0 6px var(--a), 0 4px 14px rgba(0,0,0,0.6)}
-  .leaflet-tooltip.nom i{font-style:normal; background:var(--a); color:#fff; border-radius:4px; padding:0 5px; margin-left:6px;
+  .bal .act{position:absolute; right:-18%; top:-18%; width:46%; height:46%; min-width:0.75rem; min-height:0.75rem; border-radius:50%;
+    background:var(--a); border:0.125rem solid #0b1220; box-shadow:0 0 0 1.5px #fff; z-index:2}
+  .bal.eng .rond{box-shadow:0 0 0 0.125rem #fff, 0 0 0 0.375rem var(--a), 0 0.25rem 0.875rem rgba(0,0,0,0.6)}
+  .leaflet-tooltip.nom i{font-style:normal; background:var(--a); color:#fff; border-radius:0.25rem; padding:0 0.3125rem; margin-left:0.375rem;
     font-size:0.8em; text-transform:uppercase; letter-spacing:0.04em}
   .bal .cap{position:absolute; left:50%; top:50%; width:0; height:0; margin-left:-9px; margin-top:-36px;
-    border-left:9px solid transparent; border-right:9px solid transparent; border-bottom:14px solid #fff;
-    transform-origin:9px 36px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.7))}
-  .bal.move::before{content:""; position:absolute; inset:-40%; border-radius:50%; border:3px solid var(--c); animation:onde 1.8s ease-out infinite}
-  .bal.arret .rond{box-shadow:0 0 0 2px rgba(255,255,255,0.55), 0 4px 12px rgba(0,0,0,0.55)}
+    border-left:0.5625rem solid transparent; border-right:0.5625rem solid transparent; border-bottom:0.875rem solid #fff;
+    transform-origin:0.5625rem 2.25rem; filter:drop-shadow(0 1px 0.125rem rgba(0,0,0,0.7))}
+  .bal.move::before{content:""; position:absolute; inset:-40%; border-radius:50%; border:0.1875rem solid var(--c); animation:onde 1.8s ease-out infinite}
+  .bal.arret .rond{box-shadow:0 0 0 0.125rem rgba(255,255,255,0.55), 0 0.25rem 0.75rem rgba(0,0,0,0.55)}
   .bal.off{opacity:0.55}
-  .bal.off .rond{background:var(--off) !important; box-shadow:0 0 0 2px rgba(148,163,184,0.5)}
+  .bal.off .rond{background:var(--off) !important; box-shadow:0 0 0 0.125rem rgba(148,163,184,0.5)}
   .bal.off .rond .ms{color:#cbd5e1}
   .bal.nogps .rond{border-style:dashed}
   @keyframes onde{0%{transform:scale(0.5); opacity:1}100%{transform:scale(1.5); opacity:0}}
-  .leaflet-tooltip.nom{background:rgba(11,18,32,0.88); color:#fff; border:0; border-radius:6px; font:800 14px 'Outfit',sans-serif;
-    padding:1px 7px; box-shadow:0 3px 10px rgba(0,0,0,0.5); border-bottom:3px solid var(--c, #fff)}
+  .leaflet-tooltip.nom{background:rgba(11,18,32,0.88); color:#fff; border:0; border-radius:0.375rem; font:800 0.875rem 'Outfit',sans-serif;
+    padding:1px 0.4375rem; box-shadow:0 0.1875rem 0.625rem rgba(0,0,0,0.5); border-bottom:0.1875rem solid var(--c, #fff)}
   .leaflet-tooltip.nom::before{display:none}
-  .leaflet-tooltip.nom.vite{font-size:15px}
-  .leaflet-tooltip.nom b{color:var(--move); margin-left:5px}
+  .leaflet-tooltip.nom.vite{font-size:0.9375rem}
+  .leaflet-tooltip.nom b{color:var(--move); margin-left:0.3125rem}
 
   /* Panneau : un bloc par groupe */
   .panneau{display:flex; flex-direction:column; gap:1vh; min-height:0}
   .bloc{min-height:0; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--line);
     border-radius:1vw; overflow:hidden; border-top:0.5vh solid var(--c)}
   .bloc .entete{display:flex; align-items:center; gap:0.8vw; padding:1vh 1vw 0.8vh}
-  .bloc .ico{width:clamp(30px,2.6vw,60px); height:clamp(30px,2.6vw,60px); border-radius:50%; background:var(--c); color:#fff;
+  .bloc .ico{width:clamp(1.875rem,2.6vw,3.75rem); height:clamp(1.875rem,2.6vw,3.75rem); border-radius:50%; background:var(--c); color:#fff;
     display:flex; align-items:center; justify-content:center; flex:0 0 auto}
-  .bloc .ico .ms{font-size:clamp(18px,1.6vw,36px)}
+  .bloc .ico .ms{font-size:clamp(1.125rem,1.6vw,2.25rem)}
   .bloc .nom{font-size:var(--t-grand); font-weight:900; line-height:1.05}
   .bloc .compte{margin-left:auto; text-align:right; white-space:nowrap}
   .bloc .compte .n{font-size:var(--t-grand); font-weight:900; line-height:1}
@@ -141,7 +143,7 @@
   .ligne{display:flex; align-items:center; gap:0.5vw; font-size:var(--t-ligne); font-weight:700; min-width:0;
     padding:0.35vh 0.5vw; border-radius:0.5vw; background:rgba(148,163,184,0.06)}
   .ligne.move{background:rgba(56,189,248,0.12)}
-  .ligne .puce{width:0.6vw; height:0.6vw; min-width:9px; min-height:9px}
+  .ligne .puce{width:0.6vw; height:0.6vw; min-width:0.5625rem; min-height:0.5625rem}
   .ligne .lab{flex:1 1 auto}
   .ligne .v{white-space:nowrap; font-weight:900}
   .ligne.move .v{color:var(--move)}
@@ -155,7 +157,7 @@
   .ligne.off .puce{background:var(--off)}
   .pages{flex:0 0 auto; display:flex; align-items:center; gap:0.4vw; padding:0 1vw 0.8vh}
   .pages[hidden]{display:none}
-  .pages span{width:0.55vw; height:0.55vw; min-width:8px; min-height:8px; border-radius:50%; background:var(--line-2)}
+  .pages span{width:0.55vw; height:0.55vw; min-width:0.5rem; min-height:0.5rem; border-radius:50%; background:var(--line-2)}
   .pages span.on{background:var(--c)}
   .pages em{margin-left:auto; font-style:normal; font-size:var(--t-libelle); color:var(--muted); font-weight:700}
   /* Lignes denses (2 colonnes) : police reduite pour garder nom + statut
@@ -167,7 +169,7 @@
   .ligne .act, .ligne .v, .ligne .bat{flex:0 0 auto}
   .ligne .act{white-space:nowrap; font-weight:900; font-size:0.72em; text-transform:uppercase; letter-spacing:0.04em;
     padding:0.15vh 0.45vw; border-radius:0.4vw; background:var(--a); color:#fff}
-  .ligne .act.libre{background:none; color:var(--a); box-shadow:inset 0 0 0 2px var(--a)}
+  .ligne .act.libre{background:none; color:var(--a); box-shadow:inset 0 0 0 0.125rem var(--a)}
   .ligne .act small{font-weight:700; opacity:0.9; margin-left:0.3vw; text-transform:none}
   .ligne .fiche{color:var(--muted); font-weight:600; font-size:0.8em; margin-left:0.5vw}
   .ligne.eng{background:color-mix(in srgb, var(--a) 16%, transparent); grid-column:1 / -1; box-shadow:inset 0.3vw 0 0 var(--a)}
@@ -184,28 +186,28 @@
     padding:0.8vh 1vw; font-size:var(--t-libelle); font-weight:700}
 
   /* Selecteur de groupes */
-  .choix{position:fixed; inset:0; z-index:3000; background:rgba(5,9,18,0.86); display:flex; align-items:center; justify-content:center; padding:16px}
-  .choix .boite{background:var(--bg-2); border:1px solid var(--line-2); border-radius:18px; padding:28px 30px; width:min(820px,100%);
-    max-height:100%; overflow:auto; box-shadow:0 30px 80px rgba(0,0,0,0.6)}
+  .choix{position:fixed; inset:0; z-index:3000; background:rgba(5,9,18,0.86); display:flex; align-items:center; justify-content:center; padding:1rem}
+  .choix .boite{background:var(--bg-2); border:1px solid var(--line-2); border-radius:1.125rem; padding:1.75rem 1.875rem; width:min(51.25rem,100%);
+    max-height:100%; overflow:auto; box-shadow:0 1.875rem 5rem rgba(0,0,0,0.6)}
   .choix h1{font-size:clamp(1.3rem,2.2vw,2rem); font-weight:900}
-  .choix p{color:var(--muted); margin:6px 0 20px; font-size:1rem}
-  .choix .grille{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px}
-  .choix .opt{display:flex; align-items:center; gap:12px; padding:14px; border-radius:12px; border:2px solid var(--line);
+  .choix p{color:var(--muted); margin:0.375rem 0 1.25rem; font-size:1rem}
+  .choix .grille{display:grid; grid-template-columns:repeat(auto-fill,minmax(13.75rem,1fr)); gap:0.75rem}
+  .choix .opt{display:flex; align-items:center; gap:0.75rem; padding:0.875rem; border-radius:0.75rem; border:0.125rem solid var(--line);
     background:var(--panel); color:var(--text); font:inherit; text-align:left; cursor:pointer}
   .choix .opt:hover{border-color:var(--line-2)}
   .choix .opt.on{border-color:var(--c); background:color-mix(in srgb, var(--c) 18%, var(--panel))}
   .choix .opt:disabled{opacity:0.4; cursor:not-allowed}
-  .choix .opt .ico{width:40px; height:40px; border-radius:50%; background:var(--c); display:flex; align-items:center; justify-content:center; flex:0 0 auto}
+  .choix .opt .ico{width:2.5rem; height:2.5rem; border-radius:50%; background:var(--c); display:flex; align-items:center; justify-content:center; flex:0 0 auto}
   .choix .opt .t{font-weight:800; font-size:1.05rem}
   .choix .opt .s{color:var(--muted); font-size:0.85rem}
-  .choix .opt .rang{margin-left:auto; width:28px; height:28px; border-radius:50%; background:var(--c); color:#fff; font-weight:900;
+  .choix .opt .rang{margin-left:auto; width:1.75rem; height:1.75rem; border-radius:50%; background:var(--c); color:#fff; font-weight:900;
     display:flex; align-items:center; justify-content:center; flex:0 0 auto}
-  .choix h2{font-size:1.05rem; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin:22px 0 10px}
-  .choix .bas{display:flex; align-items:center; gap:12px; margin-top:22px}
+  .choix h2{font-size:1.05rem; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin:1.375rem 0 0.625rem}
+  .choix .bas{display:flex; align-items:center; gap:0.75rem; margin-top:1.375rem}
   .choix .bas .nb{color:var(--muted); margin-right:auto}
-  .choix button.go{background:#2563eb; color:#fff; border:0; border-radius:10px; padding:12px 22px; font:800 1rem 'Outfit',sans-serif; cursor:pointer}
+  .choix button.go{background:#2563eb; color:#fff; border:0; border-radius:0.625rem; padding:0.75rem 1.375rem; font:800 1rem 'Outfit',sans-serif; cursor:pointer}
   .choix button.go:disabled{opacity:0.4; cursor:not-allowed}
-  .choix button.annul{background:none; color:var(--muted); border:1px solid var(--line-2); border-radius:10px; padding:12px 18px; font:700 1rem 'Outfit',sans-serif; cursor:pointer}
+  .choix button.annul{background:none; color:var(--muted); border:1px solid var(--line-2); border-radius:0.625rem; padding:0.75rem 1.125rem; font:700 1rem 'Outfit',sans-serif; cursor:pointer}
   </style>
 </head>
 <body class="plan">
@@ -256,6 +258,10 @@
   var ACT = { libre: { l: "Libre", c: "#22c55e", rang: 3 }, engagee: { l: "Engagée", c: "#f59e0b", rang: 1 },
               sur_place: { l: "Sur place", c: "#3b82f6", rang: 0 }, fin: { l: "Fin d'inter", c: "#a855f7", rang: 2 },
               pause: { l: "Pause", c: "#94a3b8", rang: 4 } };
+  // Echelle du mur (mur_echelle.css) : 1 jusqu'au Full HD, 2 en 4K. Les tailles passees
+  // a Leaflet sont en pixels et ne suivent pas le CSS toutes seules.
+  function echelle() { return parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1; }
+
   function engagee(b) { return b.activite === "engagee" || b.activite === "sur_place" || b.activite === "fin"; }
   function depuis(iso) { return iso ? age((maintenant() - new Date(iso).getTime()) / 1000) : ""; }
   var FONDS = [{ valeur: "plan", libelle: "Carte", icone: "map" },
@@ -355,7 +361,7 @@
   }
 
   function initCarte() {
-    carte = L.map("carte", { center: CENTRE, zoom: 14, maxZoom: 19, zoomControl: false, zoomSnap: 0.05,
+    carte = L.map("carte", { center: CENTRE, zoom: 14 + Math.log2(echelle()), maxZoom: 19, zoomControl: false, zoomSnap: 0.05,
       attributionControl: true, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
       boxZoom: false, keyboard: false, touchZoom: false });
     poserFond(fondSur(params.get("fond") || memoire(undefined, CLE_FOND)));
@@ -387,14 +393,15 @@
     var tout = toutesBalises(d).filter(function (o) { return surCarte(o.b); });
     var enLigne = tout.filter(function (o) { return o.b.en_ligne; });
     var base = enLigne.length ? enLigne : tout;
-    if (!base.length) { carte.setView(CENTRE, 14); return; }
+    if (!base.length) { carte.setView(CENTRE, 14 + Math.log2(echelle())); return; }
     var pts = base.map(function (o) { return [o.b.lat, o.b.lng]; });
     var sig = base.map(function (o) { return o.b.id; }).sort().join("|");
     var vue = carte.getBounds().pad(-0.06);
     var dehors = enLigne.some(function (o) { return !vue.contains([o.b.lat, o.b.lng]); });
     if (sig === S.sigCadre && !dehors) return;
     S.sigCadre = sig;
-    carte.flyToBounds(L.latLngBounds(pts), { paddingTopLeft: [120, 50], paddingBottomRight: [120, 110], maxZoom: 17, duration: 1.2 });
+    var e = echelle();
+    carte.flyToBounds(L.latLngBounds(pts), { paddingTopLeft: [120 * e, 50 * e], paddingBottomRight: [120 * e, 110 * e], maxZoom: 17, duration: 1.2 });
   }
 
   // Couleur inseree dans le HTML du marqueur : format strict (deja filtre par le serveur)
@@ -403,7 +410,7 @@
   function iconeBalise(o) {
     var c = couleurSure(o.g.couleur);
     var b = o.b, etat = !b.en_ligne ? "off" : b.mouvement ? "move" : "arret";
-    var taille = etat === "move" ? 40 : etat === "arret" ? 34 : 26;
+    var taille = (etat === "move" ? 40 : etat === "arret" ? 34 : 26) * echelle();
     var a = ACT[b.activite];
     var html = '<div class="bal ' + etat + (b.en_ligne && !b.gps ? " nogps" : "") + (engagee(b) ? " eng" : "") +
       '" style="--c:' + c + (a ? ";--a:" + a.c : "") + '">' + (a ? '<div class="act"></div>' : "") +
@@ -441,7 +448,7 @@
       if (b.en_ligne && b.trace && b.trace.length > 1) {
         var tr = b.trace.concat([[b.lat, b.lng]]), n = tr.length;
         for (var i = 1; i < n; i++) {
-          L.polyline([tr[i - 1], tr[i]], { color: o.g.couleur, weight: 5, opacity: 0.15 + 0.7 * i / n,
+          L.polyline([tr[i - 1], tr[i]], { color: o.g.couleur, weight: 5 * echelle(), opacity: 0.15 + 0.7 * i / n,
             lineCap: "round", interactive: false }).addTo(coucheTraces);
         }
       }
@@ -467,7 +474,7 @@
             tag.style.setProperty("--a", ACT[b.activite].c);
             t.appendChild(tag);
           }
-          m.bindTooltip(t, { permanent: true, direction: "bottom", offset: [0, ic.etat === "move" ? 18 : 15],
+          m.bindTooltip(t, { permanent: true, direction: "bottom", offset: [0, (ic.etat === "move" ? 18 : 15) * echelle()],
             className: "nom" + (b.mouvement ? " vite" : "") });
           var tt = m.getTooltip().getElement && m.getTooltip().getElement();
           if (tt) tt.style.setProperty("--c", o.g.couleur);

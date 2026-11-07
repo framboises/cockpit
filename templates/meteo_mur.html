@@ -8,6 +8,8 @@
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
 
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mur_echelle.css') }}">
+
   <style>
   /* ==========================================================================
      MUR METEO — TV du poste de commandement
@@ -58,7 +60,8 @@
        C'est la hauteur qui contraint : le panneau doit tenir en un ecran, sans
        defilement ni rognage. Le min(vw, vh) garde une borne laterale pour les
        formats etroits, et les valeurs sont calees sur une dalle 1920 x 1080 :
-         verdict 81 px   geant 97 px   grand 48 px   moyen 32 px   libelle 20 px */
+         verdict 81 px   geant 97 px   grand 48 px   moyen 32 px   libelle 20 px
+       Au-dela du Full HD, les plafonds en rem suivent l'ecran (mur_echelle.css). */
     --t-verdict: clamp(2rem, min(4.4vw, 7.5vh), 7rem);
     --t-geant:   clamp(2.6rem, min(5.6vw, 9vh), 8rem);
     --t-grand:   clamp(1.5rem, min(2.7vw, 4.4vh), 3.4rem);
@@ -84,14 +87,14 @@
 
   /* --- Bandeau : heure a gauche, vigilance a droite, rien d'autre ---------- */
   .tete{
-    display:flex; align-items:center; gap:clamp(12px,1.6vw,32px);
+    display:flex; align-items:center; gap:clamp(0.75rem,1.6vw,2rem);
     padding:0.8vh 1.4vw; background:var(--bg-2);
     border-bottom:1px solid var(--line); flex:0 0 auto; min-width:0;
   }
   .tete .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted)}
   .tete .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
   .tete .jour{font-size:var(--t-moyen); color:var(--muted); text-transform:capitalize; white-space:nowrap}
-  .tete .droite{margin-left:auto; display:flex; align-items:center; gap:clamp(10px,1.2vw,24px);
+  .tete .droite{margin-left:auto; display:flex; align-items:center; gap:clamp(0.625rem,1.2vw,1.5rem);
     min-width:0; flex:0 1 auto}
 
   /* Vigilance : pastille pleine, pas un simple texte colore. Elle doit se
@@ -99,15 +102,15 @@
      complete et l'horodatage du bulletin sont dans le pied. */
   .vig{
     display:flex; align-items:center; gap:0.7vw; min-width:0;
-    padding:0.45vh 1.1vw; border-radius:99px; font-size:var(--t-moyen); font-weight:800;
-    border:2px solid transparent; white-space:nowrap; overflow:hidden;
+    padding:0.45vh 1.1vw; border-radius:6.1875rem; font-size:var(--t-moyen); font-weight:800;
+    border:0.125rem solid transparent; white-space:nowrap; overflow:hidden;
   }
   .vig .phen{font-weight:600; opacity:0.95}
-  .vig .avenir{font-weight:700; padding-left:0.7vw; border-left:2px solid var(--line-2)}
-  .vig .alerte-bulletin{color:#fecaca; background:rgba(239,68,68,0.35); border-radius:99px;
+  .vig .avenir{font-weight:700; padding-left:0.7vw; border-left:0.125rem solid var(--line-2)}
+  .vig .alerte-bulletin{color:#fecaca; background:rgba(239,68,68,0.35); border-radius:6.1875rem;
     padding:0 0.6vw; font-size:0.8em}
   .flux{font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center; white-space:nowrap}
-  .puce{width:0.8vw; height:0.8vw; min-width:12px; min-height:12px;
+  .puce{width:0.8vw; height:0.8vw; min-width:0.75rem; min-height:0.75rem;
         border-radius:50%; display:inline-block; margin-right:0.5vw; flex:0 0 auto}
 
   /* --- Verdict : la ligne que l'on lit du fond de la salle ---------------- */
@@ -122,7 +125,7 @@
   .verdict-detail{font-size:var(--t-moyen); color:var(--muted); font-weight:500}
   .verdict-echeance{
     flex:0 0 auto; text-align:center; font-size:var(--t-grand); font-weight:800; line-height:1;
-    padding:0.8vh 1.2vw; border-radius:0.8vw; border:2px solid currentColor;
+    padding:0.8vh 1.2vw; border-radius:0.8vw; border:0.125rem solid currentColor;
   }
   .verdict-echeance small{display:block; font-size:var(--t-libelle); color:var(--muted);
     font-weight:700; letter-spacing:0.09em; margin-bottom:0.4vh}
@@ -172,7 +175,7 @@
   .tuile-ic{width:min(2.6vw, 4.6vh); height:min(2.6vw, 4.6vh)}
   .tuile-tete .libelle{font-size:var(--t-moyen); color:var(--text); letter-spacing:0.05em}
   .tuile-etat{margin-left:auto; font-size:var(--t-libelle); font-weight:900; letter-spacing:0.08em;
-    padding:0.3vh 0.8vw; border-radius:99px}
+    padding:0.3vh 0.8vw; border-radius:6.1875rem}
   .tuile-mesure{display:flex; align-items:baseline; gap:0.8vw; margin-top:0.5vh; min-width:0;
     white-space:nowrap; overflow:hidden}
   .tuile-valeur{font-size:var(--t-grand); font-weight:900; line-height:1.05; white-space:nowrap}
@@ -194,11 +197,11 @@
     text-align:center; border-top:0.42vw solid var(--muted-2); position:relative;
     display:flex; flex-direction:column; align-items:center; gap:0.3vh; min-width:0;
   }
-  .heure.maintenant{background:#24334a; outline:2px solid var(--line-2)}
+  .heure.maintenant{background:#24334a; outline:0.125rem solid var(--line-2)}
   .heure.nouveau-jour{margin-left:0.6vw}
   .heure.nouveau-jour::before{
     content:""; position:absolute; left:-0.85vw; top:0.4vh; bottom:0.4vh;
-    width:0; border-left:2px dashed var(--line-2);
+    width:0; border-left:0.125rem dashed var(--line-2);
   }
   .heure .h{font-size:var(--t-moyen); font-weight:800}
   .heure .h small{font-size:0.62em; font-weight:700; color:var(--muted); margin-left:0.15em}

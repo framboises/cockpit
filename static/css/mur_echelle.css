@@ -1,0 +1,8 @@
+/* Echelle commune des murs TV.
+   Les murs sont dessines pour 1920 x 1080. Au-dela (2K, 4K), tout ce qui est exprime en rem grandit
+   dans la meme proportion, en largeur comme en hauteur, que l'ecran soit servi par un PC ou par un
+   afficheur Raspberry en 4K natif. En dessous, rien ne change : 1rem reste a 16 px.
+     1920 x 1080 : 16 px    2560 x 1440 : 21,3 px    3840 x 2160 : 32 px
+   Dans ces pages : des rem, jamais de px au-dela des filets (1 px). Les tailles passees a Leaflet
+   sont multipliees par echelle() (voir intrusions_mur.html, balises_mur.html). */
+html { font-size: max(16px, min(calc(100vw / 120), calc(100vh / 67.5))); }

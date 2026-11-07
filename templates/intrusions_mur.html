@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mur_echelle.css') }}">
+
   <style>
   /* ==========================================================================
      MUR DES INTRUSIONS - TV du poste de commandement
@@ -54,16 +56,16 @@
   .une-ligne{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
 
   /* En-tete */
-  .tete{display:flex; align-items:center; gap:clamp(12px,1.6vw,32px); padding:0.8vh 1.4vw;
+  .tete{display:flex; align-items:center; gap:clamp(0.75rem,1.6vw,2rem); padding:0.8vh 1.4vw;
     background:var(--bg-2); border-bottom:1px solid var(--line); flex:0 0 auto; transition:background .3s}
   .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted)}
   .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
   .groupes{display:flex; gap:0.6vw; min-width:0; overflow:hidden}
   .groupe{display:flex; align-items:center; gap:0.4vw; font-size:var(--t-libelle); font-weight:700; white-space:nowrap;
-    padding:0.35vh 0.7vw; border-radius:99px; background:var(--panel); border:1px solid var(--line)}
+    padding:0.35vh 0.7vw; border-radius:6.1875rem; background:var(--panel); border:1px solid var(--line)}
   .groupe.off{color:var(--muted-2)}
   .flux{margin-left:auto; font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center; white-space:nowrap}
-  .puce{width:0.8vw; height:0.8vw; min-width:12px; min-height:12px; border-radius:50%; display:inline-block; margin-right:0.5vw; flex:0 0 auto}
+  .puce{width:0.8vw; height:0.8vw; min-width:0.75rem; min-height:0.75rem; border-radius:50%; display:inline-block; margin-right:0.5vw; flex:0 0 auto}
   body.alerte .tete{background:#7f1d1d}
   body.alerte .marque{color:#fecaca}
 
@@ -80,16 +82,16 @@
 
   /* Points cameras */
   .cam{position:relative; width:100%; height:100%}
-  .cam i{position:absolute; inset:0; border-radius:50%; border:3px solid #0b1220; box-shadow:0 0 0 2px rgba(255,255,255,0.65)}
-  .cam b{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:13px; font-weight:900; color:#0b1220}
-  .cam.actif i{background:var(--crit); box-shadow:0 0 0 3px #fff}
-  .cam.actif::before{content:""; position:absolute; inset:-60%; border-radius:50%; border:4px solid var(--crit); animation:onde 1.4s ease-out infinite}
+  .cam i{position:absolute; inset:0; border-radius:50%; border:0.1875rem solid #0b1220; box-shadow:0 0 0 0.125rem rgba(255,255,255,0.65)}
+  .cam b{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:0.8125rem; font-weight:900; color:#0b1220}
+  .cam.actif i{background:var(--crit); box-shadow:0 0 0 0.1875rem #fff}
+  .cam.actif::before{content:""; position:absolute; inset:-60%; border-radius:50%; border:0.25rem solid var(--crit); animation:onde 1.4s ease-out infinite}
   .cam.traiter i{background:var(--warn)}
   .cam.arme i{background:var(--ok)}
   .cam.off i{background:var(--off)}
   @keyframes onde{0%{transform:scale(0.4); opacity:1}100%{transform:scale(1.5); opacity:0}}
-  .leaflet-tooltip.etiq{background:var(--crit); color:#fff; border:0; border-radius:6px; font:800 16px 'Outfit',sans-serif;
-    padding:3px 9px; box-shadow:0 4px 14px rgba(0,0,0,0.5)}
+  .leaflet-tooltip.etiq{background:var(--crit); color:#fff; border:0; border-radius:0.375rem; font:800 1rem 'Outfit',sans-serif;
+    padding:0.1875rem 0.5625rem; box-shadow:0 0.25rem 0.875rem rgba(0,0,0,0.5)}
   .leaflet-tooltip.etiq::before{border-top-color:var(--crit)}
 
   /* Panneau */
@@ -108,27 +110,27 @@
   .scene,.zoom{position:relative; overflow:hidden; background:#000}
   .scene img{position:absolute; inset:0; width:100%; height:100%; object-fit:contain}
   .zoom img{position:absolute; max-width:none}
-  .cadre{position:absolute; border:3px solid var(--crit); box-shadow:0 0 0 2px rgba(0,0,0,0.6); border-radius:3px}
-  .zoom .cadre{border-width:4px}
-  .zoom .tag{position:absolute; left:0.5vw; top:0.5vh; font-size:var(--t-libelle); font-weight:800; background:rgba(0,0,0,0.65); padding:0.2vh 0.5vw; border-radius:4px}
+  .cadre{position:absolute; border:0.1875rem solid var(--crit); box-shadow:0 0 0 0.125rem rgba(0,0,0,0.6); border-radius:0.1875rem}
+  .zoom .cadre{border-width:0.25rem}
+  .zoom .tag{position:absolute; left:0.5vw; top:0.5vh; font-size:var(--t-libelle); font-weight:800; background:rgba(0,0,0,0.65); padding:0.2vh 0.5vw; border-radius:0.25rem}
   .sans-photo{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:1vh; color:var(--muted-2); font-size:var(--t-moyen)}
   .sans-photo .ms{font-size:4vw}
   .infos{flex:0 0 auto; padding:1vh 1.2vw; display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:1vw; align-items:center}
   .infos .cam-nom{font-size:var(--t-grand); font-weight:900; line-height:1.1}
   .infos .sous{grid-column:1 / -1; font-size:var(--t-moyen); color:var(--muted); font-weight:600; display:flex; flex-wrap:wrap;
     gap:0.4vh 0.8vw; align-items:center; min-width:0; margin-top:0.4vh}
-  .traitee{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:99px; font-weight:800;
+  .traitee{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:6.1875rem; font-weight:800;
     background:rgba(34,197,94,0.16); color:var(--ok); white-space:nowrap}
   .infos .depuis{grid-row:1; grid-column:2; text-align:right}
   .infos .depuis .val{font-size:var(--t-geant); font-weight:900; line-height:1}
-  .type{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:99px; font-weight:800; color:#0b1220; white-space:nowrap}
+  .type{display:inline-flex; align-items:center; gap:0.3vw; padding:0.2vh 0.7vw; border-radius:6.1875rem; font-weight:800; color:#0b1220; white-space:nowrap}
   .type.faux{background:var(--muted-2); color:#f1f5f9}
   .type .src{font-size:0.62em; font-weight:700; opacity:0.8; margin-left:0.35em}
   .camnote{color:var(--muted); font-size:0.85em; white-space:nowrap}
   .type.human{background:var(--pieton)} .type.vehicle{background:var(--vehicule)} .type.other{background:var(--muted)}
   .zone{display:inline-flex; align-items:center; gap:0.3vw; white-space:nowrap; flex:0 0 auto}
   .infos .ia{color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
-  .zone i{width:0.8vw; height:0.8vw; min-width:10px; min-height:10px; border-radius:3px; display:inline-block}
+  .zone i{width:0.8vw; height:0.8vw; min-width:0.625rem; min-height:0.625rem; border-radius:0.1875rem; display:inline-block}
   .une.calme{opacity:0.78}
   .une.calme .cadre{border-color:var(--warn)}
 
@@ -162,10 +164,10 @@
   .chiffre.warn .val{color:var(--warn)}
   .chiffre.discret .val{color:var(--muted)}
   .rythme{flex:1 1 auto; background:var(--panel); border:1px solid var(--line); border-radius:0.9vw; padding:0.6vh 1.1vw; display:flex; flex-direction:column; min-width:0}
-  .barres{flex:1 1 auto; display:flex; align-items:flex-end; gap:3px; min-height:3vh; margin-top:0.4vh}
-  .barres span{flex:1 1 0; background:var(--muted-2); border-radius:2px 2px 0 0; min-height:2px}
+  .barres{flex:1 1 auto; display:flex; align-items:flex-end; gap:0.1875rem; min-height:3vh; margin-top:0.4vh}
+  .barres span{flex:1 1 0; background:var(--muted-2); border-radius:0.125rem 0.125rem 0 0; min-height:0.125rem}
   .barres span.n{background:var(--crit)}
-  .barres span.now{outline:2px solid var(--text)}
+  .barres span.now{outline:0.125rem solid var(--text)}
   .heures{display:flex; justify-content:space-between; font-size:var(--t-libelle); color:var(--muted-2)}
   /* Plein ecran : 20 s a chaque NOUVELLE intrusion, puis retour carte + panneau */
   .plein{position:fixed; inset:0; z-index:2000; background:#000; display:flex; flex-direction:column;
@@ -179,7 +181,7 @@
   .plein .pied-plein .reste{margin-left:auto; color:var(--muted)}
   .plein .barre{position:absolute; left:0; bottom:0; height:0.6vh; background:var(--text); opacity:0.6}
   @keyframes entree{from{transform:scale(1.04); opacity:0}to{transform:none; opacity:1}}
-  .son{font-size:var(--t-libelle); font-weight:800; padding:0.3vh 0.7vw; border-radius:99px; white-space:nowrap;
+  .son{font-size:var(--t-libelle); font-weight:800; padding:0.3vh 0.7vw; border-radius:6.1875rem; white-space:nowrap;
     background:var(--panel); border:1px solid var(--line); color:var(--muted)}
   .son.bloque{background:var(--warn); color:#0b1220; border-color:var(--warn)}
   .test-marque{display:inline-block; background:#fff; color:var(--crit); font-weight:900; padding:0 0.6vw; border-radius:0.4vw; margin-right:0.6vw; letter-spacing:0.06em}
@@ -238,6 +240,10 @@
             vus: {}, plein: null, pleinFin: 0 };
   var carte, coucheCams, coucheZones;
 
+  // Echelle du mur (mur_echelle.css) : 1 jusqu'au Full HD, 2 en 4K. Les tailles passees
+  // a Leaflet sont en pixels et ne suivent pas le CSS toutes seules.
+  function echelle() { return parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1; }
+
   function $(id) { return document.getElementById(id); }
   function el(tag, cls, txt) {
     var e = document.createElement(tag);
@@ -294,7 +300,7 @@
   function initCarte() {
     // Zoom fractionnaire : la carte serre au plus pres les cameras (un zoom
     // entier laissait une large marge vide autour)
-    carte = L.map("carte", { center: CENTRE, zoom: 15, maxZoom: 20, zoomControl: false, zoomSnap: 0.05,
+    carte = L.map("carte", { center: CENTRE, zoom: 15 + Math.log2(echelle()), maxZoom: 20, zoomControl: false, zoomSnap: 0.05,
       attributionControl: true, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
       boxZoom: false, keyboard: false, touchZoom: false });
     // Secours sous l'IGN : une tuile IGN manquante laisse voir la vue
@@ -316,7 +322,8 @@
     d.zones.forEach(function (z) { pts = pts.concat(z.polygone); });
     if (!pts.length) return;
     // Marge = demi-pastille en cours + son etiquette (en haut)
-    carte.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [30, 50], paddingBottomRight: [30, 60], maxZoom: 18 });
+    var e = echelle();
+    carte.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [30 * e, 50 * e], paddingBottomRight: [30 * e, 60 * e], maxZoom: 18 });
     S.cadre = true;
   }
 
@@ -325,7 +332,7 @@
     coucheCams.clearLayers();
     d.zones.forEach(function (z) {
       L.polygon(z.polygone, {
-        color: z.actif ? "#ef4444" : z.couleur, weight: z.actif ? 5 : 2,
+        color: z.actif ? "#ef4444" : z.couleur, weight: (z.actif ? 5 : 2) * echelle(),
         fillColor: z.actif ? "#ef4444" : z.couleur, fillOpacity: z.actif ? 0.4 : 0.12,
         className: z.actif ? "clign" : ""
       }).addTo(coucheZones);
@@ -335,7 +342,7 @@
     d.cameras.map(function (c) {
       return { c: c, etat: c.actif ? "actif" : c.a_traiter ? "traiter" : c.arme ? "arme" : "off" };
     }).sort(function (a, b) { return ordre[a.etat] - ordre[b.etat]; }).forEach(function (o) {
-      var c = o.c, taille = o.etat === "actif" ? 34 : o.etat === "traiter" ? 26 : 18;
+      var c = o.c, taille = (o.etat === "actif" ? 34 : o.etat === "traiter" ? 26 : 18) * echelle();
       var html = '<div class="cam ' + o.etat + '"><i></i>' +
         (o.etat === "traiter" ? "<b>" + Math.min(c.a_traiter, 99) + "</b>" : "") + "</div>";
       var m = L.marker([c.lat, c.lng], {
@@ -344,7 +351,7 @@
       }).addTo(coucheCams);
       if (o.etat === "actif") {
         // Texte en noeud : Leaflet interprete une chaine comme du HTML
-        m.bindTooltip(el("span", "", c.nom), { permanent: true, direction: "top", offset: [0, -20], className: "etiq" });
+        m.bindTooltip(el("span", "", c.nom), { permanent: true, direction: "top", offset: [0, -20 * echelle()], className: "etiq" });
       }
     });
     cadrer(false);
