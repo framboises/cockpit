@@ -7111,6 +7111,7 @@ def _engage_field_device(patrouille_name, fiche_id, event, year, category="", te
             body=body,
             url="/field",
             tag="dispatch-" + str(fiche_id),
+            push_type="mission",
         )
     except Exception:
         pass  # non-bloquant

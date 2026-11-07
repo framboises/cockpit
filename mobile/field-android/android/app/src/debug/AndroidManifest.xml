@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Build de debug seulement : permet de declencher l'alerte par adb pour la tester. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <activity
+            android:name=".FieldAlertActivity"
+            android:exported="true"
+            tools:replace="android:exported" />
+    </application>
+</manifest>
