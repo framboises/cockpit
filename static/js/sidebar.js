@@ -219,6 +219,12 @@
       var el = document.getElementById(id);
       if (el) el.addEventListener("click", function () { ouvrirPage(cibles[id], id === "doors-page-button"); });
     });
+    // Le mur des portes exige l'evenement et l'annee (400 sinon), comme /doors
+    var murPortes = document.querySelector('a[href="/portes-mur"]');
+    if (murPortes) murPortes.addEventListener("click", function (e) {
+      e.preventDefault();
+      ouvrirPage("/portes-mur", false);
+    });
   }
 
   // Deconnexion volontaire = fin du poste operateur s'il y en a un ouvert
