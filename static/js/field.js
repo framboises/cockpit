@@ -5,6 +5,18 @@
 (function () {
   "use strict";
 
+  // Application Android (Capacitor) : un service natif suit la position et la
+  // poste lui-meme, ecran verrouille compris. null dans la PWA : rien ne change.
+  var NATIVE = (function () {
+    try {
+      if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()
+          && window.Capacitor.Plugins && window.Capacitor.Plugins.FieldNative) {
+        return window.Capacitor.Plugins.FieldNative;
+      }
+    } catch (e) { /* navigateur */ }
+    return null;
+  })();
+
   var DEFAULT_CENTER = [47.938561591531936, 0.2243184111156285];
   var DEFAULT_ZOOM = 14;
 
@@ -474,6 +486,10 @@
         navigator.geolocation.clearWatch(state.watchId);
         state.watchId = null;
       }
+      if (NATIVE) {
+        state.nativeTrackingKey = null;
+        NATIVE.stopTracking().catch(function () { /* deja arrete */ });
+      }
     } catch (e) { /* noop */ }
   }
 
@@ -719,7 +735,27 @@
     else if (status === "err") el.classList.add("err");
   }
 
+  // Evenements du service natif. Le suivi demarre ensuite par refreshGpsProfile,
+  // une fois le statut de la tablette connu.
+  function initNativeGeolocation() {
+    setGpsStatus("warn");
+    NATIVE.addListener("location", function (p) {
+      if (p.lastPostAt) state.lastPush = { at: p.lastPostAt, sim: false };
+      onGpsUpdate({ coords: {
+        latitude: p.lat, longitude: p.lng, accuracy: p.accuracy,
+        speed: p.speed == null ? null : p.speed, heading: p.heading == null ? null : p.heading,
+      } });
+    });
+    NATIVE.addListener("trackingStopped", function (p) {
+      state.gpsProfile = null;
+      state.nativeTrackingKey = null;
+      setGpsStatus("err");
+      tlog("gps", "suivi natif arrete : " + ((p && p.reason) || "?"));
+    });
+  }
+
   function startGeolocation() {
+    if (NATIVE) { initNativeGeolocation(); return; }
     if (!navigator.geolocation) {
       setGpsStatus("err");
       toast("Geolocalisation non supportee", "err");
@@ -732,6 +768,15 @@
   // Selectionne le profil GPS adapte au contexte.
   // Retourne "paused" = pas de watch du tout.
   function selectGpsProfile() {
+    if (NATIVE) {
+      var nativeStatus = state.patrolStatus || "patrouille";
+      if (state.sosInFlight) return "high";
+      if (nativeStatus === "pause") return "paused";    // pas de suivi pendant une pause declaree
+      if (POSITION_PUSH_MS === POSITION_PUSH_HIGH_MS
+          || nativeStatus === "intervention" || nativeStatus === "sur_place"
+          || (typeof _patrol !== "undefined" && _patrol.run && _patrol.run.state === "running")) return "high";
+      return nativeStatus === "fin_intervention" ? "low" : "normal";
+    }
     // Cockpit suit la tablette en temps reel : precision maximale, meme en bg
     if (POSITION_PUSH_MS === POSITION_PUSH_HIGH_MS) return "high";
     var status = state.patrolStatus || "patrouille";
@@ -746,7 +791,36 @@
     return "normal";
   }
 
+  function applyNativeGpsProfile(profile) {
+    var options = {
+      profile: profile,
+      pushMs: POSITION_PUSH_MS,
+      posting: !state.simPos,
+      sos: !!state.sosInFlight,
+    };
+    var key = JSON.stringify(options);
+    if (state.nativeTrackingKey === key) return;
+    state.nativeTrackingKey = key;
+    state.gpsProfile = profile;
+    if (profile === "paused") {
+      setGpsStatus("warn");
+      NATIVE.stopTracking().catch(function () { /* deja arrete */ });
+      return;
+    }
+    NATIVE.startTracking(options).catch(function (e) {
+      // Refus (permission, demarrage depuis l'arriere-plan) : nouvel essai au
+      // prochain changement de statut ou au retour dans l'application.
+      state.gpsProfile = null;
+      state.nativeTrackingKey = null;
+      setGpsStatus("err");
+      var why = (e && e.message) || "?";
+      tlog("gps", "suivi natif refuse : " + why);
+      if (why === "permission_refusee") toast("Permission GPS refusee", "err");
+    });
+  }
+
   function applyGpsProfile(profile) {
+    if (NATIVE) { applyNativeGpsProfile(profile); return; }
     if (!navigator.geolocation) return;
     if (state.gpsProfile === profile) return;
     state.gpsProfile = profile;
@@ -853,6 +927,7 @@
   }
 
   function maybePushPosition(pos) {
+    if (NATIVE && !pos._sim) return;   // le service natif poste le vrai GPS
     var now = Date.now();
     var latlng = [pos.coords.latitude, pos.coords.longitude];
     var elapsed = now - state.lastPushedAt;
@@ -4684,6 +4759,11 @@
     if (state.simTimer) { clearInterval(state.simTimer); state.simTimer = null; }
     if (!latlng && !quiet) stopSimWalk();
     state.simPos = latlng;
+    // Mode test : sinon le vrai GPS poste par le service ecrase la simulation
+    if (NATIVE) {
+      NATIVE.setPosting({ enabled: !latlng }).catch(function () { /* service arrete */ });
+      if (state.nativeTrackingKey) refreshNativeKey();
+    }
     try {
       if (latlng) localStorage.setItem(SIM_KEY, JSON.stringify(latlng));
       else localStorage.removeItem(SIM_KEY);
@@ -4707,6 +4787,15 @@
       // Essai loin du site : la carte suit la position simulee
       try { state.map.setView(latlng, Math.max(state.map.getZoom(), 16)); } catch (e) { /* carte pas prete */ }
     }
+  }
+
+  // La cle memorisee suit le reglage d'envoi, sans relancer le service pour rien
+  function refreshNativeKey() {
+    try {
+      var o = JSON.parse(state.nativeTrackingKey);
+      o.posting = !state.simPos;
+      state.nativeTrackingKey = JSON.stringify(o);
+    } catch (e) { state.nativeTrackingKey = null; }
   }
 
   // Position simulee a `meters` au sud du point (essai d'un vrai passage :
@@ -4897,6 +4986,7 @@
       ["Trajet simule", state.simWalk ? state.simWalk.label + " " + Math.round(state.simWalk.done || 0) + "/" + Math.round(state.simWalk.total || 0) + " m" : "non"],
       ["Dernier envoi position", state.lastPush ? _ago(state.lastPush.at) + (state.lastPush.sim ? " (simulee)" : "") : "jamais"],
       ["Intervalle d'envoi", Math.round(POSITION_PUSH_MS / 1000) + " s"],
+      ["Application", NATIVE ? "Android (suivi natif, profil " + (state.gpsProfile || "aucun") + ")" : "web"],
       ["Acces piste", state.routePiste ? "oui" : "non"],
       (function () { var w = wakeLockState(); return ["Ecran maintenu allume", (w.on ? "oui, " : "non, ") + w.why, w.on ? "ok" : "warn"]; })(),
       ["Service worker", swUrl.split("/").pop()],
@@ -10248,6 +10338,7 @@
     state.patrolStatus = dev.status || "patrouille";
     state.activeFicheId = dev.active_fiche_id || null;
     state.declarant = !!dev.declarant;
+    if (NATIVE) refreshGpsProfile();
     state.routePiste = !!dev.route_piste;
     state.deviceCategory = dev.category || state.deviceCategory || null;
     // Ouverture depuis la notification d'un message du PC : /field?constat=<id>
@@ -10268,6 +10359,7 @@
     acquireWakeLock();
     initWakeLockActivityTracking();
     initPositionBuffer();
+    initNativePush();
     initOfflineQueue();
     initVisualViewport();
 
@@ -10335,17 +10427,26 @@
       // restaure mais les minuteries ont pu etre perdues.
       if (e && e.persisted) catchUpNow();
     });
+    function onPushReceived() {
+      _lastCatchUpAt = 0;   // push : toujours relire
+      catchUpNow();
+    }
+    // Notification touchee alors que l'app etait deja ouverte
+    function onOpenUrl(url) {
+      var m = /[?&]constat=([^&#]+)/.exec(url || "");
+      if (m) { state.pendingConstat = decodeURIComponent(m[1]); pollDeclarations(true); }
+    }
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.addEventListener("message", function (ev) {
-        if (ev && ev.data && ev.data.type === "field-push") {
-          _lastCatchUpAt = 0;   // push : toujours relire
-          catchUpNow();
-        }
-        // Notification touchee alors que l'app etait deja ouverte
-        if (ev && ev.data && ev.data.type === "field-open-url") {
-          var m = /[?&]constat=([^&#]+)/.exec(ev.data.url || "");
-          if (m) { state.pendingConstat = decodeURIComponent(m[1]); pollDeclarations(true); }
-        }
+        if (ev && ev.data && ev.data.type === "field-push") onPushReceived();
+        if (ev && ev.data && ev.data.type === "field-open-url") onOpenUrl(ev.data.url);
+      });
+    }
+    if (NATIVE) {
+      NATIVE.addListener("pushReceived", onPushReceived);
+      NATIVE.addListener("openUrl", function (p) {
+        onPushReceived();
+        onOpenUrl(p && p.url);
       });
     }
     // Minuterie gelee : detecte au premier toucher suivant
@@ -10459,7 +10560,22 @@
     document.body.appendChild(banner);
   }
 
+  // Application Android : jeton FCM au lieu de l'abonnement Web Push
+  function initNativePush() {
+    if (!NATIVE) return;
+    NATIVE.getFcmToken().then(function (r) {
+      return fetch("/field/push/fcm-register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: r.token, app_version: r.version }),
+      });
+    }).catch(function (e) {
+      tlog("push", "jeton FCM indisponible : " + ((e && e.message) || "?"));
+    });
+  }
+
   function initPushSubscription(swReg) {
+    if (NATIVE) return;
     if (!("PushManager" in window) || !swReg) return;
     // Verifier si deja souscrit
     swReg.pushManager.getSubscription().then(function (existing) {

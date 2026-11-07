@@ -47,3 +47,11 @@ logs/
 graphify-out/
 uploads/tiles_cache/
 uploads/camera_models/
+
+# Field Android (mobile/field-android)
+mobile/field-android/node_modules/
+mobile/field-android/android/.gradle/
+mobile/field-android/android/**/build/
+google-services.json
+*.jks
+*.keystore

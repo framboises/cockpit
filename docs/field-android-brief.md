@@ -1,7 +1,8 @@
 # Field Android : brief de developpement (a reprendre sur le Mac)
 
-Redige le 07/11/2026 depuis le serveur Cockpit. Rien de ce qui suit n'est code ni teste.
-Les numeros de ligne valent pour le commit 26621de et sont a reverifier.
+Redige le 07/11/2026 depuis le serveur Cockpit. Les numeros de ligne valent pour le commit 26621de.
+
+**Etat : code ecrit le 07/11/2026, voir `docs/claude/field.md`. Les pieges ci-dessous restent a tester sur tablette. Firebase, signature et validation RGPD restent a faire.**
 
 ## Objectif
 
