@@ -999,18 +999,21 @@
 
   // Surveille la disparition d'un code dans les pairings actifs : disparu avant
   // expiration = consomme par la tablette -> ferme la modale + refresh.
-  function startPairPoll(code, expiresAtIso) {
+  // On cherche le code sur SON evenement, pas celui du header : ils different
+  // des que le code vise l'evenement courant ou un autre evenement actif.
+  function startPairPoll(p) {
     stopPairPoll();
-    var expMs = expiresAtIso ? new Date(expiresAtIso).getTime() : null;
+    var code = p.code;
+    var expMs = p.expiresAt ? new Date(p.expiresAt).getTime() : null;
+    var qs = new URLSearchParams();
+    if (p.event) qs.set("event", p.event);
+    if (p.year) qs.set("year", p.year);
     pairPollHandle = setInterval(function () {
-      var s = currentScope();
-      var qs = new URLSearchParams();
-      if (s.event) qs.set("event", s.event);
-      if (s.year) qs.set("year", s.year);
       apiGet("/field/admin/pairings?" + qs.toString())
         .then(function (data) {
-          var pairings = (data && data.pairings) || [];
-          var stillActive = pairings.some(function (p) { return p.code === code; });
+          // Reponse sans liste (erreur, session expiree) : on ne conclut rien
+          if (!data || !Array.isArray(data.pairings)) return;
+          var stillActive = data.pairings.some(function (x) { return x.code === code; });
           if (stillActive) return;
           stopPairPoll();
           if (expMs && Date.now() < expMs) {
@@ -1225,7 +1228,7 @@
     el.appendChild(box);
 
     // Fermeture auto + refresh quand la tablette consomme le code
-    if (p.code) startPairPoll(p.code, p.expiresAt);
+    if (p.code) startPairPoll(p);
   }
 
   // ------------------------------------------------------------------
