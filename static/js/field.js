@@ -862,6 +862,7 @@
     var latlng = [pos.coords.latitude, pos.coords.longitude];
     renderMeMarker(latlng, pos.coords.accuracy);
     maybePushPosition(pos);
+    try { updateRouteProgress(latlng, pos.coords.accuracy); } catch (e) { /* jamais bloquant */ }
     try { checkPatrolProximity(latlng, pos.coords.accuracy); } catch (e) { /* jamais bloquant */ }
     try { checkPatrolSpeed(pos); } catch (e) { /* jamais bloquant */ }
   }
@@ -3381,19 +3382,57 @@
   // ficheId : fiche a laquelle l'itineraire mene (null pour un POI ou un
   // point libre). Le trace est efface automatiquement quand cette fiche est
   // close, desaffectee, ou que l'agent sort de l'intervention.
-  function setRouteDestination(latlng, polylineEncoded, god, ficheId) {
-    _stopRouteAnimation();
-    if (state.routeLayer) {
-      state.map.removeLayer(state.routeLayer);
-      state.routeLayer = null;
-    }
+  // recalc : function (me, cb) qui recalcule depuis la position me et appelle
+  // cb(polyline ou null). Sans elle, le trace se raccourcit sans etre recalcule.
+  function setRouteDestination(latlng, polylineEncoded, god, ficheId, recalc) {
+    state.routeToken = (state.routeToken || 0) + 1;     // ecarte un recalcul en cours
+    state.routeInFlight = false;
+    state.routeRecalc = latlng ? (recalc || null) : null;
+    state.routeCalcAt = Date.now();
+    state.routeCalcFrom = state.meMarker ? _meLatLng() : null;
     state.routeDestination = latlng;
     state.routeIsGod = !!god;
     state.routeFicheId = latlng ? (ficheId || null) : null;
     var clearBtn = $("btn-route-clear");
     if (clearBtn) clearBtn.hidden = !latlng;
-    if (!latlng) return;
+    if (!latlng) { _removeRouteLayer(); return; }
 
+    var routePts = polylineEncoded ? _decodePolyline6(polylineEncoded) : null;
+    _drawRoute(latlng, routePts, god);
+
+    // Ajuste le zoom : si on a une route reelle, on cadre dessus (guidage serre)
+    try {
+      if (routePts && routePts.length >= 2) {
+        state.map.fitBounds(L.latLngBounds(routePts), { padding: [60, 60], maxZoom: 18 });
+        state.followMe = false;
+      } else if (state.meMarker) {
+        var b = L.latLngBounds([state.meMarker.getLatLng(), latlng]);
+        state.map.fitBounds(b, { padding: [80, 80], maxZoom: 18 });
+        state.followMe = false;
+      } else {
+        state.map.setView(latlng, 17);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function _meLatLng() {
+    var m = state.meMarker.getLatLng();
+    return [m.lat, m.lng];
+  }
+
+  function _removeRouteLayer() {
+    _stopRouteAnimation();
+    if (state.routeLayer) {
+      state.map.removeLayer(state.routeLayer);
+      state.routeLayer = null;
+    }
+    state.routeLines = null;
+    state.routePts = null;
+    state.routeIdx = 0;
+  }
+
+  function _drawRoute(latlng, routePts, god) {
+    _removeRouteLayer();
     var group = L.layerGroup();
     // Destination : marker rouge (place pin)
     var destIcon = L.divIcon({
@@ -3404,7 +3443,6 @@
     });
     L.marker(latlng, { icon: destIcon }).addTo(group);
 
-    var routePts = polylineEncoded ? _decodePolyline6(polylineEncoded) : null;
     if (routePts && routePts.length >= 2) {
       // Style Waze : 3-4 couches superposees (halo ambre god + glow + trait + dash anime).
       // Bleu Cockpit pour tous les modes ; en god, on ajoute un halo ambre
@@ -3451,6 +3489,8 @@
 
       group.addTo(state.map);
       state.routeLayer = group;
+      state.routePts = routePts;
+      state.routeLines = (god ? [amberHalo] : []).concat([glow, baseLine, dashLine]);
       _startRouteAnimation(dashLine, god);
     } else if (state.meMarker) {
       // Fallback : trait pointille direct (vol d'oiseau) si pas de polyline reelle.
@@ -3465,20 +3505,84 @@
       group.addTo(state.map);
       state.routeLayer = group;
     }
+  }
 
-    // Ajuste le zoom : si on a une route reelle, on cadre dessus (guidage serre)
-    try {
-      if (routePts && routePts.length >= 2) {
-        state.map.fitBounds(L.latLngBounds(routePts), { padding: [60, 60], maxZoom: 18 });
-        state.followMe = false;
-      } else if (state.meMarker) {
-        var b = L.latLngBounds([state.meMarker.getLatLng(), latlng]);
-        state.map.fitBounds(b, { padding: [80, 80], maxZoom: 18 });
-        state.followMe = false;
-      } else {
-        state.map.setView(latlng, 17);
+  // Position sur le trace : segment le plus proche parmi ceux qui suivent la
+  // derniere position connue, sur ROUTE_LOOKAHEAD_M au plus. Sans cette limite,
+  // un aller-retour par la meme rue ferait sauter directement au retour.
+  var ROUTE_LOOKAHEAD_M = 500;
+  function _routeProgress(pts, fromIdx, me) {
+    var cosLat = Math.cos(me[0] * Math.PI / 180);
+    var best = null, walked = 0;
+    for (var i = fromIdx; i < pts.length - 1 && walked <= ROUTE_LOOKAHEAD_M; i++) {
+      var ax = (pts[i][1] - me[1]) * cosLat, ay = pts[i][0] - me[0];
+      var bx = (pts[i + 1][1] - me[1]) * cosLat, by = pts[i + 1][0] - me[0];
+      var dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+      var t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+      var point = [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t];
+      var dist = haversine(me, point);
+      if (!best || dist < best.dist) best = { idx: i, point: point, dist: dist };
+      walked += haversine(pts[i], pts[i + 1]);
+    }
+    return best;
+  }
+
+  // Recalcul : toutes les ROUTE_RECALC_MS si l'agent a bouge, plus tot s'il a quitte le trace.
+  var ROUTE_RECALC_MS = 30000;
+  var ROUTE_RECALC_OFF_MS = 10000;
+  var ROUTE_RECALC_MOVE_M = 20;
+  var ROUTE_OFF_TRACK_M = 40;
+  var ROUTE_ARRIVED_M = 20;
+  var ROUTE_MAX_ACCURACY_M = 100;
+  function _routeRecalcDue(ctx) {
+    if (ctx.distToDest <= ROUTE_ARRIVED_M) return false;
+    var elapsed = ctx.now - ctx.lastAt;
+    if (ctx.offTrack) return elapsed >= ROUTE_RECALC_OFF_MS;
+    return elapsed >= ROUTE_RECALC_MS && ctx.moved >= ROUTE_RECALC_MOVE_M;
+  }
+
+  // A chaque position : raccourcit le trace, puis recalcule si c'est le moment.
+  function updateRouteProgress(me, accuracy) {
+    if (!state.routeDestination || document.visibilityState === "hidden") return;
+    if (accuracy && accuracy > ROUTE_MAX_ACCURACY_M) return;
+    var offTrack = false;
+    if (state.routePts) {
+      var p = _routeProgress(state.routePts, state.routeIdx || 0, me);
+      if (p) {
+        offTrack = p.dist > Math.max(ROUTE_OFF_TRACK_M, accuracy || 0);
+        if (!offTrack) {
+          state.routeIdx = p.idx;
+          var rest = [p.point].concat(state.routePts.slice(p.idx + 1));
+          state.routeLines.forEach(function (line) { line.setLatLngs(rest); });
+        }
       }
-    } catch (e) { /* ignore */ }
+    }
+    if (!state.routeRecalc || state.routeInFlight || !navigator.onLine) return;
+    if (!_routeRecalcDue({
+      now: Date.now(),
+      lastAt: state.routeCalcAt,
+      moved: haversine(state.routeCalcFrom, me),
+      offTrack: offTrack,
+      distToDest: haversine(me, state.routeDestination),
+    })) return;
+    var token = state.routeToken;
+    state.routeInFlight = true;
+    state.routeCalcAt = Date.now();
+    state.routeCalcFrom = me;
+    state.routeRecalc(me, function (polyline) {
+      if (token !== state.routeToken) return;   // autre itineraire entre-temps
+      state.routeInFlight = false;
+      // Echec ou moteur indisponible : on garde le trace en cours
+      var pts = polyline ? _decodePolyline6(polyline) : null;
+      if (!pts || pts.length < 2) return;
+      state.routeIdx = 0;
+      if (state.routeLines) {
+        state.routePts = pts;
+        state.routeLines.forEach(function (line) { line.setLatLngs(pts); });
+      } else {
+        _drawRoute(state.routeDestination, pts, state.routeIsGod);
+      }
+    });
   }
 
   function clearRoute() {
@@ -3536,7 +3640,7 @@
       return;
     }
     var me = state.meMarker.getLatLng();
-    fetch("/field/api/route", {
+    fetchWithTimeout("/field/api/route", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -3560,6 +3664,16 @@
       .catch(function (e) {
         callback((e && e.message) || "Reseau indisponible");
       });
+  }
+
+  // Recalcul d'un itineraire ACO avec les memes options. Le trait droit de
+  // secours (moteur indisponible) ne remplace jamais un vrai trace.
+  function _acoRecalc(toLatLng, god, piste) {
+    return function (me, cb) {
+      _computeAcoRoute(toLatLng, god, piste, function (err, resp) {
+        cb(!err && resp && resp.engine !== "stub" ? resp.polyline : null);
+      });
+    };
   }
 
   // Construit le menu Itineraire (ACO / Google Maps) sans innerHTML.
@@ -3683,11 +3797,11 @@
           var msg = err === "no_route" ? "aucun chemin praticable"
             : err === "piste_not_allowed" ? "acces piste non autorise" : err;
           toast("Itineraire indisponible: " + msg);
-          setRouteDestination([lat, lng], null, god, ficheId);
+          setRouteDestination([lat, lng], null, god, ficheId, _acoRecalc([lat, lng], god, piste));
           return;
         }
         var isGod = (resp.mode === "god") || !!resp.god || god;
-        setRouteDestination([lat, lng], resp.polyline, isGod, ficheId);
+        setRouteDestination([lat, lng], resp.polyline, isGod, ficheId, _acoRecalc([lat, lng], god, piste));
         var minutes = Math.max(1, Math.round((resp.duration_s || 0) / 60));
         var km = ((resp.distance_m || 0) / 1000).toFixed(1);
         var prefix = (resp.engine === "stub") ? "Estime " : "";
@@ -3707,7 +3821,11 @@
     if (isNaN(lat) || isNaN(lng)) return;
     var polyline = m.payload && m.payload.polyline;
     var god = !!(m.payload && m.payload.god);
-    setRouteDestination([lat, lng], polyline, god, (m.payload && (m.payload.fiche_id || m.payload.pcorg_id)) || null);
+    // Trajet impose par le PC Org avec des points de passage : il se raccourcit
+    // sans etre recalcule, le calcul direct les perdrait.
+    var via = m.payload && m.payload.via;
+    var recalc = via && via.length ? null : _acoRecalc([lat, lng], god, !!(m.payload && m.payload.piste));
+    setRouteDestination([lat, lng], polyline, god, (m.payload && (m.payload.fiche_id || m.payload.pcorg_id)) || null, recalc);
   }
 
   // ---------------------------------------------------------------------
@@ -4518,27 +4636,41 @@
     card.appendChild(ol);
   }
 
+  function _fetchPatrolRoute(step, me) {
+    return fetchWithTimeout("/field/patrol/" + encodeURIComponent(_patrol.run.run_id) + "/route", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: me, point_id: step.point_id,
+                             vias: viaLeft(step).map(function (v) { return v.i; }) }),
+    }, 12000).then(function (r) { return r.json(); });
+  }
+
+  // Recalcul : meme route (a pied ou en vehicule), points de passage restants
+  function _patrolRecalc(step) {
+    return function (me, cb) {
+      if (!_patrol.run || _patrol.routeFor !== step.point_id || tourStarted(step)) { cb(null); return; }
+      _fetchPatrolRoute(step, me).then(function (d) {
+        cb(d && d.ok ? d.polyline : null);
+      }).catch(function () { cb(null); });
+    };
+  }
+
   function routeToPatrolPoint(step, manual) {
     if (!_patrol.run || !step) return;
     var latlng = [step.lat, step.lng];
+    var recalc = _patrolRecalc(step);
     _patrol.routeFor = step.point_id;
     if (!state.meMarker || !navigator.onLine) {
-      setRouteDestination(latlng, null, false, null);
+      setRouteDestination(latlng, null, false, null, recalc);
       return;
     }
-    var me = state.meMarker.getLatLng();
-    fetchWithTimeout("/field/patrol/" + encodeURIComponent(_patrol.run.run_id) + "/route", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: [me.lat, me.lng], point_id: step.point_id,
-                             vias: viaLeft(step).map(function (v) { return v.i; }) }),
-    }, 12000).then(function (r) { return r.json(); }).then(function (d) {
+    _fetchPatrolRoute(step, _meLatLng()).then(function (d) {
       tlog("itineraire", "vers " + step.name + " : " + (d && d.ok ? _fmtDistance(d.distance_m) + ", " + Math.round(d.duration_s / 60) + " min (" + d.travel + ")"
                                                                   : "echec " + ((d && d.error) || "?") + ", trait direct"));
       if (!_patrol.run || _patrol.routeFor !== step.point_id) return;
       state.lastPatrolRoute = d && d.ok ? d.polyline : null;
-      setRouteDestination(latlng, d && d.ok ? d.polyline : null, false, null);
+      setRouteDestination(latlng, d && d.ok ? d.polyline : null, false, null, recalc);
       if (manual && d && d.ok) toast("Itineraire : " + _fmtDistance(d.distance_m) + ", " + Math.max(1, Math.round(d.duration_s / 60)) + " min", "ok");
-    }).catch(function () { setRouteDestination(latlng, null, false, null); });
+    }).catch(function () { setRouteDestination(latlng, null, false, null, recalc); });
   }
 
   function patrolPost(step, body, label) {
