@@ -40,6 +40,7 @@ Pas de tests automatisés ni de linter configurés.
 | `MONGO_URI` | URI MongoDB | `mongodb://localhost:27017/` |
 | `TITAN_JWKS_URL` | JWKS EdDSA du portail TITAN Home v2 (`decoder_jeton_portail` de `app.py` : EdDSA par le JWKS, HS256 par `JWT_SECRET`, puis révocation partagée `titan_shared`). JWKS injoignable : jetons EdDSA refusés, HS256 acceptés | `http://127.0.0.1:8080/.well-known/jwks.json` |
 | `CODING` | `true` bypass l'auth en dev | `false` |
+| `FIELD_FCM_CREDENTIALS` | Chemin de la cle de service du projet Firebase DEDIE a l'application Android Field (notifications FCM, `field.py`). Ne pas reutiliser `firebase-service-account.json` (Vision) | — (notifications Android impossibles, Web Push inchange) |
 | `COCKPIT_ANTHROPIC_API_KEY` | Clé API Anthropic de Cockpit (clé console « cockpit-prod »). ⚠️ Seule lue : `ANTHROPIC_API_KEY` est volontairement ignorée (lue par tout script du même compte Windows, elle rendait la consommation indiscernable) | — (routes IA en 503 si vide) |
 | `CLAUDE_MODEL` | Modèle Claude utilisé par l'Assistant IA | `claude-sonnet-5-5` |
 | `CLAUDE_TIMEOUT_SECONDS` | Timeout HTTP appel Claude (entre 2 chunks SSE) | `120` |
@@ -159,7 +160,7 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/presents.md` : Presents sur site (presents_etat.py) : remises a zero, pics, serie N-1
 - `docs/claude/montre.md` : Montre Garmin (cote serveur et pieges Connect IQ) : trafic_etat, meteo_etat, payload, guidage
 - `docs/claude/main-courante.md` : Main courante pcorg : pcorg_history, fusion SQL/Cockpit, droits, CSRF d'onglet ancien, aide a la saisie (pcorg_assist)
-- `docs/claude/field.md` : Tablettes Field : categories, dispatch automatique, idempotence, statuts hors ligne, SOS
+- `docs/claude/field.md` : Tablettes Field : categories, dispatch automatique, idempotence, statuts hors ligne, SOS, application Android (`mobile/field-android/`, service de position natif, FCM)
 - `docs/claude/alertes.md` : Centrale d'alerte : rendu pilote par la definition, display_mode, explication IA, saturation porte
 - `docs/claude/alfred.md` : Alfred (agent IA WhatsApp) : webhook WAHA, breaker, resumes Ollama ; chat Alfred des operateurs (widget, outils exposes a la VM, jeton de portee). Brief du wrapper VM : `docs/alfred-vm-brief.md`
 - `docs/claude/ai-reports.md` : Briefing de situation et RETEX de fin d'edition (ai_reports.py)

@@ -1,0 +1,17 @@
+{
+  "name": "field-android",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Coquille Android de Field (Capacitor, charge cockpit.lemans.org/field)",
+  "scripts": {
+    "sync": "cap sync android",
+    "build:debug": "cap sync android && cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/core": "8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0"
+  }
+}

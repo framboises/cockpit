@@ -274,16 +274,77 @@ def _vapid_subject():
     return "https://cockpit.lemans.org"
 
 
+# Application Android : Web Push n'existe pas en WebView, elle passe par FCM.
+# Projet Firebase DEDIE, distinct de firebase-service-account.json (Vision).
+FIELD_FCM_CREDENTIALS = os.getenv("FIELD_FCM_CREDENTIALS", "").strip()
+_FCM_APP_NAME = "field_push"
+_FCM_APP = None
+_FCM_UNAVAILABLE_LOGGED = False
+
+
+def _fcm_app():
+    """Application firebase_admin nommee, creee a la demande. None si indisponible
+    (signale une seule fois : les envois Web Push continuent)."""
+    global _FCM_APP, _FCM_UNAVAILABLE_LOGGED
+    if _FCM_APP is not None:
+        return _FCM_APP
+    try:
+        if not FIELD_FCM_CREDENTIALS:
+            raise RuntimeError("FIELD_FCM_CREDENTIALS non renseignee")
+        import firebase_admin
+        from firebase_admin import credentials
+        _FCM_APP = firebase_admin.initialize_app(
+            credentials.Certificate(FIELD_FCM_CREDENTIALS),
+            {"httpTimeout": 5},
+            name=_FCM_APP_NAME,
+        )
+    except Exception as e:
+        if not _FCM_UNAVAILABLE_LOGGED:
+            logger.warning("field: FCM indisponible, notifications Android impossibles : %s", e)
+            _FCM_UNAVAILABLE_LOGGED = True
+        return None
+    return _FCM_APP
+
+
+def send_fcm_notification(token, title, body, url=None, tag=None, push_type=None):
+    """Message data de priorite haute : l'application affiche elle-meme la
+    notification. Memes champs et memes retours que send_push_notification."""
+    if not token:
+        return "expired"
+    app = _fcm_app()
+    if app is None:
+        return False
+    try:
+        from firebase_admin import messaging
+        fields = {"title": title, "body": body, "url": url, "tag": tag, "type": push_type}
+        message = messaging.Message(
+            token=token,
+            data={k: str(v) for k, v in fields.items() if v is not None},
+            android=messaging.AndroidConfig(priority="high", ttl=3600),
+        )
+        messaging.send(message, app=app)
+        return True
+    except Exception as e:
+        # Jeton retire (application desinstallee, donnees effacees) : pas de nouvel essai
+        if type(e).__name__ in ("UnregisteredError", "SenderIdMismatchError"):
+            return "expired"
+        logger.warning("field: envoi FCM en echec : %s", e)
+        return False
+
+
 def send_push_to_device(db, device_id, title, body, url=None, tag=None, push_type=None):
     """Envoie un push a toutes les souscriptions d'un device. Les abonnements
     expires sont supprimes. Retourne le nombre d'envois reussis."""
     sent = 0
     subs = list(db["field_push_subs"].find({"device_id": device_id}))
     for sub in subs:
-        info = sub.get("subscription")
-        if not info:
-            continue
-        res = send_push_notification(info, title, body, url=url, tag=tag, push_type=push_type)
+        if sub.get("kind") == "fcm":
+            res = send_fcm_notification(sub.get("fcm_token"), title, body, url=url, tag=tag, push_type=push_type)
+        else:
+            info = sub.get("subscription")
+            if not info:
+                continue
+            res = send_push_notification(info, title, body, url=url, tag=tag, push_type=push_type)
         if res == "expired":
             db["field_push_subs"].delete_one({"_id": sub["_id"]})
         elif res:
@@ -1500,6 +1561,46 @@ def field_push_subscribe():
     return jsonify({"ok": True})
 
 
+@field_bp.route("/field/push/fcm-register", methods=["POST"])
+@field_token_required
+def field_push_fcm_register():
+    """Enregistre le jeton FCM de l'application Android de cette tablette."""
+    data = request.get_json(silent=True) or {}
+    token = data.get("token")
+    if not isinstance(token, str) or not token.strip() or len(token) > 4096:
+        return jsonify({"ok": False, "error": "missing_token"}), 400
+    token = token.strip()
+    app_version = data.get("app_version")
+    app_version = app_version[:32] if isinstance(app_version, str) else None
+
+    db = _get_mongo_db()
+    device = request.device
+    # L'index unique porte sur endpoint : prefixe pour ne pas croiser le Web Push
+    endpoint = "fcm:" + token
+    db["field_push_subs"].update_one(
+        {"endpoint": endpoint},
+        {"$set": {
+            "kind": "fcm",
+            "fcm_token": token,
+            "device_id": device["_id"],
+            "device_name": device.get("name", ""),
+            "app_version": app_version,
+            "updatedAt": _now(),
+        },
+        "$setOnInsert": {"createdAt": _now()}},
+        upsert=True,
+    )
+    # Le jeton a change : l'ancien de cette tablette ne sert plus
+    db["field_push_subs"].delete_many({
+        "device_id": device["_id"], "kind": "fcm", "endpoint": {"$ne": endpoint},
+    })
+    if app_version:
+        db["field_devices"].update_one(
+            {"_id": device["_id"]}, {"$set": {"native_app_version": app_version}},
+        )
+    return jsonify({"ok": True})
+
+
 @field_bp.route("/field/push/unsubscribe", methods=["POST"])
 @field_token_required
 def field_push_unsubscribe():
@@ -1644,7 +1745,36 @@ def field_position():
     except Exception:
         pass  # non-bloquant
 
-    return jsonify({"ok": True})
+    resp = {"ok": True}
+    # Application Android : le service natif adapte sa cadence meme si le JS est
+    # gele. Lecture reservee a ce cas, les tablettes web n'ont rien a relire.
+    if data.get("native"):
+        fresh = db["field_devices"].find_one(
+            {"_id": request.device["_id"]},
+            {"status": 1, "tracking_mode": 1, "tracking_watchers": 1},
+        ) or {}
+        resp["status"] = fresh.get("status") or "patrouille"
+        resp["tracking_mode"] = _effective_tracking_mode(db, request.device["_id"], fresh)
+    return jsonify(resp)
+
+
+def _effective_tracking_mode(db, device_id, device_doc):
+    """Mode de suivi effectif d'une tablette, en purgeant les watchers expires."""
+    watchers = device_doc.get("tracking_watchers")
+    if isinstance(watchers, dict) and watchers:
+        now_iso = _now().isoformat()
+        active = {k: v for k, v in watchers.items()
+                  if isinstance(v, str) and v > now_iso}
+        if active:
+            return "high_freq"
+        if device_doc.get("tracking_mode") == "high_freq":
+            # Tous les watchers ont expire, remettre a normal
+            db["field_devices"].update_one(
+                {"_id": device_id},
+                {"$set": {"tracking_mode": "normal", "tracking_watchers": {}}},
+            )
+        return "normal"
+    return device_doc.get("tracking_mode") or "normal"
 
 
 # ---------------------------------------------------------------------------
@@ -4854,22 +4984,7 @@ def field_my_fiches():
     closed_list = [pub(f) for f in db["pcorg"].find(closed_query).sort("close_ts", -1).limit(50)]
 
     # Determiner le tracking_mode effectif (purge watchers expires)
-    tracking_mode = "normal"
-    watchers = dev_fresh.get("tracking_watchers")
-    if isinstance(watchers, dict) and watchers:
-        now_iso = _now().isoformat()
-        active = {k: v for k, v in watchers.items()
-                  if isinstance(v, str) and v > now_iso}
-        if active:
-            tracking_mode = "high_freq"
-        elif dev_fresh.get("tracking_mode") == "high_freq":
-            # Tous les watchers ont expire, remettre a normal
-            db["field_devices"].update_one(
-                {"_id": device["_id"]},
-                {"$set": {"tracking_mode": "normal", "tracking_watchers": {}}},
-            )
-    else:
-        tracking_mode = dev_fresh.get("tracking_mode") or "normal"
+    tracking_mode = _effective_tracking_mode(db, device["_id"], dev_fresh)
 
     # Demande de flux video en attente : si un operateur PC org a demande
     # un stream, on remonte l'info pour que la tablette affiche la modale
