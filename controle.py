@@ -262,10 +262,6 @@ def search(db, device, data, group_id=None, position=None):
     _ensure_ttl(db)
     now = _now()
     device_id = str(device.get("_id"))
-    limit = _env_int("CONTROLE_RATE_10MIN", 40)
-    if db[COLLECTION].count_documents({"device_id": device_id, "at": {"$gte": now - timedelta(minutes=10)}}) >= limit:
-        return {"ok": False, "error": "trop_de_consultations"}, 429
-
     consultation_id = uuid.uuid4().hex
     test_mode = bool(device.get("test_mode"))
     log = {
@@ -276,6 +272,18 @@ def search(db, device, data, group_id=None, position=None):
         "position": position,
         "expire_at": now + timedelta(days=_env_int("CONTROLE_RETENTION_DAYS", 365)),
     }
+    # Trace AVANT toute consultation, puis comptage qui l'inclut : deux appels
+    # simultanes ne peuvent pas passer tous les deux sous la limite. Sans
+    # journal, pas de consultation.
+    try:
+        db[COLLECTION].insert_one(dict(log, statut="en_cours"))
+    except Exception:
+        return {"ok": False, "error": "journal_indisponible"}, 503
+    limit = _env_int("CONTROLE_RATE_10MIN", 40)
+    recent = db[COLLECTION].count_documents({"device_id": device_id, "at": {"$gte": now - timedelta(minutes=10)}})
+    if recent > limit:
+        db[COLLECTION].update_one({"_id": consultation_id}, {"$set": {"statut": "refuse_limite", "provider": None}})
+        return {"ok": False, "error": "trop_de_consultations"}, 429
     started = time.monotonic()
     status_code = 200
     if api_configured():
@@ -298,12 +306,14 @@ def search(db, device, data, group_id=None, position=None):
     else:
         log["provider"] = None
         body, status_code = None, 503
-    log["duration_ms"] = int((time.monotonic() - started) * 1000)
+    done = {"provider": log.get("provider"), "duration_ms": int((time.monotonic() - started) * 1000),
+            "statut": body["statut"] if body else ("erreur" if status_code == 502 else "non_configure")}
     if body:
-        log["statut"] = body["statut"]
-        log["nb_resultats"] = len(body["resultats"])
+        done["nb_resultats"] = len(body["resultats"])
+    if log.get("error"):
+        done["error"] = log["error"]
     try:
-        db[COLLECTION].insert_one(log)
+        db[COLLECTION].update_one({"_id": consultation_id}, {"$set": done})
     except Exception:
         pass
     if status_code == 503:

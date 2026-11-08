@@ -127,6 +127,24 @@ def test_limite_de_consultations(env, monkeypatch):
     for _ in range(2):
         c.post("/field/controle/search", json=PERSONNE)
     assert c.post("/field/controle/search", json=PERSONNE).status_code == 429
+    # Le refus est trace aussi, et compte : pas de contournement en insistant
+    assert db[controle.COLLECTION].count_documents({"statut": "refuse_limite"}) == 1
+
+
+def test_trace_avant_consultation(env, monkeypatch):
+    c, db = env
+    vu = {}
+
+    def post(url, data=None, timeout=None, headers=None):
+        vu["log"] = db[controle.COLLECTION].find_one({})
+        raise RuntimeError("coupure")
+
+    monkeypatch.setenv("CONTROLE_API_URL", "https://consultation.test/v1")
+    monkeypatch.setenv("CONTROLE_API_SECRET", SECRET)
+    monkeypatch.setattr(controle.requests, "post", post)
+    c.post("/field/controle/search", json=PERSONNE)
+    assert vu["log"]["statut"] == "en_cours" and vu["log"]["query"]["nom"] == "Dupont"
+    assert db[controle.COLLECTION].find_one({})["statut"] == "erreur"
 
 
 @pytest.mark.parametrize("query,erreur", [

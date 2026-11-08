@@ -7767,6 +7767,7 @@
     consultation_non_configuree: "La consultation des fichiers n'est pas encore en service.",
     consultation_indisponible: "Serveur de consultation injoignable. Reessayez.",
     trop_de_consultations: "Trop de consultations en peu de temps. Patientez quelques minutes.",
+    journal_indisponible: "Consultation impossible pour le moment (journal indisponible).",
     nom_requis: "Saisir au moins le nom (2 lettres) ou le numero du document.",
     nom_invalide: "Nom ou prenom : lettres, espaces, tirets et apostrophes seulement.",
     date_invalide: "Date de naissance invalide.",
@@ -7808,8 +7809,11 @@
   }
 
   function ctlMrzClean(line) {
-    return String(line || "").toUpperCase().replace(/[«‹]/g, "<").replace(/\s+/g, "")
+    var s = String(line || "").toUpperCase().replace(/[«‹]/g, "<").replace(/\s+/g, "")
       .replace(/[^A-Z0-9<]/g, "");
+    // "<" lu "K" au milieu des suites de remplissage
+    for (var k = 0; k < 2; k++) s = s.replace(/<K(?=<|$)/g, "<<");
+    return s;
   }
 
   function ctlMrzDate(yymmdd, future) {
@@ -7822,10 +7826,12 @@
     return String(century + yy) + "-" + mm + "-" + dd;
   }
 
+  // Nom, "<<", prenoms separes par "<", puis remplissage : ce qui suit les
+  // prenoms est du bruit d'OCR (une lettre isolee lue au lieu d'un "<").
   function ctlMrzNames(field) {
     var parts = field.split("<<");
     var nom = (parts[0] || "").replace(/</g, " ").trim();
-    var prenom = parts.slice(1).join(" ").replace(/</g, " ").replace(/\s+/g, " ").trim();
+    var prenom = (parts[1] || "").replace(/</g, " ").replace(/\s+/g, " ").trim();
     return { nom: nom, prenom: prenom };
   }
 
@@ -7838,6 +7844,40 @@
     return "autre";
   }
 
+  // ML Kit coupe parfois une ligne MRZ en morceaux (longues suites de "<") :
+  // les morceaux d'une meme rangee sont recolles, de gauche a droite.
+  function ctlRows(lines) {
+    var rows = [];
+    (lines || []).forEach(function (l) {
+      var t = typeof l === "string" ? l : (l && l.text) || "";
+      var b = l && typeof l === "object" ? l.box : null;
+      var last = rows[rows.length - 1];
+      if (b && last && last.box) {
+        var h = Math.min(b[3] - b[1], last.box[3] - last.box[1]);
+        if (Math.abs((b[1] + b[3]) / 2 - (last.box[1] + last.box[3]) / 2) < h * 0.6 && b[0] >= last.box[2] - 8) {
+          last.text += t;
+          last.box = [last.box[0], Math.min(last.box[1], b[1]), b[2], Math.max(last.box[3], b[3])];
+          return;
+        }
+      }
+      rows.push({ text: t, box: b || null });
+    });
+    return rows.map(function (r) { return r.text; });
+  }
+
+  // Ramene une ligne a sa longueur en allongeant ou raccourcissant sa plus
+  // longue suite de "<" (un "<" perdu ou en trop par l'OCR). Les cles de
+  // controle disent ensuite si la ligne est juste.
+  function ctlFit(s, n) {
+    if (s.length === n) return s;
+    var best = null, re = /<{2,}/g, x;
+    while ((x = re.exec(s))) if (!best || x[0].length > best.len) best = { i: x.index, len: x[0].length };
+    if (!best) return (s + new Array(n + 1).join("<")).slice(0, n);
+    var len = Math.max(1, best.len + n - s.length);
+    var out = s.slice(0, best.i) + new Array(len + 1).join("<") + s.slice(best.i + best.len);
+    return (out + new Array(n + 1).join("<")).slice(0, n);
+  }
+
   function ctlField(s, check) {
     var v = ctlDigits(s);
     return { v: v, ok: ctlCheckDigit(v) === ctlDigits(check) };
@@ -7847,12 +7887,13 @@
   // {format, type_document, pays, nom, prenom, numero_document, nationalite,
   //  date_naissance, sexe, date_expiration, valide}
   function ctlParseMrz(lines) {
-    var c = (lines || []).map(ctlMrzClean).filter(function (l) { return l.length >= 28 && l.indexOf("<") >= 0; });
+    var c = ctlRows(lines).map(ctlMrzClean).filter(function (l) { return l.length >= 10; });
+    var near = function (l, n, t) { return Math.abs(l.length - n) <= t; };
     for (var i = 0; i < c.length; i++) {
       var a = c[i], b = c[i + 1] || "", d = c[i + 2] || "";
       // TD3 (passeport) : 2 x 44
-      if (a.length >= 43 && a.length <= 45 && b.length >= 43 && b.length <= 45 && a.charAt(0) === "P") {
-        a = (a + "<").slice(0, 44); b = (b + "<").slice(0, 44);
+      if (a.charAt(0) === "P" && a.length >= 20 && near(b, 44, 3)) {
+        a = ctlFit(a, 44); b = ctlFit(b, 44);
         var n3 = ctlMrzNames(a.slice(5));
         var doc3 = b.slice(0, 9), birth3 = ctlField(b.slice(13, 19), b.charAt(19)), exp3 = ctlField(b.slice(21, 27), b.charAt(27));
         var comp3 = doc3 + b.charAt(9) + birth3.v + b.charAt(19) + exp3.v + b.charAt(27) + b.slice(28, 43);
@@ -7865,8 +7906,8 @@
         };
       }
       // Ancienne CNI francaise : 2 x 36, "IDFRA"
-      if (a.length >= 35 && a.length <= 37 && b.length >= 35 && b.length <= 37 && a.indexOf("IDFRA") === 0) {
-        a = (a + "<").slice(0, 36); b = (b + "<").slice(0, 36);
+      if (a.indexOf("IDFRA") === 0 && a.length >= 20 && near(b, 36, 2)) {
+        a = ctlFit(a, 36); b = ctlFit(b, 36);
         var numF = ctlDigits(b.slice(0, 4)) + b.slice(4, 7) + ctlDigits(b.slice(7, 12));
         var birthF = ctlField(b.slice(27, 33), b.charAt(33));
         var compF = (a + numF + b.charAt(12) + b.slice(13, 27) + birthF.v + b.charAt(33) + b.charAt(34));
@@ -7880,8 +7921,8 @@
         };
       }
       // TD2 : 2 x 36 (titres, anciennes cartes)
-      if (a.length >= 35 && a.length <= 37 && b.length >= 35 && b.length <= 37 && /^[ACIRV]/.test(a)) {
-        a = (a + "<").slice(0, 36); b = (b + "<").slice(0, 36);
+      if (/^[ACIRV]/.test(a) && a.length >= 20 && near(b, 36, 2)) {
+        a = ctlFit(a, 36); b = ctlFit(b, 36);
         var n2 = ctlMrzNames(a.slice(5));
         var doc2 = b.slice(0, 9), birth2 = ctlField(b.slice(13, 19), b.charAt(19)), exp2 = ctlField(b.slice(21, 27), b.charAt(27));
         var comp2 = doc2 + b.charAt(9) + birth2.v + b.charAt(19) + exp2.v + b.charAt(27) + b.slice(28, 35);
@@ -7895,8 +7936,8 @@
         };
       }
       // TD1 (CNI depuis 2021, titres de sejour) : 3 x 30
-      if (a.length >= 29 && a.length <= 31 && b.length >= 29 && b.length <= 31 && d.length >= 29 && d.length <= 31 && /^[ACI]/.test(a)) {
-        a = (a + "<").slice(0, 30); b = (b + "<").slice(0, 30); d = (d + "<").slice(0, 30);
+      if (/^[ACI]/.test(a) && near(a, 30, 2) && near(b, 30, 2) && d.length >= 5) {
+        a = ctlFit(a, 30); b = ctlFit(b, 30); d = ctlFit(d, 30);
         var n1 = ctlMrzNames(d);
         var doc1 = a.slice(5, 14), birth1 = ctlField(b.slice(0, 6), b.charAt(6)), exp1 = ctlField(b.slice(8, 14), b.charAt(14));
         var comp1 = a.slice(5, 30) + birth1.v + b.charAt(6) + exp1.v + b.charAt(14) + b.slice(18, 29);
@@ -8294,7 +8335,7 @@
   function ctlHandleRead(lines, barcodes) {
     if (_ctl.step !== "scan") return;
     var texts = lines.map(function (l) { return typeof l === "string" ? l : (l && l.text) || ""; }).filter(Boolean);
-    var mrz = ctlParseMrz(texts);
+    var mrz = ctlParseMrz(lines);
     if (mrz && mrz.valide) { ctlAcceptDocument(mrz, "mrz"); return; }
     var code = barcodes.filter(function (b) { return b && b.value; })[0];
     if (code) {

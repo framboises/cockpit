@@ -59,6 +59,12 @@ Tout est lu **sur la tablette**. Aucune image ne part au serveur.
 | ML Kit (texte latin + codes), modèles embarqués | Application Android **1.4 et plus** (`FieldScanner.java`, méthode `FieldNative.scanImage`) | Texte (MRZ, permis, badges) et tous les codes |
 | `BarcodeDetector` du navigateur | PWA, ou application 1.3 et moins | Codes seulement. L'écran le signale et propose la saisie |
 
+ML Kit coupe souvent une ligne MRZ en morceaux (longues suites de `<`) et lit parfois `<` comme `K`
+ou `s`, ou en perd un. Les morceaux d'une même rangée sont recollés d'après leur position
+(`ctlRows`), chaque ligne est ramenée à sa longueur en ajustant sa plus longue suite de `<`
+(`ctlFit`), puis les clés de contrôle tranchent. Vérifié sur la tablette avec les spécimens
+dessinés à l'écran : passeport, CNI 2021 et ancienne CNI, lus en 0,8 s environ.
+
 Formats MRZ reconnus (`ctlParseMrz`, `field.js`), clés de contrôle OACI 9303 (poids 7-3-1)
 vérifiées champ par champ et en composite :
 
@@ -158,7 +164,7 @@ Réponse 200 :
 Erreurs : 400 (`type_invalide`, `nom_requis`, `nom_invalide`, `date_invalide`, `document_invalide`,
 `siret_invalide`, `entreprise_requise`, `code_requis`, `requete_invalide`), 403
 `controle_non_autorise`, 429 `trop_de_consultations`, 502 `consultation_indisponible`, 503
-`consultation_non_configuree`. Les 502 et 503 portent aussi `consultation_id`, et la tentative est tracée.
+`consultation_non_configuree` ou `journal_indisponible`. Les 502 et 503 portent aussi `consultation_id`, et la tentative est tracée.
 
 ## 7. Contrat du serveur de consultation
 
@@ -230,10 +236,15 @@ Conseil au moteur : renvoyer `aucun` avec la liste des `sources` interrogées (l
 
 ## 8. Traçabilité et RGPD
 
-Collection `controle_consultations`, un document par tentative valide, y compris 502 et 503 :
+Collection `controle_consultations`, un document par tentative valide, y compris 429, 502 et 503.
+Il est écrit **avant** l'appel au serveur de consultation (`statut: "en_cours"`), puis complété.
+La limite par tablette compte ces documents, refus compris : deux appels simultanés ne la
+contournent pas. Si le journal ne peut pas être écrit, rien n'est consulté (503
+`journal_indisponible`). Champs :
 `_id` (= `consultation_id`), `at`, `device_id`, `device_name`, `group_id`, `event`, `year`,
 `motif`, `source`, `query` (critères), `position` (dernière position connue de la tablette),
-`provider` (`api`, `demo` ou vide), `statut`, `nb_resultats`, `error`, `duration_ms`, `expire_at`.
+`provider` (`api`, `demo` ou vide), `statut` (celui de la réponse, ou `en_cours`, `refuse_limite`,
+`erreur`, `non_configure`), `nb_resultats`, `error`, `duration_ms`, `expire_at`.
 Index TTL sur `expire_at` : `CONTROLE_RETENTION_DAYS` (365 j par défaut). Le détail des résultats
 **n'est pas** gardé par Cockpit : seul le serveur de consultation sait ce qu'il a répondu.
 
