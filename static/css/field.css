@@ -3675,3 +3675,11 @@ body.field-declarant .field-actions .action-declare:active { background: #b45309
 .ctl-ref { margin-top: 10px; font-size: 11px; color: #475569; }
 .ctl-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
 .ctl-actions .btn-primary { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px; }
+.ctl-found-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 4px 0 2px; }
+.ctl-found-nom { font-size: 20px; font-weight: 800; letter-spacing: .02em; color: #f8fafc; }
+.ctl-found-prenom { font-size: 18px; font-weight: 600; color: #e2e8f0; }
+.ctl-found-infos { color: #a5b4fc !important; }
+.ctl-scan-status strong { color: #f8fafc; font-size: 16px; }
+.ctl-use { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 6px 12px; border-radius: 999px;
+  background: #16a34a; border: none; color: #fff; font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; vertical-align: middle; }
+.ctl-use .material-symbols-outlined { font-size: 18px; }

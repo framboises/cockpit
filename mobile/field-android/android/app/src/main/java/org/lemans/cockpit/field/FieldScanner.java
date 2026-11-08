@@ -74,16 +74,19 @@ final class FieldScanner {
         });
     }
 
-    /** Lignes dans l'ordre de lecture (haut puis gauche) : la MRZ reste dans l'ordre. */
+    /**
+     * Lignes de haut en bas. Tri simple et transitif : une comparaison "meme rangee"
+     * ne l'est pas, et TimSort peut alors lever une exception. field.js regroupe
+     * ensuite les rangees et les ordonne de gauche a droite d'apres les cadres.
+     */
     private static JSArray lines(Text text) {
         List<Text.Line> all = new ArrayList<>();
         for (Text.TextBlock block : text.getTextBlocks()) all.addAll(block.getLines());
         Collections.sort(all, (a, b) -> {
             Rect ra = a.getBoundingBox(), rb = b.getBoundingBox();
-            if (ra == null || rb == null) return 0;
-            int dy = ra.centerY() - rb.centerY();
-            if (Math.abs(dy) > Math.min(ra.height(), rb.height()) / 2) return dy;
-            return ra.left - rb.left;
+            int ya = ra == null ? 0 : ra.centerY(), yb = rb == null ? 0 : rb.centerY();
+            if (ya != yb) return Integer.compare(ya, yb);
+            return Integer.compare(ra == null ? 0 : ra.left, rb == null ? 0 : rb.left);
         });
         JSArray out = new JSArray();
         for (Text.Line line : all) {

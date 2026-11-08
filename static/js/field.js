@@ -7847,22 +7847,23 @@
   // ML Kit coupe parfois une ligne MRZ en morceaux (longues suites de "<") :
   // les morceaux d'une meme rangee sont recolles, de gauche a droite.
   function ctlRows(lines) {
-    var rows = [];
-    (lines || []).forEach(function (l) {
+    var items = (lines || []).map(function (l, i) {
       var t = typeof l === "string" ? l : (l && l.text) || "";
-      var b = l && typeof l === "object" ? l.box : null;
-      var last = rows[rows.length - 1];
-      if (b && last && last.box) {
-        var h = Math.min(b[3] - b[1], last.box[3] - last.box[1]);
-        if (Math.abs((b[1] + b[3]) / 2 - (last.box[1] + last.box[3]) / 2) < h * 0.6 && b[0] >= last.box[2] - 8) {
-          last.text += t;
-          last.box = [last.box[0], Math.min(last.box[1], b[1]), b[2], Math.max(last.box[3], b[3])];
-          return;
-        }
-      }
-      rows.push({ text: t, box: b || null });
+      var b = l && typeof l === "object" && l.box && l.box.length === 4 ? l.box : null;
+      return { t: t, b: b, i: i };
     });
-    return rows.map(function (r) { return r.text; });
+    if (!items.every(function (x) { return x.b; })) return items.map(function (x) { return x.t; });
+    items.sort(function (a, b) { return (a.b[1] + a.b[3]) - (b.b[1] + b.b[3]); });
+    var rows = [];
+    items.forEach(function (x) {
+      var cy = (x.b[1] + x.b[3]) / 2, h = x.b[3] - x.b[1];
+      var row = rows[rows.length - 1];
+      if (row && Math.abs(cy - row.cy) < Math.min(h, row.h) * 0.6) { row.items.push(x); return; }
+      rows.push({ cy: cy, h: h, items: [x] });
+    });
+    return rows.map(function (r) {
+      return r.items.sort(function (a, b) { return a.b[0] - b.b[0]; }).map(function (x) { return x.t; }).join("");
+    });
   }
 
   // Ramene une ligne a sa longueur en allongeant ou raccourcissant sa plus
@@ -7971,6 +7972,97 @@
       } else if (m[1] === "5" && !out.numero_document) out.numero_document = v.replace(/\s/g, "").toUpperCase().slice(0, 20);
     });
     return out.nom || out.numero_document ? out : null;
+  }
+
+  // --- Badges, accreditations, cartes : nom et prenom sans bande MRZ -------
+  var CTL_UP = "A-ZÀ-ÖØ-Þ";
+  var CTL_LOW = "a-zß-öø-ÿ";
+  var CTL_CAPS_RE = new RegExp("^[" + CTL_UP + "][" + CTL_UP + "' -]*[" + CTL_UP + "]$");
+  var CTL_TITLE_RE = new RegExp("^[" + CTL_UP + "][" + CTL_LOW + "]+(?:[ '-][" + CTL_UP + "]?[" + CTL_LOW + "]+){0,3}$");
+  var CTL_CAPS_WORD = new RegExp("^[" + CTL_UP + "][" + CTL_UP + "'-]+$");
+  var CTL_TITLE_WORD = new RegExp("^[" + CTL_UP + "][" + CTL_LOW + "]+(?:-[" + CTL_UP + "][" + CTL_LOW + "]+)?$");
+  // Mots de badge qui ne sont jamais un nom (fonctions, zones, mentions)
+  var CTL_STOP = ("ACO ALL STAFF PRESSE MEDIA MEDIAS INVITE INVITES ORGANISATION ORGANISATEUR BENEVOLE SECURITE CONTROLE " +
+    "COMMISSAIRE COMMISSAIRES ACCOMPAGNANT PISTE VIRAGE PADDOCK ACCES ENTREE CIRCUIT CIRCUITS MOTOS MOTO AUTO VALABLE " +
+    "CARTE PERMIS REPUBLIQUE FRANCAISE NOM PRENOM PRENOMS BTP PASS BADGE ZONE ZONES PARKING VIP TECHNIQUE TECHNICIEN " +
+    "DIRECTION DIRECTEUR ADJOINT SERVICE SERVICES OPERATIONS EQUIPE TEAM HOSPITALITY INVITATION PROFESSIONNELLE " +
+    "IDENTIFICATION SALARIE ENTREPRISE EMPLOYEUR CHANTIER CONDUIRE IDENTITE NATIONALE MANS REGLEMENT PORTEUR " +
+    "SECOURS MEDECIN MEDICAL POMPIER POLICE GENDARMERIE DOUANE EXPOSANT PRESTATAIRE").split(" ");
+
+  function ctlIsStop(t) {
+    var w = t.toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[ '-]+/).filter(Boolean);
+    return !w.length || w.some(function (x) { return CTL_STOP.indexOf(x) !== -1; });
+  }
+
+  function ctlTitleCase(t) {
+    return t.toLowerCase().replace(new RegExp("(^|[ '-])([" + CTL_LOW + "])", "g"), function (m, a, b) { return a + b.toUpperCase(); });
+  }
+
+  function ctlIsSurname(t) {
+    return t.length >= 2 && t.length <= 30 && CTL_CAPS_RE.test(t) && t.split(/\s+/).length <= 3 && !ctlIsStop(t);
+  }
+
+  function ctlIsGiven(t) {
+    return t.length >= 2 && t.length <= 30 && CTL_TITLE_RE.test(t) && !ctlIsStop(t);
+  }
+
+  // lines : [{text, box}] (ou textes). Retourne {nom, prenom, infos} ou null.
+  function ctlGuessIdentity(lines) {
+    var items = (lines || []).map(function (l) {
+      return typeof l === "string" ? { t: l.trim(), b: null } : { t: ((l && l.text) || "").trim(), b: (l && l.box) || null };
+    }).filter(function (x) { return x.t; });
+    var res = null, k, m, idx = -1;
+    // a) Libelles : "Nom : DUPONT", ou "Nom" puis la valeur a la ligne suivante
+    var labelNom = /^(?:nom(?: de naissance| d'usage)?|surname)\s*[:.\/]?\s*(.*)$/i;
+    var labelPre = /^(?:pr[eé]noms?|given names?)\s*[:.\/]?\s*(.*)$/i;
+    var nomL = "", preL = "";
+    for (k = 0; k < items.length; k++) {
+      if (!nomL && (m = labelNom.exec(items[k].t))) { nomL = m[1] || (items[k + 1] ? items[k + 1].t : ""); idx = k; }
+      else if (!preL && (m = labelPre.exec(items[k].t))) { preL = m[1] || (items[k + 1] ? items[k + 1].t : ""); idx = Math.max(idx, k); }
+    }
+    if (nomL && !labelPre.test(nomL)) {
+      res = { nom: nomL.toUpperCase(), prenom: preL && !labelNom.test(preL) ? ctlTitleCase(preL) : "" };
+    }
+    // b) NOM en majuscules, prenom juste en dessous (ou a la ligne suivante)
+    if (!res) {
+      for (k = 0; k < items.length && !res; k++) {
+        var s = items[k];
+        if (!ctlIsSurname(s.t)) continue;
+        for (var j = 0; j < items.length; j++) {
+          var g = items[j];
+          if (j === k || !ctlIsGiven(g.t)) continue;
+          var below;
+          if (s.b && g.b) {
+            var h = s.b[3] - s.b[1];
+            var cxS = (s.b[0] + s.b[2]) / 2, cxG = (g.b[0] + g.b[2]) / 2;
+            below = g.b[1] >= s.b[1] + 0.4 * h && g.b[1] <= s.b[3] + 1.3 * h
+              && (Math.abs(g.b[0] - s.b[0]) <= 1.5 * h || Math.abs(cxG - cxS) <= 1.5 * h);
+          } else {
+            below = j === k + 1;
+          }
+          if (below) { res = { nom: s.t, prenom: g.t }; idx = Math.max(k, j); break; }
+        }
+      }
+    }
+    // c) Meme ligne : "DUPONT Jean" ou "Jean DUPONT"
+    if (!res) {
+      for (k = 0; k < items.length && !res; k++) {
+        var w = items[k].t.split(/\s+/);
+        if (w.length < 2 || w.length > 4 || items[k].t.length > 40 || ctlIsStop(items[k].t)) continue;
+        var caps = w.filter(function (x) { return CTL_CAPS_WORD.test(x); });
+        var titles = w.filter(function (x) { return CTL_TITLE_WORD.test(x); });
+        if (!caps.length || !titles.length || caps.length + titles.length !== w.length) continue;
+        var capsFirst = CTL_CAPS_WORD.test(w[0]);
+        var split = capsFirst ? caps.length : titles.length;
+        var ordered = w.slice(0, split).every(function (x) { return capsFirst ? CTL_CAPS_WORD.test(x) : CTL_TITLE_WORD.test(x); });
+        if (ordered) { res = { nom: caps.join(" "), prenom: titles.join(" ") }; idx = k; }
+      }
+    }
+    if (!res) return null;
+    // Fonction, organisme : les quelques lignes qui suivent (hors codes et chiffres)
+    res.infos = items.slice(idx + 1).map(function (x) { return x.t; })
+      .filter(function (t) { return t.length >= 2 && t.length <= 50 && !/^[\d\s\/.:-]+$/.test(t); }).slice(0, 3);
+    return res;
   }
 
   function ctlClassifyCode(format, value) {
@@ -8095,7 +8187,11 @@
     var fc = _ctlEl("div", "ctl-form");
     fc.dataset.form = "code";
     fc.appendChild(_ctlInput("ctl-code", "Numero du badge ou du titre", { inputmode: "text", maxlength: 512 }));
-    fc.appendChild(_ctlEl("p", "ctl-hint", "Numero sous le code-barres, ou utilisez Lire un document pour scanner le code."));
+    var rowT = _ctlEl("div", "ctl-row");
+    rowT.appendChild(_ctlInput("ctl-code-nom", "Nom du titulaire", { maxlength: 80 }));
+    rowT.appendChild(_ctlInput("ctl-code-prenom", "Prenom", { maxlength: 80, caps: "words" }));
+    fc.appendChild(rowT);
+    fc.appendChild(_ctlEl("p", "ctl-hint", "Le titulaire est facultatif : il permet de verifier que le badge est bien le sien."));
     home.appendChild(fc);
 
     home.appendChild(_ctlEl("div", "ctl-field-label ctl-motif-label", "Motif"));
@@ -8132,7 +8228,7 @@
     torch.hidden = true;
     stage.appendChild(torch);
     scan.appendChild(stage);
-    var status = _ctlEl("div", "ctl-scan-status", "Placez le document dans le cadre, bande MRZ en bas.");
+    var status = _ctlEl("div", "ctl-scan-status", "Piece d'identite : bande MRZ dans le pointille. Badge ou carte : recto entier dans le cadre.");
     scan.appendChild(status);
     var linesBox = _ctlEl("div", "ctl-lines");
     linesBox.hidden = true;
@@ -8153,7 +8249,7 @@
 
     document.body.appendChild(root);
     _ctl.root = root;
-    ["ctl-nom", "ctl-prenom", "ctl-doc", "ctl-raison", "ctl-siret", "ctl-code"].forEach(function (id) {
+    ["ctl-nom", "ctl-prenom", "ctl-doc", "ctl-raison", "ctl-siret", "ctl-code", "ctl-code-nom", "ctl-code-prenom"].forEach(function (id) {
       _ctl.els[id].addEventListener("keydown", function (e) { if (e.key === "Enter") ctlSearch(); });
       _ctl.els[id].addEventListener("input", function () { _ctl.els.error.hidden = true; });
     });
@@ -8175,9 +8271,10 @@
   }
 
   function ctlReset() {
-    ["ctl-nom", "ctl-prenom", "ctl-naissance", "ctl-doc", "ctl-raison", "ctl-siret", "ctl-code"].forEach(function (id) {
+    ["ctl-nom", "ctl-prenom", "ctl-naissance", "ctl-doc", "ctl-raison", "ctl-siret", "ctl-code", "ctl-code-nom", "ctl-code-prenom"].forEach(function (id) {
       if (_ctl.els[id]) _ctl.els[id].value = "";
     });
+    _ctl.cand = null;
     _ctl.found = null;
     _ctl.ocrLines = [];
     _ctl.fillTarget = "nom";
@@ -8231,10 +8328,19 @@
     var box = _ctlEl("div", "ctl-found" + (f.valide === false ? " warn" : ""));
     box.appendChild(_mkIcon(f.valide === false ? "warning" : "fact_check"));
     var txt = _ctlEl("div", "ctl-found-text");
-    var label = f.kind === "code" ? CTL_CODE_LABELS[f.type_code] : (CTL_DOC_LABELS[f.type_document] || "Document");
+    var label = f.kind === "code" ? CTL_CODE_LABELS[f.type_code]
+      : f.kind === "texte" ? "Badge ou carte" : (CTL_DOC_LABELS[f.type_document] || "Document");
     txt.appendChild(_ctlEl("strong", null, label + (f.pays && f.pays !== "FRA" ? " (" + f.pays + ")" : "")));
-    var sub = f.kind === "code" ? "Code lu : verifiez le numero."
-      : f.valide === false ? "Lecture incertaine : verifiez chaque champ avant de rechercher."
+    var ident = f.ident;
+    if (ident) {
+      var who = _ctlEl("div", "ctl-found-who");
+      who.appendChild(_ctlEl("span", "ctl-found-nom", ident.nom.toUpperCase()));
+      if (ident.prenom) who.appendChild(_ctlEl("span", "ctl-found-prenom", ident.prenom));
+      txt.appendChild(who);
+      if (ident.infos && ident.infos.length) txt.appendChild(_ctlEl("small", "ctl-found-infos", ident.infos.join(" · ")));
+    }
+    var sub = f.valide === false ? "Lecture incertaine : verifiez chaque champ avant de rechercher."
+      : f.kind === "code" ? (ident ? "Numero et titulaire lus : verifiez avant de rechercher." : "Numero lu : verifiez avant de rechercher.")
       : "Lu sur le document : verifiez avant de rechercher.";
     if (f.date_expiration && f.date_expiration < new Date().toISOString().slice(0, 10)) sub = "Document EXPIRE le " + f.date_expiration + ". " + sub;
     txt.appendChild(_ctlEl("small", null, sub));
@@ -8334,19 +8440,70 @@
 
   function ctlHandleRead(lines, barcodes) {
     if (_ctl.step !== "scan") return;
-    var texts = lines.map(function (l) { return typeof l === "string" ? l : (l && l.text) || ""; }).filter(Boolean);
+    var rows = ctlRows(lines);
+    var texts = rows.filter(Boolean);
     var mrz = ctlParseMrz(lines);
     if (mrz && mrz.valide) { ctlAcceptDocument(mrz, "mrz"); return; }
-    var code = barcodes.filter(function (b) { return b && b.value; })[0];
-    if (code) {
-      ctlAcceptCode(code.format || "", String(code.value));
-      return;
-    }
     var lic = ctlParseLicence(texts);
     if (lic && lic.nom && lic.numero_document) { ctlAcceptDocument(lic, "ocr"); return; }
-    if (mrz) _ctl.els.scanStatus.textContent = "Bande MRZ reperee, lecture en cours... tenez le document immobile.";
-    else if (texts.length) _ctl.els.scanStatus.textContent = "Texte lu : touchez une ligne pour la reporter, ou continuez a viser la bande MRZ.";
+    var code = barcodes.filter(function (b) { return b && b.value; })[0] || null;
+    var ident = ctlGuessIdentity(lines);
+    // Badge, carte, titre : deux lectures identiques avant de remplir, pour ne
+    // pas prendre une image floue. Nom sans code : une image de plus, le temps
+    // que le code-barres du badge soit lu lui aussi (bouton Utiliser sinon).
+    var key = (code ? code.value : "") + "|" + (ident ? ident.nom + "|" + ident.prenom : "");
+    if (code || ident) {
+      if (_ctl.cand && _ctl.cand.key === key) _ctl.cand.n++;
+      else _ctl.cand = { key: key, n: 1, code: code, ident: ident };
+      if (_ctl.cand.n >= (ident && !code ? 3 : 2)) { ctlAcceptRead(code, ident); return; }
+      ctlShowPreview(code, ident);
+    } else if (mrz) {
+      _ctl.els.scanStatus.textContent = "Bande MRZ reperee, lecture en cours... tenez le document immobile.";
+    } else if (texts.length) {
+      _ctl.els.scanStatus.textContent = "Lecture en cours... approchez le document, nom bien visible.";
+    }
     ctlShowLines(texts);
+  }
+
+  function ctlIdentText(code, ident) {
+    var parts = [];
+    if (ident) parts.push(ident.nom + (ident.prenom ? " " + ident.prenom : ""));
+    if (code) parts.push((CTL_CODE_LABELS[ctlClassifyCode(code.format, code.value)] || "Code") + " " + String(code.value).slice(0, 24));
+    return parts.join(" · ");
+  }
+
+  // Apercu de ce qui est en train d'etre lu, avec validation immediate
+  function ctlShowPreview(code, ident) {
+    var st = _ctl.els.scanStatus;
+    st.textContent = "";
+    st.appendChild(_ctlEl("strong", null, ctlIdentText(code, ident)));
+    st.appendChild(document.createTextNode(" "));
+    var use = _ctlBtn("ctl-use", "check", "Utiliser", function () { ctlAcceptRead(code, ident); });
+    st.appendChild(use);
+  }
+
+  function ctlAcceptRead(code, ident) {
+    try { if (navigator.vibrate) navigator.vibrate([60, 40, 60]); } catch (e) {}
+    _ctl.cand = null;
+    var e = _ctl.els;
+    if (ident) {
+      e["ctl-nom"].value = ident.nom.toUpperCase();
+      e["ctl-prenom"].value = ident.prenom;
+      e["ctl-code-nom"].value = ident.nom.toUpperCase();
+      e["ctl-code-prenom"].value = ident.prenom;
+    }
+    if (code) {
+      var type = ctlClassifyCode(code.format || "", String(code.value));
+      e["ctl-code"].value = String(code.value);
+      _ctl.found = { kind: "code", type_code: type, format: code.format || "", ident: ident };
+      _ctl.source = "code";
+      ctlSetTab("code");
+    } else {
+      _ctl.found = { kind: "texte", ident: ident };
+      _ctl.source = "ocr";
+      ctlSetTab("personne");
+    }
+    ctlGo("accueil");
   }
 
   // Lignes lues (badge, document sans MRZ) : touchees, elles remplissent le
@@ -8379,24 +8536,32 @@
   }
 
   function ctlFillFromLine(text) {
+    var t = _ctl.fillTarget;
     var map = { nom: "ctl-nom", prenom: "ctl-prenom", doc: "ctl-doc", raison: "ctl-raison" };
-    var inp = _ctl.els[map[_ctl.fillTarget]];
+    var inp = _ctl.els[map[t]];
     if (!inp) return;
-    inp.value = _ctl.fillTarget === "doc" ? text.replace(/\s/g, "").toUpperCase() : text.trim();
-    _ctl.source = "ocr";
-    ctlSetTab(_ctl.fillTarget === "raison" ? "entreprise" : "personne");
+    var v = text.trim();
+    // Convention des fichiers : NOM en majuscules, Prenom avec majuscule initiale
+    if (t === "nom") v = v.toUpperCase();
+    else if (t === "prenom" && v === v.toUpperCase()) v = ctlTitleCase(v);
+    else if (t === "doc") v = v.replace(/\s/g, "").toUpperCase();
+    inp.value = v;
+    // Badge deja lu : le titulaire suit, on reste sur l'onglet du badge
+    var onCode = _ctl.found && _ctl.found.kind === "code";
+    if (onCode && (t === "nom" || t === "prenom")) _ctl.els[t === "nom" ? "ctl-code-nom" : "ctl-code-prenom"].value = v;
+    if (!onCode) { _ctl.source = "ocr"; ctlSetTab(t === "raison" ? "entreprise" : "personne"); }
     var order = ["nom", "prenom", "doc"];
-    var i = order.indexOf(_ctl.fillTarget);
+    var i = order.indexOf(t);
     if (i >= 0 && i < order.length - 1) _ctl.fillTarget = order[i + 1];
     try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) {}
-    toast("Reporte : " + text.slice(0, 30), "ok");
+    toast("Reporte : " + v.slice(0, 30), "ok");
     _ctl.linesTouchedAt = Date.now();
     ctlShowLines(_ctl.ocrLines, true);
   }
 
   function ctlAcceptDocument(doc, source) {
     try { if (navigator.vibrate) navigator.vibrate([60, 40, 60]); } catch (e) {}
-    _ctl.found = Object.assign({ kind: "document" }, doc);
+    _ctl.found = Object.assign({ kind: "document", ident: doc.nom ? { nom: doc.nom, prenom: doc.prenom || "" } : null }, doc);
     _ctl.source = source;
     _ctl.els["ctl-nom"].value = doc.nom || "";
     _ctl.els["ctl-prenom"].value = doc.prenom || "";
@@ -8407,13 +8572,7 @@
   }
 
   function ctlAcceptCode(format, value) {
-    try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
-    var type = ctlClassifyCode(format, value);
-    _ctl.found = { kind: "code", type_code: type, format: format };
-    _ctl.source = "code";
-    _ctl.els["ctl-code"].value = value;
-    ctlSetTab("code");
-    ctlGo("accueil");
+    ctlAcceptRead({ format: format, value: value }, null);
   }
 
   // --- Recherche ------------------------------------------------------------
@@ -8438,8 +8597,11 @@
     }
     if (!v("ctl-code")) return { error: "code_requis" };
     var f = _ctl.found && _ctl.found.kind === "code" ? _ctl.found : null;
-    return { query: { type: "code", valeur: v("ctl-code"), format: f ? f.format : "manual",
-                      type_code: f ? f.type_code : ctlClassifyCode("manual", v("ctl-code")) } };
+    var qc = { type: "code", valeur: v("ctl-code"), format: f ? f.format : "manual",
+               type_code: f ? f.type_code : ctlClassifyCode("manual", v("ctl-code")) };
+    if (v("ctl-code-nom")) qc.nom = v("ctl-code-nom");
+    if (v("ctl-code-prenom")) qc.prenom = v("ctl-code-prenom");
+    return { query: qc };
   }
 
   function ctlShowError(code) {
@@ -8482,7 +8644,8 @@
               q.numero_document ? "doc. " + q.numero_document : ""].filter(Boolean).join(" · ");
     }
     if (q.type === "entreprise") return [q.raison_sociale, q.siret ? "SIRET " + q.siret : ""].filter(Boolean).join(" · ");
-    return (CTL_CODE_LABELS[q.type_code] || "Code") + " " + q.valeur.slice(0, 60);
+    return (CTL_CODE_LABELS[q.type_code] || "Code") + " " + q.valeur.slice(0, 60)
+      + (q.nom ? " · " + q.nom.toUpperCase() + (q.prenom ? " " + q.prenom : "") : "");
   }
 
   var CTL_VERDICTS = {

@@ -31,6 +31,10 @@ consultation. Les fichiers interrogés seront choisis plus tard.
    - **MRZ valide** (toutes les clés de contrôle justes) : vibration, retour à l'accueil, champs remplis ;
    - **code** (QR, code-barres) : onglet Badge / titre rempli, type deviné (carte BTP, badge, titre) ;
    - **permis** reconnu (nom et numéro lus) : champs remplis ;
+   - **badge, accréditation, carte** (§ 3 bis) : le nom, le prénom et le numéro du code sont
+     reconnus. Un aperçu en direct (« ARNAULT Ludovic · Badge 9000... ») propose **Utiliser**. Sinon,
+     tout est rempli automatiquement après deux lectures identiques, trois si aucun code n'est
+     encore lu : le temps que le code-barres le soit aussi ;
    - sinon, les **lignes lues** s'affichent : l'agent choisit le champ (Nom, Prénom, N° doc,
      Entreprise) et touche la ligne. Le champ suivant est proposé automatiquement. La liste reste
      figée 3 s après un toucher.
@@ -56,7 +60,7 @@ Tout est lu **sur la tablette**. Aucune image ne part au serveur.
 
 | Moteur | Où | Ce qu'il lit |
 |---|---|---|
-| ML Kit (texte latin + codes), modèles embarqués | Application Android **1.4 et plus** (`FieldScanner.java`, méthode `FieldNative.scanImage`) | Texte (MRZ, permis, badges) et tous les codes |
+| ML Kit (texte latin + codes), modèles embarqués | Application Android **1.4 et plus** (1.5 conseillée : tri des lignes corrigé, la 1.4 pouvait s'arrêter sur un document très chargé) (`FieldScanner.java`, méthode `FieldNative.scanImage`) | Texte (MRZ, permis, badges) et tous les codes |
 | `BarcodeDetector` du navigateur | PWA, ou application 1.3 et moins | Codes seulement. L'écran le signale et propose la saisie |
 
 ML Kit coupe souvent une ligne MRZ en morceaux (longues suites de `<`) et lit parfois `<` comme `K`
@@ -93,6 +97,29 @@ Vérifié hors tablette : spécimens OACI TD1, TD2, TD3, ancienne CNI française
 clés, correction d'OCR, clé fausse refusée, permis, classement des codes, SIRET.
 **À vérifier sur la tablette** : lecture réelle d'une CNI, d'un passeport, d'un permis, d'un
 badge et d'une carte BTP (lumière, reflets, mise au point).
+
+## 3 bis. Badges, accréditations, cartes (sans MRZ)
+
+`ctlGuessIdentity` (`field.js`), à partir des lignes et de leurs cadres renvoyés par ML Kit :
+
+1. **Libellés** : `Nom : DUPONT`, `Prénom : Jean`, ou le libellé seul et la valeur à la ligne suivante
+   (cartes BTP, cartes professionnelles) ;
+2. **NOM en majuscules, Prénom avec majuscule initiale juste en dessous**, aligné à gauche ou centré
+   (accréditations ACO et 24h, badges en général). La position décide, pas l'ordre des lignes ;
+3. **même ligne** : `DUPONT Jean` ou `Jean DUPONT`.
+
+Les mots de badge (fonctions, zones, mentions : COMMISSAIRE, SECURITE, ACCES, PADDOCK...) ne sont
+jamais pris pour un nom. Les particules (DE, LA, DU) restent possibles. Les lignes qui suivent le
+prénom (fonction, organisme) sont affichées à la relecture, jamais envoyées. Convention appliquée
+au remplissage, automatique ou au doigt : **NOM en majuscules, Prénom avec majuscule initiale**.
+
+Avec un code, l'onglet Badge / titre est rempli avec le **titulaire** (nom, prénom, facultatifs) :
+le serveur de consultation peut vérifier que le badge est bien celui de la personne. Le nom et le
+prénom sont aussi recopiés dans l'onglet Personne.
+
+Vérifié sur la sortie réelle de ML Kit pour les trois exemples (badge ACO, accréditation 24h Motos,
+carte d'accès sans nom, où rien n'est inventé), ainsi que sur les libellés, la même ligne et les
+fonctions ignorées.
 
 ## 4. Architecture
 
@@ -141,7 +168,7 @@ Tablette Field ──(cookie field_token)──> Cockpit /field/controle/search 
 |---|---|---|
 | `personne` | `nom`, `prenom`, `date_naissance` (AAAA-MM-JJ), `numero_document`, `type_document` (`cni`, `passeport`, `titre_sejour`, `permis`, `visa`, `autre`), `nationalite` (ISO 3 lettres) | `nom` (2 car.) ou `numero_document` |
 | `entreprise` | `raison_sociale`, `siret` (14 chiffres) ou SIREN (9), clé de Luhn vérifiée, règle La Poste comprise | l'un des deux |
-| `code` | `valeur` (512 car. max), `format` (`qr_code`, `code_128`... ou `manual`), `type_code` (`carte_btp`, `badge`, `titre`, `autre`) | `valeur` |
+| `code` | `valeur` (512 car. max), `format` (`qr_code`, `code_128`... ou `manual`), `type_code` (`carte_btp`, `badge`, `titre`, `autre`), `nom` et `prenom` du titulaire (facultatifs, mêmes règles que pour une personne) | `valeur` |
 
 `source` : `manuel`, `mrz`, `ocr`, `code`. `motif` : `acces`, `identite`, `incident`, `autre`
 (par défaut `acces`). Noms : lettres (accents compris), espaces, tiret, apostrophe, point.

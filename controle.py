@@ -142,6 +142,13 @@ def normalize_query(data):
         if not valeur:
             return None, "code_requis"
         out.update(valeur=valeur, format=_txt(q.get("format"), 20), type_code=_txt(q.get("type_code"), 20))
+        # Titulaire lu sur le badge (facultatif) : le serveur verifie qu'il correspond
+        for k in ("nom", "prenom"):
+            v = _txt(q.get(k), 80)
+            if v and not _NOM_RE.match(v):
+                return None, "nom_invalide"
+            if v:
+                out[k] = v
     return {"query": out, "source": source, "motif": motif}, None
 
 
@@ -232,8 +239,10 @@ def demo_response(q):
                    sous_titre="Etablissement actif (fictif)",
                    champs=[{"label": "SIRET", "valeur": q.get("siret") or "-"}])
     else:
-        res = dict(demo, niveau="ok", titre="Titre " + q["valeur"][:40], sous_titre="Titre valide (fictif)",
-                   champs=[{"label": "Format", "valeur": q.get("format") or "-"}])
+        champs = [{"label": "Format", "valeur": q.get("format") or "-"}]
+        if q.get("nom"):
+            champs.insert(0, {"label": "Titulaire", "valeur": " ".join(x for x in (q["nom"], q.get("prenom")) if x)})
+        res = dict(demo, niveau="ok", titre="Titre " + q["valeur"][:40], sous_titre="Titre valide (fictif)", champs=champs)
     return {"resultats": [res], "messages": ["Resultats fictifs (mode test)."],
             "sources": [{"nom": "Demonstration", "etat": "ok"}]}
 

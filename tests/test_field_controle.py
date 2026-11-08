@@ -171,6 +171,15 @@ def test_normalisation():
     assert q["query"]["numero_document"] == "X4RTBPFW4" and q["query"]["nationalite"] == "FRA"
 
 
+def test_badge_avec_titulaire():
+    q, err = controle.normalize_query({"query": {"type": "code", "valeur": "9000914400001003", "nom": "LECLAIR", "prenom": "Florian"}})
+    assert err is None and q["query"]["nom"] == "LECLAIR" and q["query"]["prenom"] == "Florian"
+    _, err = controle.normalize_query({"query": {"type": "code", "valeur": "1", "nom": "<b>"}})
+    assert err == "nom_invalide"
+    d = controle.demo_response(q["query"])
+    assert d["resultats"][0]["champs"][0] == {"label": "Titulaire", "valeur": "LECLAIR Florian"}
+
+
 def test_luhn():
     assert controle.luhn_ok("73282932000074")      # SIRET valide (exemple INSEE)
     assert controle.luhn_ok("732829320")           # SIREN

@@ -7,8 +7,8 @@ android {
         applicationId "org.lemans.cockpit.field"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 5
-        versionName "1.4"
+        versionCode 6
+        versionName "1.5"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Tablettes ARM seulement : les modeles ML Kit des emulateurs x86 doubleraient l'APK
         ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
