@@ -163,14 +163,19 @@ public class FieldLocationService extends Service {
     }
 
     private static int rank(@Nullable String profile) {
+        if (profile == null) return -1;     // aucune exigence : ne doit jamais l'emporter
         if ("high".equals(profile)) return 2;
         if ("low".equals(profile)) return 0;
         return 1;
     }
 
+    /** Le JS connait patrouille et SOS, le serveur le statut : le plus exigeant gagne. */
+    static String effectiveProfile(@Nullable String server, String js) {
+        return rank(server) > rank(js) ? server : js;
+    }
+
     private void applyProfile() {
-        // Le JS connait patrouille et SOS, le serveur le statut : le plus exigeant gagne
-        String effective = rank(serverProfile) > rank(jsProfile) ? serverProfile : jsProfile;
+        String effective = effectiveProfile(serverProfile, jsProfile);
         if (updatesActive && effective.equals(appliedProfile)) return;
         LocationRequest request;
         if ("high".equals(effective)) {

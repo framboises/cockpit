@@ -4189,6 +4189,23 @@ def _resolve_targets(db, event, year, target):
     return list(db["field_devices"].find(query)), None
 
 
+def _push_admin_message(db, targets, title, body, priority):
+    """Notification d'un message du PC Org. Non bloquant : le message reste lu
+    par le poll de l'inbox si l'envoi echoue. Priorite haute : alarme sur Android."""
+    tag = "pc-message-" + _uuid.uuid4().hex[:12]
+    push_type = "mission" if priority != "normal" else None
+    for device in targets:
+        try:
+            send_push_to_device(
+                db, device["_id"],
+                title or "Message du PC Organisation",
+                (body or title)[:140],
+                url="/field", tag=tag, push_type=push_type,
+            )
+        except Exception as e:
+            logger.warning("field: notification de message en echec (%s) : %s", device.get("_id"), e)
+
+
 @field_bp.route("/field/admin/send", methods=["POST"])
 @admin_required
 def field_admin_send():
@@ -4262,6 +4279,7 @@ def field_admin_send():
         })
     if docs:
         db["field_messages"].insert_many(docs)
+        _push_admin_message(db, targets, title, body, priority)
 
     return jsonify({
         "ok": True,
@@ -4354,6 +4372,7 @@ def field_admin_send_with_photo():
         })
     if docs:
         db["field_messages"].insert_many(docs)
+        _push_admin_message(db, targets, title, body, priority)
 
     return jsonify({
         "ok": True,

@@ -24,6 +24,17 @@
 
         </activity>
 
+        <activity
+            android:name=".FieldAlertActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/AppTheme.NoActionBar"
+            android:turnScreenOn="true" />
+
         <service
             android:name=".FieldLocationService"
             android:exported="false"

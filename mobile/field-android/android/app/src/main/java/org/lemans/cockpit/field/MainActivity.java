@@ -15,6 +15,24 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     private static final String KEY_HOME_SHORTCUT = "home_shortcut_asked";
+    private static volatile boolean inForeground;
+
+    static boolean isInForeground() {
+        return inForeground;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        inForeground = true;
+        FieldNotifications.silenceAlarms(this);
+    }
+
+    @Override
+    public void onPause() {
+        inForeground = false;
+        super.onPause();
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

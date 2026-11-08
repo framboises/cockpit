@@ -1330,7 +1330,7 @@ def propose_next(db, run_id, now=None):
         _field().send_push_to_device(
             db, dev["_id"], title="Patrouille proposee : " + (sc.get("name") or ""),
             body="%d points, reponse attendue sous %d s" % (len(sc.get("points") or []), timeout),
-            url="/field", tag="patrol-" + run_id)
+            url="/field", tag="patrol-" + run_id, push_type="mission")
     except Exception:
         pass
     return "proposed", skipped

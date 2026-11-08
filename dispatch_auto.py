@@ -528,6 +528,7 @@ def propose_next(db, fiche_id, now=None):
             body=((fiche.get("text") or "Nouvelle intervention")[:100] + _describe(chosen)),
             url="/field",
             tag="proposal-" + str(fiche_id),
+            push_type="mission",
         )
     except Exception:
         pass
@@ -721,7 +722,7 @@ def manual_assign(db, fiche_id, device, by_name, now=None):
         F.send_push_to_device(db, device["_id"],
                               title="Dispatch : " + (fiche.get("category") or "").replace("PCO.", ""),
                               body=(fiche.get("text") or "Nouvelle intervention")[:120],
-                              url="/field", tag="dispatch-" + str(fiche_id))
+                              url="/field", tag="dispatch-" + str(fiche_id), push_type="mission")
     except Exception:
         pass
     return True, ("ajoutee_aux_missions" if busy else "ok")

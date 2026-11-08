@@ -112,3 +112,42 @@ def test_position_native_purge_les_suivis_expires(env):
     rep = c.post("/field/position", json={"lat": 47.9, "lng": 0.2, "native": True}).get_json()
     assert rep["tracking_mode"] == "normal"
     assert db["field_devices"].find_one({"_id": "dev-1"})["tracking_watchers"] == {}
+
+
+def _capture_push(monkeypatch):
+    envois = []
+
+    def fake(db, device_id, title, body, url=None, tag=None, push_type=None):
+        envois.append({"id": device_id, "title": title, "body": body, "tag": tag, "type": push_type})
+        return 1
+
+    monkeypatch.setattr(field, "send_push_to_device", fake)
+    return envois
+
+
+def test_message_normal_notifie_sans_alarme(monkeypatch):
+    envois = _capture_push(monkeypatch)
+    field._push_admin_message(None, [{"_id": "a"}, {"_id": "b"}], "", "Bonjour", "normal")
+    assert [e["id"] for e in envois] == ["a", "b"]
+    assert envois[0]["title"] == "Message du PC Organisation" and envois[0]["body"] == "Bonjour"
+    assert envois[0]["type"] is None and envois[0]["tag"] == envois[1]["tag"]
+
+
+def test_message_prioritaire_declenche_l_alarme(monkeypatch):
+    envois = _capture_push(monkeypatch)
+    field._push_admin_message(None, [{"_id": "a"}], "Urgent", "", "high")
+    assert envois[0]["type"] == "mission" and envois[0]["body"] == "Urgent"
+
+
+def test_un_envoi_en_echec_ne_bloque_pas_les_suivants(monkeypatch):
+    vus = []
+
+    def fake(db, device_id, title, body, url=None, tag=None, push_type=None):
+        vus.append(device_id)
+        if device_id == "a":
+            raise RuntimeError("panne")
+        return 1
+
+    monkeypatch.setattr(field, "send_push_to_device", fake)
+    field._push_admin_message(None, [{"_id": "a"}, {"_id": "b"}], "T", "B", "normal")
+    assert vus == ["a", "b"]
