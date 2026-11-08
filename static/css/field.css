@@ -2622,68 +2622,40 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 .field-session-lost-actions .btn-primary:active { transform: scale(0.98); }
 
 /* =====================================================================
-   SOS Confirm Dialog (tablette emettrice)
+   SOS : appui maintenu 3 s (bindSosHold), remplissage de bas en haut
    ===================================================================== */
-.sos-confirm-overlay {
-  position: fixed; inset: 0;
-  background: rgba(127, 29, 29, 0.92);
-  z-index: 99999;
-  display: flex; align-items: center; justify-content: center;
-  padding: 24px;
-  animation: sos-pulse-bg 1s ease-in-out infinite alternate;
+.field-actions .action-sos {
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  --sos-p: 0;
 }
+.field-actions .action-sos::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: calc(var(--sos-p) * 100%);
+  background: rgba(254, 202, 202, 0.55);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.field-actions .action-sos > * { position: relative; z-index: 1; }
+.field-actions .action-sos.sos-holding {
+  transform: scale(0.96);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.6), 0 0 24px rgba(239, 68, 68, 0.8);
+}
+.field-actions .action-sos.sos-holding .label {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes sos-pulse-bg {
   from { background: rgba(127, 29, 29, 0.92); }
   to   { background: rgba(153, 27, 27, 0.96); }
-}
-.sos-confirm-box {
-  background: #1e293b; border: 3px solid #ef4444;
-  border-radius: 20px; padding: 32px 24px;
-  text-align: center; max-width: 380px; width: 100%;
-}
-.sos-confirm-icon {
-  font-size: 72px; color: #ef4444;
-  display: block; margin-bottom: 12px;
-  animation: sos-icon-pulse 0.8s ease-in-out infinite alternate;
 }
 @keyframes sos-icon-pulse {
   from { transform: scale(1); }
   to   { transform: scale(1.15); }
 }
-.sos-confirm-msg {
-  font-size: 24px; font-weight: 800; color: #fecaca;
-  margin-bottom: 8px;
-}
-.sos-confirm-sub {
-  font-size: 14px; color: #94a3b8;
-  margin-bottom: 28px; line-height: 1.4;
-}
-.sos-confirm-btn {
-  display: block; width: 100%;
-  padding: 20px; margin-bottom: 12px;
-  font-size: 22px; font-weight: 900;
-  color: #fff; background: #dc2626;
-  border: 3px solid #fca5a5;
-  border-radius: 16px; cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  min-height: 70px;
-  animation: sos-btn-glow 1.2s ease-in-out infinite alternate;
-}
-@keyframes sos-btn-glow {
-  from { box-shadow: 0 0 12px rgba(220, 38, 38, 0.4); }
-  to   { box-shadow: 0 0 30px rgba(220, 38, 38, 0.8); }
-}
-.sos-confirm-btn:active { transform: scale(0.96); background: #b91c1c; }
-.sos-cancel-btn {
-  display: block; width: 100%;
-  padding: 14px;
-  font-size: 16px; font-weight: 600;
-  color: #94a3b8; background: transparent;
-  border: 1px solid #334155;
-  border-radius: 12px; cursor: pointer;
-}
-.sos-cancel-btn:active { background: #1e293b; }
 
 /* =====================================================================
    SOS Alert received on OTHER tablets
@@ -3115,7 +3087,7 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 
   /* Overlays plein ecran : encoche + barre d'accueil, et contenu
      scrollable plutot que coupe (en paysage surtout). */
-  .sos-confirm-overlay, .sos-alert-overlay, .dispatch-alert-overlay,
+  .sos-alert-overlay, .dispatch-alert-overlay,
   .field-session-lost, .capture-chooser, .itinerary-menu-overlay,
   .field-lightbox {
     padding-top: max(12px, env(safe-area-inset-top));
@@ -3123,7 +3095,7 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
   }
-  .sos-confirm-box, .sos-alert-box, .field-session-lost-box,
+  .sos-alert-box, .field-session-lost-box,
   .capture-chooser-box, .itinerary-menu {
     max-height: 100%;
     overflow-y: auto;
