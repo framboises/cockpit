@@ -2741,6 +2741,17 @@
       add.appendChild(s);
       add.addEventListener("click", function () { var inp = $("declare-photo-input"); if (inp) inp.click(); });
       wrap.appendChild(add);
+      // Sans capture : galerie de la tablette (photo prise avant le constat)
+      var gal = document.createElement("button");
+      gal.type = "button";
+      gal.className = "declare-photo-add declare-photo-gallery";
+      gal.setAttribute("aria-label", "Choisir dans la galerie");
+      gal.appendChild(_mkIcon("photo_library"));
+      var gs = document.createElement("span");
+      gs.textContent = "Galerie";
+      gal.appendChild(gs);
+      gal.addEventListener("click", function () { var inp = $("declare-gallery-input"); if (inp) inp.click(); });
+      wrap.appendChild(gal);
     }
   }
 
@@ -9780,6 +9791,8 @@
     if (declSubmit) declSubmit.addEventListener("click", submitDeclaration);
     var declInput = $("declare-photo-input");
     if (declInput) declInput.addEventListener("change", declOnFiles);
+    var declGallery = $("declare-gallery-input");
+    if (declGallery) declGallery.addEventListener("change", declOnFiles);
     var declUrg = $("declare-urgency");
     if (declUrg) declUrg.querySelectorAll(".urgency-btn").forEach(function (b) {
       b.addEventListener("click", function () {
