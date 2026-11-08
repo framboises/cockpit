@@ -3338,6 +3338,7 @@ def _pub_device_admin(d):
         "last_ip": d.get("last_ip"),
         "last_ua": d.get("last_ua"),
         "notes": d.get("notes", ""),
+        "native_app_version": d.get("native_app_version"),
     })
     return base
 

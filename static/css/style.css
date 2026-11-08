@@ -16580,3 +16580,95 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-close-err { color: #b91c1c; font-size: 13px; }
 .pcorg-close-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .pcorg-close-ok { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ===== Balises GPS > modale Groupe de balises (anoloc_admin.js) =====
+   Trois sources bien distinctes : Teltonika (sarcelle), Anoloc (orange),
+   tablettes Field (indigo). Interrupteurs .toggle-switch de la charte. */
+.bg-modal { --tlt: #0d9488; --tlt-l: rgba(13, 148, 136, .10); --ano: #ea580c; --ano-l: rgba(234, 88, 12, .10); --fld: #4f46e5; --fld-l: rgba(79, 70, 229, .10); }
+.bg-modal .bg-dialog { width: min(860px, calc(100vw - 32px)); min-width: 0; max-width: none; }
+.bg-header { gap: 12px; }
+.bg-avatar { --grp: #6366f1; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0;
+  background: color-mix(in srgb, var(--grp) 16%, transparent); color: var(--grp); border: 1px solid color-mix(in srgb, var(--grp) 35%, transparent); }
+.bg-avatar .material-symbols-outlined { font-size: 24px; }
+.bg-header-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bg-header-text h3 { margin: 0; }
+.bg-header-sub { font-size: .8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bg-active { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-size: .85rem; font-weight: 600; color: var(--text); cursor: pointer; }
+.bg-body { background: var(--bg); }
+.bg-body form { gap: 14px; }
+.bg-section { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px 16px; }
+.bg-section-title { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.bg-section-title .material-symbols-outlined { font-size: 18px; color: var(--brand); }
+.bg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+.bg-span-2 { grid-column: span 2; }
+.bg-help { font-weight: 400; font-size: .76rem; color: var(--muted); }
+.bg-color { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); padding: 4px 10px 4px 4px; }
+.bg-color input[type="color"] { width: 34px; height: 28px; padding: 0; border: none; background: none; cursor: pointer; }
+.bg-color-hex { font-family: ui-monospace, monospace; font-size: .82rem; font-weight: 500; color: var(--muted); }
+
+.bg-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.bg-tab { --c: var(--brand); --cl: var(--brand-light); display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 8px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--card);
+  font-family: inherit; font-size: .88rem; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.bg-tab .material-symbols-outlined { font-size: 20px; color: var(--c); }
+.bg-tab:hover { border-color: var(--c); }
+.bg-tab.is-active { background: var(--cl); border-color: var(--c); color: var(--text); box-shadow: inset 0 -3px 0 var(--c); }
+.bg-tab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.bg-count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--c); color: #fff; font-size: .74rem; font-weight: 700; text-align: center; }
+.bg-count.is-zero { background: var(--line); color: var(--muted); }
+.bg-src-tlt { --c: var(--tlt); --cl: var(--tlt-l); }
+.bg-src-anoloc { --c: var(--ano); --cl: var(--ano-l); }
+.bg-src-field { --c: var(--fld); --cl: var(--fld-l); }
+
+.bg-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+.bg-search { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.bg-search .material-symbols-outlined { font-size: 18px; color: var(--muted); }
+.crud-modal-body .bg-search input { flex: 1; border: none; background: transparent; padding: 8px 0; box-shadow: none; }
+.bg-only { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 500 !important; font-size: .82rem !important; color: var(--muted) !important; cursor: pointer; }
+.bg-only[hidden] { display: none !important; }
+
+.bg-panel { border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: var(--radius-md); background: var(--card); }
+.bg-panel[hidden] { display: none; }
+.bg-panel-help { margin: 0; padding: 8px 12px; font-size: .76rem; color: var(--muted); background: var(--cl); border-bottom: 1px solid var(--line); }
+.bg-list { max-height: 260px; overflow-y: auto; padding: 4px; }
+.bg-empty { margin: 10px; font-size: .8rem; color: var(--muted); }
+.crud-modal-body label.bg-member, .bg-member { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 500; }
+.bg-member[hidden] { display: none; }
+.bg-member:hover { background: var(--bg); }
+.bg-member input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
+.bg-check { width: 20px; height: 20px; flex-shrink: 0; border-radius: 6px; border: 2px solid var(--line); background: var(--card); display: grid; place-items: center; transition: background .12s, border-color .12s; }
+.bg-check::after { content: ""; width: 10px; height: 6px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg) translate(1px, -1px); opacity: 0; }
+.bg-member input:checked + .bg-check { background: var(--c); border-color: var(--c); }
+.bg-member input:checked + .bg-check::after { opacity: 1; }
+.bg-member input:focus-visible + .bg-check { box-shadow: var(--focus-ring); }
+.bg-member:has(input:checked) { background: var(--cl); }
+.bg-member-ro { cursor: default; }
+.bg-member-icon { color: var(--fld); font-size: 20px; }
+.bg-member-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bg-member-name { font-size: .88rem; color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bg-member-sub { font-size: .74rem; color: var(--muted); font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bg-tag { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; font-size: .7rem; font-weight: 600; background: var(--bg); color: var(--muted); border: 1px solid var(--line); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bg-tag-warn { background: var(--warning-light); color: #92400e; border-color: rgba(245, 158, 11, .35); }
+.bg-tag-info { background: var(--brand-light); color: var(--brand-strong); border-color: rgba(37, 99, 235, .25); }
+
+.bg-options { display: flex; flex-direction: column; gap: 8px; }
+.crud-modal-body label.bg-option, .bg-option { display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); cursor: pointer; transition: border-color .15s, background .15s; }
+.bg-option:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); }
+.bg-option:has(input:checked) { border-color: var(--brand); background: var(--brand-light); }
+.bg-option-icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; }
+.bg-option-icon .material-symbols-outlined { font-size: 22px; }
+.bg-oi-declarant { background: var(--warning-light); color: #b45309; }
+.bg-oi-piste { background: var(--brand-light); color: var(--brand); }
+.bg-oi-controle { background: var(--fld-l); color: var(--fld); }
+.bg-option-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.bg-option-text strong { font-size: .9rem; color: var(--text); }
+.bg-option-text small { font-size: .78rem; font-weight: 400; color: var(--muted); line-height: 1.35; }
+.bg-summary { margin-right: auto; font-size: .82rem; color: var(--muted); }
+
+@media (max-width: 640px) {
+  .bg-grid { grid-template-columns: minmax(0, 1fr); }
+  .bg-span-2 { grid-column: auto; }
+  .bg-tabs { grid-template-columns: minmax(0, 1fr); }
+  .bg-header-sub { display: none; }
+}
+.bg-dialog .crud-modal-footer { justify-content: flex-end; gap: 8px; }

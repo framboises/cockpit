@@ -1132,98 +1132,110 @@
 </div>
 
 <!-- CRUD Modal — Anoloc beacon group -->
-<div id="anoloc-group-modal" class="crud-modal" hidden>
-  <div class="crud-modal-dialog">
-    <div class="crud-modal-header">
-      <h3 id="anoloc-group-modal-title">Nouveau groupe de balises</h3>
-      <button class="crud-modal-close" data-close>&times;</button>
+<div id="anoloc-group-modal" class="crud-modal bg-modal" hidden>
+  <div class="crud-modal-dialog bg-dialog">
+    <div class="crud-modal-header bg-header">
+      <span class="bg-avatar" id="bg-avatar"><span class="material-symbols-outlined" id="anoloc-icon-preview">location_on</span></span>
+      <div class="bg-header-text">
+        <h3 id="anoloc-group-modal-title">Nouveau groupe de balises</h3>
+        <span class="bg-header-sub" id="bg-header-sub">Balises GPS et tablettes Field suivies ensemble</span>
+      </div>
+      <label class="bg-active" title="Un groupe inactif n'apparait plus sur les cartes">
+        <span>Actif</span>
+        <span class="toggle-switch"><input type="checkbox" name="enabled" form="anoloc-group-form" checked /><span class="toggle-slider"></span></span>
+      </label>
+      <button class="crud-modal-close" data-close aria-label="Fermer">&times;</button>
     </div>
-    <div class="crud-modal-body">
+    <div class="crud-modal-body bg-body">
       <form id="anoloc-group-form">
         <input type="hidden" name="id" />
-        <div class="form-row">
-          <label>Label
-            <input name="label" required placeholder="ex. Securite" class="form-input" />
-          </label>
-        </div>
-        <div class="form-row" style="display:flex; gap:12px; align-items:flex-end;">
-          <label style="flex:1;">Icone Material
-            <input name="icon" placeholder="ex. security" class="form-input" value="location_on" />
-          </label>
-          <span class="material-symbols-outlined" id="anoloc-icon-preview" style="font-size:28px; color:var(--brand);">location_on</span>
-        </div>
-        <div class="form-row">
-          <label>Couleur
-            <input name="color" type="color" value="#6366f1" class="form-input" style="width:60px; height:36px; padding:2px; cursor:pointer;" />
-          </label>
-        </div>
-        <div class="form-row">
-          <label>Balises Teltonika</label>
-          <p style="font-size:11px; color:var(--muted); margin:2px 0 6px;">
-            Balises du parc Teltonika (section Source Teltonika).
-          </p>
-          <div id="tlt-devices-checkboxes" style="max-height:160px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px;"></div>
-        </div>
-        <div class="form-row">
-          <label>Balises Anoloc</label>
-          <p style="font-size:11px; color:var(--muted); margin:2px 0 6px;">
-            Liste lue chez Anoloc ("Charger devices"). Une balise deja dans le groupe reste cochee meme si Anoloc ne repond pas.
-          </p>
-          <div id="anoloc-devices-checkboxes" style="max-height:200px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px;"></div>
-        </div>
-        <div class="form-row">
-          <label>Categorie PCO associee
-            <select name="pco_category" class="form-input">
-              <option value="">-- Aucune --</option>
-              <option value="PCO.Secours">Secours</option>
-              <option value="PCO.Securite">Securite</option>
-              <option value="PCO.Technique">Technique</option>
-              <option value="PCO.Flux">Flux</option>
-              <option value="PCO.Fourriere">Fourriere</option>
-              <option value="PCO.Information">Information</option>
-              <option value="PCO.MainCourante">Main Courante</option>
-            </select>
-          </label>
-          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
-            Les vehicules de ce groupe seront proposes lors de la creation d'interventions de cette categorie.
-          </p>
-        </div>
-        <div class="form-row">
-          <label style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="declarant" />
-            Mode declarant (tablettes Field)
-          </label>
-          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
-            Les tablettes de ce groupe declarent des fiches (photos, description, position) et restent suivies sur la carte, mais ne sont jamais engagees : ni proposition, ni missions, ni SOS des autres. Le PC Org peut toujours leur envoyer une destination.
-          </p>
-        </div>
-        <div class="form-row">
-          <label style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="route_piste" />
-            Acces piste dans les itineraires (tablettes Field)
-          </label>
-          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
-            Les tablettes de ce groupe peuvent calculer un itineraire qui emprunte la piste (dans le sens de course, ou dans les deux sens en intervention prioritaire). Sans cette case, l'option n'est pas proposee.
-          </p>
-        </div>
-        <div class="form-row">
-          <label style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="controle" />
-            Controle de documents (tablettes Field)
-          </label>
-          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
-            Les tablettes de ce groupe ont le bouton Controle : lecture d'une piece d'identite, d'un permis, d'un badge ou d'une carte BTP, ou recherche par nom ou entreprise, puis consultation des fichiers. Chaque consultation est tracee.
-          </p>
-        </div>
-        <div class="form-row">
-          <label style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="enabled" checked />
-            Actif
-          </label>
-        </div>
+
+        <section class="bg-section">
+          <h4 class="bg-section-title"><span class="material-symbols-outlined">badge</span>Identite</h4>
+          <div class="bg-grid">
+            <label class="bg-field bg-span-2">Nom du groupe
+              <input name="label" required placeholder="ex. Securite" class="form-input" />
+            </label>
+            <label class="bg-field">Icone Material
+              <input name="icon" placeholder="ex. security" class="form-input" value="location_on" />
+            </label>
+            <label class="bg-field">Couleur
+              <span class="bg-color"><input name="color" type="color" value="#6366f1" /><span class="bg-color-hex" id="bg-color-hex">#6366f1</span></span>
+            </label>
+            <label class="bg-field bg-span-2">Categorie PCO associee
+              <select name="pco_category" class="form-input">
+                <option value="">-- Aucune --</option>
+                <option value="PCO.Secours">Secours</option>
+                <option value="PCO.Securite">Securite</option>
+                <option value="PCO.Technique">Technique</option>
+                <option value="PCO.Flux">Flux</option>
+                <option value="PCO.Fourriere">Fourriere</option>
+                <option value="PCO.Information">Information</option>
+                <option value="PCO.MainCourante">Main Courante</option>
+              </select>
+              <small class="bg-help">Les membres du groupe sont proposes a la creation d'une intervention de cette categorie.</small>
+            </label>
+          </div>
+        </section>
+
+        <section class="bg-section">
+          <h4 class="bg-section-title"><span class="material-symbols-outlined">hub</span>Membres</h4>
+          <div class="bg-tabs" role="tablist">
+            <button type="button" class="bg-tab bg-src-tlt is-active" data-src="tlt" role="tab">
+              <span class="material-symbols-outlined">satellite_alt</span>Teltonika<span class="bg-count" id="bg-count-tlt">0</span>
+            </button>
+            <button type="button" class="bg-tab bg-src-anoloc" data-src="anoloc" role="tab">
+              <span class="material-symbols-outlined">gps_fixed</span>Anoloc<span class="bg-count" id="bg-count-anoloc">0</span>
+            </button>
+            <button type="button" class="bg-tab bg-src-field" data-src="field" role="tab">
+              <span class="material-symbols-outlined">tablet_android</span>Tablettes Field<span class="bg-count" id="bg-count-field">0</span>
+            </button>
+          </div>
+          <div class="bg-toolbar">
+            <span class="bg-search"><span class="material-symbols-outlined">search</span><input type="search" id="bg-search" placeholder="Filtrer par nom ou IMEI" autocomplete="off" /></span>
+            <label class="bg-only"><span class="toggle-switch"><input type="checkbox" id="bg-only-selected" /><span class="toggle-slider"></span></span>Membres seulement</label>
+          </div>
+          <div class="bg-panel bg-src-tlt" data-panel="tlt">
+            <p class="bg-panel-help">Balises du parc Teltonika (section Source Teltonika).</p>
+            <div id="tlt-devices-checkboxes" class="bg-list"></div>
+          </div>
+          <div class="bg-panel bg-src-anoloc" data-panel="anoloc" hidden>
+            <p class="bg-panel-help">Liste lue chez Anoloc (Charger devices). Une balise deja membre reste cochee meme si Anoloc ne repond pas.</p>
+            <div id="anoloc-devices-checkboxes" class="bg-list"></div>
+          </div>
+          <div class="bg-panel bg-src-field" data-panel="field" hidden>
+            <p class="bg-panel-help">Une tablette rejoint le groupe a son appairage (page Field). Liste en lecture seule.</p>
+            <div id="field-devices-list" class="bg-list"></div>
+          </div>
+        </section>
+
+        <section class="bg-section">
+          <h4 class="bg-section-title"><span class="material-symbols-outlined">tablet_android</span>Fonctions des tablettes Field du groupe</h4>
+          <div class="bg-options">
+            <label class="bg-option">
+              <span class="bg-option-icon bg-oi-declarant"><span class="material-symbols-outlined">add_a_photo</span></span>
+              <span class="bg-option-text"><strong>Mode declarant</strong>
+                <small>Elles deposent des constats (photos, description, position) et restent suivies, mais ne sont jamais engagees : ni proposition, ni missions, ni SOS des autres.</small></span>
+              <span class="toggle-switch"><input type="checkbox" name="declarant" /><span class="toggle-slider"></span></span>
+            </label>
+            <label class="bg-option">
+              <span class="bg-option-icon bg-oi-piste"><span class="material-symbols-outlined">route</span></span>
+              <span class="bg-option-text"><strong>Acces piste dans les itineraires</strong>
+                <small>Itineraires par la piste, dans le sens de course, ou dans les deux sens en intervention prioritaire.</small></span>
+              <span class="toggle-switch"><input type="checkbox" name="route_piste" /><span class="toggle-slider"></span></span>
+            </label>
+            <label class="bg-option">
+              <span class="bg-option-icon bg-oi-controle"><span class="material-symbols-outlined">person_search</span></span>
+              <span class="bg-option-text"><strong>Controle de documents</strong>
+                <small>Bouton Controle : lecture d'une piece, d'un permis, d'un badge ou d'une carte BTP, recherche par nom ou entreprise. Chaque consultation est tracee.</small></span>
+              <span class="toggle-switch"><input type="checkbox" name="controle" /><span class="toggle-slider"></span></span>
+            </label>
+          </div>
+        </section>
       </form>
     </div>
     <div class="crud-modal-footer">
+      <span class="bg-summary" id="bg-summary"></span>
       <button class="btn btn-secondary" data-close>Annuler</button>
       <button id="anoloc-group-modal-save" class="btn btn-primary">Enregistrer</button>
     </div>

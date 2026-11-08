@@ -63,14 +63,22 @@
     var saveModalBtn = $("#anoloc-group-modal-save");
     if (saveModalBtn) saveModalBtn.addEventListener("click", saveBeaconGroup);
 
-    // Icon preview
-    var iconInput = $('input[name="icon"]', $("#anoloc-group-form"));
-    if (iconInput) {
-      iconInput.addEventListener("input", function () {
-        var preview = $("#anoloc-icon-preview");
-        if (preview) preview.textContent = iconInput.value || "location_on";
+    // Apercu de l'icone et de la couleur dans l'en-tete
+    var groupForm = $("#anoloc-group-form");
+    if (groupForm) {
+      ["icon", "color", "label"].forEach(function (n) {
+        var el = groupForm.elements[n];
+        if (el) el.addEventListener("input", refreshGroupHeader);
       });
+      groupForm.addEventListener("change", refreshGroupCounts);
     }
+    $$(".bg-tab").forEach(function (t) {
+      t.addEventListener("click", function () { showGroupTab(t.dataset.src); });
+    });
+    var bgSearch = $("#bg-search");
+    if (bgSearch) bgSearch.addEventListener("input", filterGroupMembers);
+    var bgOnly = $("#bg-only-selected");
+    if (bgOnly) bgOnly.addEventListener("change", filterGroupMembers);
 
     // Interrupteur general des balises GPS (toutes sources) : enregistre tout de suite
     var enabledToggle = $("#anoloc-enabled");
@@ -369,7 +377,7 @@
       $('input[name="label"]', form).value = grp.label || "";
       $('input[name="icon"]', form).value = grp.icon || "location_on";
       $('input[name="color"]', form).value = grp.color || "#6366f1";
-      $('input[name="enabled"]', form).checked = grp.enabled !== false;
+      form.elements.enabled.checked = grp.enabled !== false;
       var pcoCatSel = $('select[name="pco_category"]', form);
       if (pcoCatSel) pcoCatSel.value = grp.pco_category || "";
       $('input[name="declarant"]', form).checked = !!grp.declarant;
@@ -382,14 +390,71 @@
       if (pcoCatSel) pcoCatSel.value = "";
     }
 
-    // Update icon preview
-    var preview = $("#anoloc-icon-preview");
-    if (preview) preview.textContent = (grp && grp.icon) || "location_on";
+    var search = $("#bg-search");
+    if (search) search.value = "";
+    var only = $("#bg-only-selected");
+    if (only) only.checked = false;
+    refreshGroupHeader();
+    showGroupTab("tlt");
 
     // Populate device checkboxes
     populateDeviceCheckboxes(grp);
 
     modal.hidden = false;
+  }
+
+  function refreshGroupHeader() {
+    var form = $("#anoloc-group-form");
+    if (!form) return;
+    var icon = form.elements.icon.value.trim() || "location_on";
+    var color = form.elements.color.value || "#6366f1";
+    var preview = $("#anoloc-icon-preview");
+    if (preview) preview.textContent = icon;
+    var avatar = $("#bg-avatar");
+    if (avatar) avatar.style.setProperty("--grp", color);
+    var hex = $("#bg-color-hex");
+    if (hex) hex.textContent = color;
+    var sub = $("#bg-header-sub");
+    if (sub) sub.textContent = form.elements.label.value.trim() || "Balises GPS et tablettes Field suivies ensemble";
+  }
+
+  function showGroupTab(src) {
+    $$(".bg-tab").forEach(function (t) {
+      var on = t.dataset.src === src;
+      t.classList.toggle("is-active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    $$(".bg-panel").forEach(function (p) { p.hidden = p.dataset.panel !== src; });
+    var only = $("#bg-only-selected");
+    if (only) only.closest(".bg-only").hidden = src === "field";
+    filterGroupMembers();
+  }
+
+  function filterGroupMembers() {
+    var q = (($("#bg-search") || {}).value || "").trim().toLowerCase();
+    var only = !!(($("#bg-only-selected") || {}).checked);
+    $$(".bg-list .bg-member").forEach(function (row) {
+      var cb = row.querySelector("input[type=checkbox]");
+      var match = !q || (row.dataset.search || "").indexOf(q) !== -1;
+      row.hidden = !match || (only && cb && !cb.checked);
+    });
+  }
+
+  function refreshGroupCounts() {
+    var tlt = $$("#tlt-devices-checkboxes input:checked").length;
+    var ano = $$("#anoloc-devices-checkboxes input:checked").length;
+    var fld = $$("#field-devices-list .bg-member").length;
+    var set = function (id, n) { var e = $(id); if (e) { e.textContent = n; e.classList.toggle("is-zero", !n); } };
+    set("#bg-count-tlt", tlt);
+    set("#bg-count-anoloc", ano);
+    set("#bg-count-field", fld);
+    var parts = [];
+    if (tlt) parts.push(tlt + " Teltonika");
+    if (ano) parts.push(ano + " Anoloc");
+    if (fld) parts.push(fld + " tablette" + (fld > 1 ? "s" : ""));
+    var sum = $("#bg-summary");
+    if (sum) sum.textContent = parts.length ? parts.join(" · ") : "Aucun membre";
+    filterGroupMembers();
   }
 
   function closeGroupModal() {
@@ -401,33 +466,95 @@
   function isTeltonikaId(id) { return String(id || "").indexOf("tlt:") === 0; }
   function isFieldId(id) { return String(id || "").indexOf("field:") === 0; }
 
-  function checkboxRow(prefix, value, label, sub, checked) {
-    var row = document.createElement("div");
-    row.className = "anoloc-device-checkbox-row";
+  // Une ligne de membre : case, nom, identifiant, etiquettes (deja dans un
+  // autre groupe, non lue chez Anoloc...). Toute la ligne est cliquable.
+  function checkboxRow(prefix, value, label, sub, checked, tags) {
+    var row = document.createElement("label");
+    row.className = "bg-member";
+    row.dataset.search = (label + " " + (sub || "") + " " + value).toLowerCase();
     var cb = document.createElement("input");
     cb.type = "checkbox";
     cb.id = prefix + value;
     cb.value = value;
     cb.checked = checked;
     row.appendChild(cb);
-    var lbl = document.createElement("label");
-    lbl.setAttribute("for", prefix + value);
-    lbl.textContent = label;
-    row.appendChild(lbl);
+    var box = document.createElement("span");
+    box.className = "bg-check";
+    row.appendChild(box);
+    var txt = document.createElement("span");
+    txt.className = "bg-member-text";
+    var n = document.createElement("span");
+    n.className = "bg-member-name";
+    n.textContent = label;
+    txt.appendChild(n);
     if (sub) {
       var s = document.createElement("span");
-      s.className = "anoloc-device-imei";
+      s.className = "bg-member-sub";
       s.textContent = sub;
-      row.appendChild(s);
+      txt.appendChild(s);
     }
+    row.appendChild(txt);
+    (tags || []).forEach(function (t) {
+      var tag = document.createElement("span");
+      tag.className = "bg-tag" + (t.kind ? " bg-tag-" + t.kind : "");
+      tag.textContent = t.text;
+      if (t.title) tag.title = t.title;
+      row.appendChild(tag);
+    });
     return row;
   }
 
   function emptyNote(container, text) {
     var msg = document.createElement("p");
-    msg.style.cssText = "font-size:11px; color:var(--muted); margin:4px;";
+    msg.className = "bg-empty";
     msg.textContent = text;
     container.appendChild(msg);
+  }
+
+  // Tablettes Field du groupe (lecture seule : le groupe se choisit a l'appairage)
+  function populateFieldDevices(grp) {
+    var box = $("#field-devices-list");
+    if (!box) return;
+    box.textContent = "";
+    if (!grp || !grp.id) { emptyNote(box, "Enregistrez le groupe, puis appairez les tablettes en le choisissant."); refreshGroupCounts(); return; }
+    emptyNote(box, "Chargement...");
+    apiGet("/field/admin/devices?include_revoked=false&beacon_group_id=" + encodeURIComponent(grp.id)).then(function (data) {
+      box.textContent = "";
+      var devs = (data && data.devices) || [];
+      if (!devs.length) emptyNote(box, "Aucune tablette appairee dans ce groupe.");
+      devs.forEach(function (d) {
+        var row = document.createElement("div");
+        row.className = "bg-member bg-member-ro";
+        row.dataset.search = ((d.name || "") + " " + (d.event || "")).toLowerCase();
+        var ic = document.createElement("span");
+        ic.className = "material-symbols-outlined bg-member-icon";
+        ic.textContent = "tablet_android";
+        row.appendChild(ic);
+        var txt = document.createElement("span");
+        txt.className = "bg-member-text";
+        var n = document.createElement("span");
+        n.className = "bg-member-name";
+        n.textContent = d.name || d.id;
+        txt.appendChild(n);
+        var s = document.createElement("span");
+        s.className = "bg-member-sub";
+        s.textContent = [d.event, d.year].filter(Boolean).join(" ") + (d.native_app_version ? " · application " + d.native_app_version : " · PWA");
+        txt.appendChild(s);
+        row.appendChild(txt);
+        if (d.test_mode) {
+          var t = document.createElement("span");
+          t.className = "bg-tag bg-tag-warn";
+          t.textContent = "Mode test";
+          row.appendChild(t);
+        }
+        box.appendChild(row);
+      });
+      refreshGroupCounts();
+    }).catch(function () {
+      box.textContent = "";
+      emptyNote(box, "Liste des tablettes indisponible.");
+      refreshGroupCounts();
+    });
   }
 
   function populateDeviceCheckboxes(grp) {
@@ -445,13 +572,15 @@
         if (!devs.length) { emptyNote(tltBox, "Aucune balise Teltonika dans le parc."); return; }
         devs.forEach(function (d) {
           var others = (d.groups || []).filter(function (g) { return !grp || g !== grp.label; });
-          var sub = d.imei + (others.length ? " - deja dans " + others.join(", ") : "");
-          tltBox.appendChild(checkboxRow("tlt-dev-", d.id, d.label || d.imei, sub,
-                                         selectedIds.indexOf(d.id) !== -1));
+          var tags = others.length ? [{ text: "Aussi dans " + others.join(", "), kind: "info" }] : [];
+          tltBox.appendChild(checkboxRow("tlt-dev-", d.id, d.label || d.imei, "IMEI " + d.imei,
+                                         selectedIds.indexOf(d.id) !== -1, tags));
         });
+        refreshGroupCounts();
       }).catch(function () {
         tltBox.textContent = "";
         emptyNote(tltBox, "Parc Teltonika indisponible.");
+        refreshGroupCounts();
       });
     }
 
@@ -464,17 +593,19 @@
     var shown = {};
     remoteDevices.forEach(function (dev) {
       shown[dev.id] = true;
-      container.appendChild(checkboxRow("anoloc-dev-", dev.id, dev.label || dev.id, dev.imei || "",
+      container.appendChild(checkboxRow("anoloc-dev-", dev.id, dev.label || dev.id, dev.imei ? "IMEI " + dev.imei : "",
                                         selectedIds.indexOf(dev.id) !== -1));
     });
     selectedIds.forEach(function (id) {
       if (shown[id] || isTeltonikaId(id) || isFieldId(id)) return;
-      container.appendChild(checkboxRow("anoloc-dev-", id, savedLabels[id] || id,
-                                        "non lu chez Anoloc", true));
+      container.appendChild(checkboxRow("anoloc-dev-", id, savedLabels[id] || id, id, true,
+                                        [{ text: "Non lue chez Anoloc", kind: "warn", title: "Gardee dans le groupe tant que vous ne la decochez pas" }]));
     });
     if (!container.children.length) {
       emptyNote(container, "Aucune balise Anoloc chargee. Cliquez 'Charger devices' dans Source Anoloc.");
     }
+    populateFieldDevices(grp);
+    refreshGroupCounts();
   }
 
   function saveBeaconGroup() {
@@ -486,7 +617,7 @@
 
     var icon = $('input[name="icon"]', form).value.trim() || "location_on";
     var color = $('input[name="color"]', form).value || "#6366f1";
-    var enabled = $('input[name="enabled"]', form).checked;
+    var enabled = form.elements.enabled.checked;
 
     // Collect selected device IDs + build label map (Anoloc et Teltonika ;
     // les libelles Teltonika sont recalcules par le serveur depuis le parc)
