@@ -9989,11 +9989,13 @@
     Object.keys(_sosMarkers).forEach(removeSosPin);
   }
 
+  // Declenchement : appui maintenu SOS_HOLD_MS sur le bouton (bindSosHold),
+  // qui remplace l'ancienne fenetre de confirmation. Un appui bref ne fait
+  // qu'afficher la consigne : pas de SOS par megarde dans une poche ou en
+  // effleurant l'ecran.
   function triggerSos() {
     if (state.sosInFlight) return;
-    // Big single-button SOS confirmation — no note, no text input
-    showSosConfirm(function (confirmed) {
-      if (!confirmed) return;
+    (function () {
       state.sosInFlight = true;
       refreshGpsProfile();      // force GPS haute precision pour la duree du SOS
       forceOneShotPosition();   // fix immediat au cas ou le watch est en basse precision
@@ -10063,42 +10065,83 @@
           });
       }
       send();
-    });
+    })();
   }
 
-  function showSosConfirm(callback) {
-    var overlay = document.createElement("div");
-    overlay.className = "sos-confirm-overlay";
-    var box = document.createElement("div");
-    box.className = "sos-confirm-box";
-    var icon = document.createElement("span");
-    icon.className = "material-symbols-outlined sos-confirm-icon";
-    icon.textContent = "sos";
-    var msg = document.createElement("div");
-    msg.className = "sos-confirm-msg";
-    msg.textContent = "Declencher un SOS ?";
-    var sub = document.createElement("div");
-    sub.className = "sos-confirm-sub";
-    sub.textContent = "Le cockpit, les equipes securite et ton equipe seront alertes avec ta position GPS.";
-    var btnConfirm = document.createElement("button");
-    btnConfirm.className = "sos-confirm-btn";
-    btnConfirm.textContent = "CONFIRMER SOS";
-    var btnCancel = document.createElement("button");
-    btnCancel.className = "sos-cancel-btn";
-    btnCancel.textContent = "Annuler";
-    box.appendChild(icon);
-    box.appendChild(msg);
-    box.appendChild(sub);
-    box.appendChild(btnConfirm);
-    box.appendChild(btnCancel);
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-    function done(result) {
-      try { document.body.removeChild(overlay); } catch (e) {}
-      callback(result);
+  var SOS_HOLD_MS = 3000;
+
+  function bindSosHold(btn) {
+    var label = btn.querySelector(".label");
+    var labelText = label ? label.textContent : "SOS";
+    var holding = false, startAt = 0, raf = 0, fired = false, lastSec = 0;
+
+    function reset() {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      holding = false;
+      btn.classList.remove("sos-holding");
+      btn.style.setProperty("--sos-p", "0");
+      if (label) label.textContent = labelText;
     }
-    btnConfirm.addEventListener("click", function () { done(true); });
-    btnCancel.addEventListener("click", function () { done(false); });
+    function tick() {
+      if (!holding) return;
+      var el = Date.now() - startAt;
+      var p = Math.min(1, el / SOS_HOLD_MS);
+      btn.style.setProperty("--sos-p", String(p));
+      var sec = Math.ceil((SOS_HOLD_MS - el) / 1000);
+      if (sec !== lastSec && sec > 0) {
+        lastSec = sec;
+        if (label) label.textContent = String(sec);
+        try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) {}
+      }
+      if (p >= 1) {
+        fired = true;
+        reset();
+        try { if (navigator.vibrate) navigator.vibrate([200, 80, 200]); } catch (e) {}
+        triggerSos();
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    }
+    function start(e) {
+      if (holding || state.sosInFlight) {
+        if (state.sosInFlight) toast("SOS deja en cours d'envoi", "warn");
+        return;
+      }
+      if (e && e.pointerId != null) {
+        try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      fired = false;
+      lastSec = 0;
+      holding = true;
+      startAt = Date.now();
+      btn.classList.add("sos-holding");
+      raf = requestAnimationFrame(tick);
+    }
+    function stop() {
+      if (!holding) return;
+      var short = !fired;
+      reset();
+      if (short) toast("Maintenir le bouton SOS 3 secondes pour declencher l'alerte", "warn");
+    }
+
+    btn.addEventListener("pointerdown", function (e) {
+      if (e.button != null && e.button !== 0) return;
+      e.preventDefault();
+      start(e);
+    });
+    btn.addEventListener("pointerup", stop);
+    btn.addEventListener("pointercancel", function () { reset(); });
+    // L'appui long ouvrirait le menu contextuel du WebView
+    btn.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    // Clavier : Entree / Espace maintenus
+    btn.addEventListener("keydown", function (e) {
+      if ((e.key === "Enter" || e.key === " ") && !e.repeat) { e.preventDefault(); start(null); }
+    });
+    btn.addEventListener("keyup", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stop(); }
+    });
+    btn.addEventListener("blur", function () { reset(); });
   }
 
   function handleSosBroadcast(m) {
@@ -10778,7 +10821,7 @@
     if (tabAvail) tabAvail.addEventListener("click", function () { setMissionsTab("avail"); });
     var tabDecl = $("missions-tab-decl");
     if (tabDecl) tabDecl.addEventListener("click", function () { setMissionsTab("decl"); });
-    $("btn-sos").addEventListener("click", triggerSos);
+    bindSosHold($("btn-sos"));
 
     // Mode declarant
     var btnDeclare = $("btn-declare");
