@@ -21,10 +21,28 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    // Signature de production : cle et mots de passe HORS du repo et de Dropbox
+    // (~/.android/field-release/keystore.properties, ou -PfieldReleaseProps=<chemin>).
+    // Sans ce fichier, assembleRelease produit un APK non signe, non installable.
+    def releasePropsFile = file(project.findProperty("fieldReleaseProps")
+        ?: "${System.getProperty('user.home')}/.android/field-release/keystore.properties")
+    signingConfigs {
+        release {
+            if (releasePropsFile.exists()) {
+                def p = new Properties()
+                releasePropsFile.withInputStream { p.load(it) }
+                storeFile file(p.getProperty("storeFile"))
+                storePassword p.getProperty("storePassword")
+                keyAlias p.getProperty("keyAlias")
+                keyPassword p.getProperty("keyPassword")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releasePropsFile.exists()) signingConfig signingConfigs.release
         }
     }
 }

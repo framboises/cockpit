@@ -2,7 +2,7 @@
 
 Redige le 07/11/2026 depuis le serveur Cockpit. Les numeros de ligne valent pour le commit 26621de.
 
-**Etat : code ecrit le 07/11/2026, voir `docs/claude/field.md`. Les pieges ci-dessous restent a tester sur tablette. Firebase, signature et validation RGPD restent a faire.**
+**Etat : code ecrit le 07/11/2026, voir `docs/claude/field.md`. Firebase en service, version de production signee le 08/11/2026 (1.5). Restent : patrouille longue ecran eteint sur le terrain, validation RGPD, diffusion par MDM.**
 
 ## Objectif
 

@@ -5,7 +5,8 @@
   "description": "Coquille Android de Field (Capacitor, charge cockpit.lemans.org/field)",
   "scripts": {
     "sync": "cap sync android",
-    "build:debug": "cap sync android && cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ./gradlew assembleDebug"
+    "build:debug": "cap sync android && cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ./gradlew assembleDebug",
+    "build:release": "cap sync android && cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ./gradlew assembleRelease"
   },
   "dependencies": {
     "@capacitor/android": "8.6.0",
