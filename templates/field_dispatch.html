@@ -543,14 +543,13 @@
                     </p>
                 </div>
                 <div class="form-row">
-                    <label>Categorie de fiches
-                        <select name="category" class="form-input">
-                            <option value="">Celle du groupe</option>
-                        </select>
-                    </label>
+                    <label style="display:block;">Categories de fiches</label>
+                    <div id="field-pair-cats" class="dcfg-cats-box"></div>
                     <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
-                        La tablette ne voit que les fiches de cette categorie, n'est proposee au
-                        PC Org que sur ces fiches, et ne cree des fiches que dans cette categorie.
+                        La tablette ne voit que les fiches de ces categories, n'est proposee au
+                        PC Org (et en dispatch automatique) que sur ces fiches, et ne cree des
+                        fiches que dans ces categories. Toutes : n'importe quelle fiche.
+                        Rien de coche : celles du groupe.
                     </p>
                 </div>
                 <div class="form-row">
@@ -807,15 +806,19 @@
 <div id="field-metiers-modal" class="crud-modal" hidden>
     <div class="crud-modal-dialog" style="max-width:520px;">
         <div class="crud-modal-header">
-            <h3 id="field-metiers-title">Metiers de la tablette</h3>
+            <h3 id="field-metiers-title">Categories et metiers de la tablette</h3>
             <button class="crud-modal-close" data-close>&times;</button>
         </div>
         <div class="crud-modal-body">
-            <p id="field-metiers-cat" style="font-size:12px; color:var(--muted); margin:0 0 8px;"></p>
+            <label style="display:block; font-size:12px; font-weight:600; margin:0 0 4px;">Categories de fiches</label>
+            <div id="field-unit-cats" class="dcfg-cats-box"></div>
+            <p id="field-metiers-cat" style="font-size:11px; color:var(--muted); margin:4px 0 12px;"></p>
+            <label style="display:block; font-size:12px; font-weight:600; margin:0 0 4px;">Metiers couverts (dispatch automatique)</label>
             <div id="field-metiers-list" class="dcfg-metiers-box"></div>
             <p style="font-size:11px; color:var(--muted); margin:6px 0 0;">
                 Aucun coche = tous les metiers. Seules les fiches de ces metiers seront
-                proposees automatiquement a la tablette.
+                proposees automatiquement a la tablette. Plusieurs categories : une categorie
+                sans aucun metier coche reste "tous metiers".
             </p>
         </div>
         <div class="crud-modal-footer">
@@ -838,6 +841,18 @@
   .dcfg-levels label, .dcfg-grid label.dcfg-check { display:inline-flex; flex-direction:row; align-items:center; gap:4px; cursor:pointer; color:inherit; }
   .dcfg-metiers-box { display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px; border:1px solid var(--line); border-radius:6px; max-height:200px; overflow:auto; font-size:12px; }
   .dcfg-metiers-box label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
+  .dcfg-metiers-box .dcfg-metiers-head { flex-basis:100%; font-weight:700; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; margin-top:4px; }
+  /* Categories d'une tablette : plusieurs, ou Toutes (exclusive) */
+  .dcfg-cats-box { display:flex; flex-wrap:wrap; gap:6px; }
+  .dcfg-cats-box label { display:inline-flex; flex-direction:row; align-items:center; gap:5px; padding:4px 10px; border:1px solid var(--line); border-radius:999px; background:var(--bg); font-size:12px; font-weight:600; cursor:pointer; color:var(--text); }
+  .dcfg-cats-box label:has(input:checked) { border-color:var(--brand); background:var(--brand-light); color:var(--brand-strong); }
+  .dcfg-cats-box label.is-all { border-style:dashed; }
+  .dcfg-cats-box input { margin:0; }
+  .field-dev-cats { display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; }
+  .field-dev-cats span.txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .field-dev-cats span.inh { font-weight:400; color:var(--muted); }
+  .field-dev-cats button { border:none; background:transparent; cursor:pointer; padding:0; color:var(--muted); display:inline-flex; }
+  .field-dev-cats button:hover { color:var(--brand); }
   .field-dev-metiers { display:flex; align-items:center; gap:4px; margin-top:3px; font-size:11px; color:var(--muted); }
   .field-dev-metiers span.txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
   .field-dev-metiers button { border:none; background:transparent; cursor:pointer; padding:0; color:var(--muted); display:inline-flex; }

@@ -16602,6 +16602,12 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .bg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
 .bg-span-2 { grid-column: span 2; }
 .bg-help { font-weight: 400; font-size: .76rem; color: var(--muted); }
+/* Categories PCO d'un groupe (plusieurs, ou Toutes) */
+.bg-cats { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+.crud-modal-body label.bg-cat, .bg-cat { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); font-size: .8rem; font-weight: 600; color: var(--text); cursor: pointer; transition: border-color .15s, background .15s; }
+.bg-cat input { margin: 0; accent-color: var(--brand); }
+.bg-cat:has(input:checked) { border-color: var(--brand); background: var(--brand-light); color: var(--brand-strong); }
+.bg-cat-all { border-style: dashed; }
 .bg-color { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); padding: 4px 10px 4px 4px; }
 .bg-color input[type="color"] { width: 34px; height: 28px; padding: 0; border: none; background: none; cursor: pointer; }
 .bg-color-hex { font-family: ui-monospace, monospace; font-size: .82rem; font-weight: 500; color: var(--muted); }

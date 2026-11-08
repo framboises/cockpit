@@ -49,6 +49,9 @@
   var state = {
     map: null,
     deviceCategory: null,
+    // Categories de la tablette (plusieurs, ["*"] = toutes ; [] = aucune
+    // restriction, liste historique) : creation de fiche et photo avec fiche
+    deviceCategories: [],
     selfClose: false,
     tileLayers: {},
     currentLayerKey: "plan",
@@ -2663,6 +2666,31 @@
     return { id: c.id, label: c.label, icon: c.icon, color: c.color, legacyOnly: !c.legacy };
   });
 
+  // Categories de la tablette (serveur : _device_categories). Aucune = pas de
+  // restriction (liste historique a 4) ; "*" = toutes.
+  function setDeviceCategories(cats, first) {
+    state.deviceCategories = Array.isArray(cats) ? cats.slice() : (first ? [first] : []);
+    state.deviceCategory = state.deviceCategories[0] || null;
+  }
+
+  function deviceCatRestricted() {
+    var c = state.deviceCategories || [];
+    return c.length > 0 && c.indexOf("*") === -1;
+  }
+
+  // Categorie que la tablette peut choisir pour CREER une fiche
+  function deviceAllowsCat(id) {
+    var c = state.deviceCategories || [];
+    if (!c.length) return !(FICHE_CREATE_CATEGORIES.find(function (x) { return x.id === id; }) || {}).legacyOnly;
+    return c.indexOf("*") !== -1 || c.indexOf(id) !== -1;
+  }
+
+  // Categorie unique a preselectionner (une seule categorie reelle), sinon null
+  function deviceSingleCat() {
+    var c = state.deviceCategories || [];
+    return c.length === 1 && c[0] !== "*" ? c[0] : null;
+  }
+
   // ----- Mode declarant (07/10/2026) -----
   // Drapeau du GROUPE de la tablette (Configuration > Anoloc). La tablette
   // declare des fiches (photos prises sur le moment, description, urgence,
@@ -3257,7 +3285,7 @@
       // changer cote admin pendant la session.
       cats.innerHTML = "";
       var pcoCategories = FICHE_CREATE_CATEGORIES.filter(function (c) {
-        return state.deviceCategory ? c.id === state.deviceCategory : !c.legacyOnly;
+        return deviceAllowsCat(c.id);
       });
       pcoCategories.forEach(function (c) {
         var btn = document.createElement("button");
@@ -3287,7 +3315,7 @@
       });
     }
     // Reset form (categorie preselectionnee quand la tablette n'en a qu'une)
-    state.ficheCreateCat = state.deviceCategory || null;
+    state.ficheCreateCat = deviceSingleCat();
     // Cle d'idempotence : un renvoi (file hors ligne, reponse perdue) ne
     // cree pas une seconde fiche identique.
     state.ficheCreateToken = newClientKey();
@@ -3889,7 +3917,8 @@
         state.fiches = open;
         // Categorie de la tablette (null = pas de restriction) : pilote les
         // categories proposees a la creation de fiche et a l'envoi de photo.
-        if (data.hasOwnProperty("device_category")) state.deviceCategory = data.device_category || null;
+        if (data.hasOwnProperty("device_categories")) setDeviceCategories(data.device_categories);
+        else if (data.hasOwnProperty("device_category")) setDeviceCategories(null, data.device_category || null);
         if (data.hasOwnProperty("declarant") && !!data.declarant !== !!state.declarant) {
           state.declarant = !!data.declarant;     // groupe modifie par un admin
           applyDeclarantMode();
@@ -7325,13 +7354,16 @@
     if (_cam.constatBtn) _cam.constatBtn.hidden = !!_cam.attachToFiche;
     if (_cam.catRowEl) _cam.catRowEl.hidden = !showChips;
     if (_cam.urgRowEl) _cam.urgRowEl.hidden = !showChips;
-    // Une tablette categorisee ne cree de fiche que dans sa categorie ; une
-    // photo simplement envoyee au PC Org garde le choix libre.
-    var lockCat = !!state.deviceCategory && !_cam.targetFicheId && _cam.createFiche;
-    if (lockCat) _cam.selectedCategory = state.deviceCategory;
+    // Une tablette categorisee ne cree de fiche que dans ses categories ;
+    // une photo simplement envoyee au PC Org garde le choix libre.
+    var lockCat = deviceCatRestricted() && !_cam.targetFicheId && _cam.createFiche;
+    if (lockCat) {
+      var allowed = state.deviceCategories;
+      if (allowed.indexOf(_cam.selectedCategory) === -1) _cam.selectedCategory = allowed.length === 1 ? allowed[0] : null;
+    }
     if (_cam.catChipsEl) {
       Array.prototype.forEach.call(_cam.catChipsEl.children, function (c) {
-        c.hidden = lockCat && c.dataset.cat !== state.deviceCategory;
+        c.hidden = lockCat && state.deviceCategories.indexOf(c.dataset.cat) === -1;
         c.classList.toggle("is-selected", c.dataset.cat === _cam.selectedCategory);
       });
     }
@@ -11485,7 +11517,8 @@
     state.routePiste = !!dev.route_piste;
     state.controle = !!dev.controle;
     applyControleButton();
-    state.deviceCategory = dev.category || state.deviceCategory || null;
+    if (Array.isArray(dev.categories_effective)) setDeviceCategories(dev.categories_effective);
+    else if (dev.category) setDeviceCategories(null, dev.category);
     // Ouverture depuis la notification d'un message du PC : /field?constat=<id>
     try {
       var qc = new URLSearchParams(location.search).get("constat");

@@ -458,17 +458,18 @@
 
       devices.forEach(function (dev, idx) {
         dev._groupId = gid; // store for trail functions
-        // Balise hors ligne depuis plus de 24 h (stale) : plus de pin, elle
-        // reste dans la liste du panneau. Non marquee vue : la pin existante
-        // est retiree plus bas.
-        if (dev.kind !== "tablet" && dev.stale) return;
+        // Balise ou tablette hors ligne depuis plus de 24 h (stale) : plus de
+        // pin, elle reste dans la liste du panneau. Non marquee vue : la pin
+        // existante est retiree plus bas.
+        if (dev.stale) return;
         seenDevices[dev.id] = true;
         var lat = dev.lat;
         var lng = dev.lng;
         if (lat == null || lng == null) return;
 
         // Balises hors ligne recentes : on garde la pin mais grisee (cf. createBeaconIcon).
-        // Tablettes hors ligne : pin normale (utile pour voir ou la patrouille a perdu signal).
+        // Tablettes hors ligne depuis moins de 24 h : pin normale (utile pour voir
+        // ou la patrouille a perdu signal).
 
         var existing = anolocMarkers[dev.id];
         if (existing) {

@@ -1162,19 +1162,19 @@
             <label class="bg-field">Couleur
               <span class="bg-color"><input name="color" type="color" value="#6366f1" /><span class="bg-color-hex" id="bg-color-hex">#6366f1</span></span>
             </label>
-            <label class="bg-field bg-span-2">Categorie PCO associee
-              <select name="pco_category" class="form-input">
-                <option value="">-- Aucune --</option>
-                <option value="PCO.Secours">Secours</option>
-                <option value="PCO.Securite">Securite</option>
-                <option value="PCO.Technique">Technique</option>
-                <option value="PCO.Flux">Flux</option>
-                <option value="PCO.Fourriere">Fourriere</option>
-                <option value="PCO.Information">Information</option>
-                <option value="PCO.MainCourante">Main Courante</option>
-              </select>
-              <small class="bg-help">Les membres du groupe sont proposes a la creation d'une intervention de cette categorie.</small>
-            </label>
+            <div class="bg-field bg-span-2">Categories PCO associees
+              <div class="bg-cats" id="bg-pco-categories">
+                <label class="bg-cat bg-cat-all"><input type="checkbox" name="pco_categories" value="*" />Toutes</label>
+                <label class="bg-cat"><input type="checkbox" name="pco_categories" value="PCO.Secours" />Secours</label>
+                <label class="bg-cat"><input type="checkbox" name="pco_categories" value="PCO.Securite" />Securite</label>
+                <label class="bg-cat"><input type="checkbox" name="pco_categories" value="PCO.Technique" />Technique</label>
+                <label class="bg-cat"><input type="checkbox" name="pco_categories" value="PCO.Flux" />Flux</label>
+                <label class="bg-cat"><input type="checkbox" name="pco_categories" value="PCO.Fourriere" />Fourriere</label>
+                <label class="bg-cat"><input type="checkbox" name="pco_categories" value="PCO.Information" />Information</label>
+                <label class="bg-cat"><input type="checkbox" name="pco_categories" value="PCO.MainCourante" />Main Courante</label>
+              </div>
+              <small class="bg-help">Les membres du groupe sont proposes sur les interventions de chaque categorie cochee (Toutes : n'importe quelle fiche). Aucune : jamais proposes. Une tablette peut avoir ses propres categories (Field dispatch).</small>
+            </div>
           </div>
         </section>
 

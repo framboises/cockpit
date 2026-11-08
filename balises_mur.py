@@ -315,5 +315,7 @@ def tablette(t, now=None):
             "vitesse": round(vitesse) if en_ligne else 0, "cap": pos.get("heading") or 0,
             "batterie": pos.get("battery"), "charge": None, "vu_a": _iso(vu),
             "age_s": round(age) if age is not None else None, "source": "field",
+            # Meme regle que les balises : hors ligne depuis > 24 h = plus de pin
+            "stale": B._is_stale(en_ligne, age),
             "tablette": True, "trace": [], "statut_field": t.get("status") or "patrouille",
             "statut_depuis": _iso(t.get("status_since")), "fiche_id": t.get("active_fiche_id")}
