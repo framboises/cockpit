@@ -676,6 +676,23 @@
       attributionControl: true,
       doubleClickZoom: false,
     });
+    // Calques : bouton de carte sous le zoom (la barre du bas porte Controle)
+    var LayersControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var bar = L.DomUtil.create("div", "leaflet-bar field-layers-ctl");
+        var a = L.DomUtil.create("a", "", bar);
+        a.href = "#";
+        a.setAttribute("role", "button");
+        a.setAttribute("aria-label", "Calques de la carte");
+        a.title = "Calques";
+        a.appendChild(_mkIcon("layers"));
+        L.DomEvent.disableClickPropagation(bar);
+        L.DomEvent.on(a, "click", function (e) { L.DomEvent.preventDefault(e); openLayersPanel(); });
+        return bar;
+      },
+    });
+    new LayersControl().addTo(state.map);
 
     state.tileLayers.plan = L.tileLayer(
       "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -3880,6 +3897,11 @@
         pollDeclarations();   // declarante 8 s, autres 30 s
         // Acces piste des itineraires : case du groupe de balises, lue a chaud
         if (data.hasOwnProperty("route_piste")) state.routePiste = !!data.route_piste;
+        // Controle de documents : case du groupe de balises, lue a chaud
+        if (data.hasOwnProperty("controle") && !!data.controle !== !!state.controle) {
+          state.controle = !!data.controle;
+          applyControleButton();
+        }
         state.selfClose = !!data.self_close;
         if (data.hasOwnProperty("proposal")) handleProposal(data.proposal);
         if (data.hasOwnProperty("test_mode")) applyTestMode(!!data.test_mode);
@@ -7723,6 +7745,777 @@
   }
 
   // =====================================================================
+  // CONTROLE de documents (08/11/2026) : bouton loupe en bas a gauche,
+  // tablettes d'un groupe coche "Controle de documents". Lecture sur la
+  // tablette (bande MRZ, permis, texte, QR / code-barres) ou saisie, relecture
+  // OBLIGATOIRE, puis /field/controle/search. Aucune image ne quitte la
+  // tablette ; rien n'est garde apres fermeture. Doc : docs/controle-documents.md
+  // =====================================================================
+  var CTL_SCAN_EVERY_MS = 650;
+  var CTL_FRAME_MAX_W = 1600;
+  var CTL_MOTIFS = [
+    ["acces", "Controle d'acces"], ["identite", "Verification d'identite"],
+    ["incident", "Incident"], ["autre", "Autre"],
+  ];
+  var CTL_DOC_LABELS = {
+    passeport: "Passeport", cni: "Carte d'identite", titre_sejour: "Titre de sejour",
+    permis: "Permis de conduire", visa: "Visa", autre: "Document",
+  };
+  var CTL_CODE_LABELS = { carte_btp: "Carte BTP", badge: "Badge / accreditation", titre: "Titre d'acces", autre: "Code" };
+  var CTL_ERRORS = {
+    controle_non_autorise: "Cette tablette n'est pas autorisee a consulter.",
+    consultation_non_configuree: "La consultation des fichiers n'est pas encore en service.",
+    consultation_indisponible: "Serveur de consultation injoignable. Reessayez.",
+    trop_de_consultations: "Trop de consultations en peu de temps. Patientez quelques minutes.",
+    nom_requis: "Saisir au moins le nom (2 lettres) ou le numero du document.",
+    nom_invalide: "Nom ou prenom : lettres, espaces, tirets et apostrophes seulement.",
+    date_invalide: "Date de naissance invalide.",
+    document_invalide: "Numero de document invalide.",
+    siret_invalide: "SIRET ou SIREN invalide (cle de controle).",
+    entreprise_requise: "Saisir la raison sociale ou le SIRET.",
+    code_requis: "Aucun code a rechercher.",
+    hors_ligne: "Hors ligne : la consultation demande le reseau.",
+  };
+
+  var _ctl = {
+    root: null, step: "accueil", tab: "personne", motif: "acces",
+    stream: null, track: null, video: null, canvas: null, timer: null, busy: false,
+    native: null,            // null = inconnu, true / false apres le premier essai
+    detector: null, torchOn: false,
+    found: null,             // derniere lecture : {kind, ...}
+    ocrLines: [], fillTarget: "nom", linesTouchedAt: 0,
+    source: "manuel", pending: false, els: {},
+  };
+
+  // --- Lecture : fonctions pures (testees hors tablette) -------------------
+
+  function ctlCharValue(c) {
+    if (c >= "0" && c <= "9") return c.charCodeAt(0) - 48;
+    if (c >= "A" && c <= "Z") return c.charCodeAt(0) - 55;
+    return 0;   // "<"
+  }
+
+  function ctlCheckDigit(s) {
+    var w = [7, 3, 1], t = 0;
+    for (var i = 0; i < s.length; i++) t += ctlCharValue(s.charAt(i)) * w[i % 3];
+    return String(t % 10);
+  }
+
+  // Champs numeriques : confusions courantes de l'OCR
+  function ctlDigits(s) {
+    return s.replace(/[OQD]/g, "0").replace(/[IL]/g, "1").replace(/Z/g, "2")
+      .replace(/S/g, "5").replace(/B/g, "8").replace(/G/g, "6");
+  }
+
+  function ctlMrzClean(line) {
+    return String(line || "").toUpperCase().replace(/[«‹]/g, "<").replace(/\s+/g, "")
+      .replace(/[^A-Z0-9<]/g, "");
+  }
+
+  function ctlMrzDate(yymmdd, future) {
+    if (!/^\d{6}$/.test(yymmdd)) return "";
+    var yy = parseInt(yymmdd.slice(0, 2), 10);
+    var nowYY = new Date().getFullYear() % 100;
+    var century = future ? 2000 : (yy > nowYY ? 1900 : 2000);
+    var mm = yymmdd.slice(2, 4), dd = yymmdd.slice(4, 6);
+    if (mm < "01" || mm > "12" || dd < "01" || dd > "31") return "";
+    return String(century + yy) + "-" + mm + "-" + dd;
+  }
+
+  function ctlMrzNames(field) {
+    var parts = field.split("<<");
+    var nom = (parts[0] || "").replace(/</g, " ").trim();
+    var prenom = parts.slice(1).join(" ").replace(/</g, " ").replace(/\s+/g, " ").trim();
+    return { nom: nom, prenom: prenom };
+  }
+
+  function ctlDocType(code) {
+    var c = code.charAt(0);
+    if (c === "P") return "passeport";
+    if (c === "V") return "visa";
+    if (code === "IR" || code === "AR" || code === "RT" || c === "R") return "titre_sejour";
+    if (c === "I" || c === "A" || c === "C") return "cni";
+    return "autre";
+  }
+
+  function ctlField(s, check) {
+    var v = ctlDigits(s);
+    return { v: v, ok: ctlCheckDigit(v) === ctlDigits(check) };
+  }
+
+  // lines : lignes de texte (ordre de lecture). Retourne null ou
+  // {format, type_document, pays, nom, prenom, numero_document, nationalite,
+  //  date_naissance, sexe, date_expiration, valide}
+  function ctlParseMrz(lines) {
+    var c = (lines || []).map(ctlMrzClean).filter(function (l) { return l.length >= 28 && l.indexOf("<") >= 0; });
+    for (var i = 0; i < c.length; i++) {
+      var a = c[i], b = c[i + 1] || "", d = c[i + 2] || "";
+      // TD3 (passeport) : 2 x 44
+      if (a.length >= 43 && a.length <= 45 && b.length >= 43 && b.length <= 45 && a.charAt(0) === "P") {
+        a = (a + "<").slice(0, 44); b = (b + "<").slice(0, 44);
+        var n3 = ctlMrzNames(a.slice(5));
+        var doc3 = b.slice(0, 9), birth3 = ctlField(b.slice(13, 19), b.charAt(19)), exp3 = ctlField(b.slice(21, 27), b.charAt(27));
+        var comp3 = doc3 + b.charAt(9) + birth3.v + b.charAt(19) + exp3.v + b.charAt(27) + b.slice(28, 43);
+        return {
+          format: "TD3", type_document: "passeport", pays: a.slice(2, 5).replace(/</g, ""),
+          nom: n3.nom, prenom: n3.prenom, numero_document: doc3.replace(/</g, ""),
+          nationalite: b.slice(10, 13).replace(/</g, ""), date_naissance: ctlMrzDate(birth3.v),
+          sexe: b.charAt(20).replace("<", ""), date_expiration: ctlMrzDate(exp3.v, true),
+          valide: ctlCheckDigit(doc3) === b.charAt(9) && birth3.ok && exp3.ok && ctlCheckDigit(comp3) === b.charAt(43),
+        };
+      }
+      // Ancienne CNI francaise : 2 x 36, "IDFRA"
+      if (a.length >= 35 && a.length <= 37 && b.length >= 35 && b.length <= 37 && a.indexOf("IDFRA") === 0) {
+        a = (a + "<").slice(0, 36); b = (b + "<").slice(0, 36);
+        var numF = ctlDigits(b.slice(0, 4)) + b.slice(4, 7) + ctlDigits(b.slice(7, 12));
+        var birthF = ctlField(b.slice(27, 33), b.charAt(33));
+        var compF = (a + numF + b.charAt(12) + b.slice(13, 27) + birthF.v + b.charAt(33) + b.charAt(34));
+        return {
+          format: "CNI_FR", type_document: "cni", pays: "FRA",
+          nom: a.slice(5, 30).replace(/</g, " ").trim(),
+          prenom: b.slice(13, 27).replace(/<</g, ", ").replace(/</g, " ").replace(/\s+/g, " ").replace(/[ ,]+$/, "").trim(),
+          numero_document: numF, nationalite: "FRA", date_naissance: ctlMrzDate(birthF.v),
+          sexe: b.charAt(34).replace("<", ""), date_expiration: "",
+          valide: ctlCheckDigit(numF) === b.charAt(12) && birthF.ok && ctlCheckDigit(compF) === b.charAt(35),
+        };
+      }
+      // TD2 : 2 x 36 (titres, anciennes cartes)
+      if (a.length >= 35 && a.length <= 37 && b.length >= 35 && b.length <= 37 && /^[ACIRV]/.test(a)) {
+        a = (a + "<").slice(0, 36); b = (b + "<").slice(0, 36);
+        var n2 = ctlMrzNames(a.slice(5));
+        var doc2 = b.slice(0, 9), birth2 = ctlField(b.slice(13, 19), b.charAt(19)), exp2 = ctlField(b.slice(21, 27), b.charAt(27));
+        var comp2 = doc2 + b.charAt(9) + birth2.v + b.charAt(19) + exp2.v + b.charAt(27) + b.slice(28, 35);
+        return {
+          format: "TD2", type_document: ctlDocType(a.slice(0, 2).replace(/</g, "")),
+          pays: a.slice(2, 5).replace(/</g, ""), nom: n2.nom, prenom: n2.prenom,
+          numero_document: doc2.replace(/</g, ""), nationalite: b.slice(10, 13).replace(/</g, ""),
+          date_naissance: ctlMrzDate(birth2.v), sexe: b.charAt(20).replace("<", ""),
+          date_expiration: ctlMrzDate(exp2.v, true),
+          valide: ctlCheckDigit(doc2) === b.charAt(9) && birth2.ok && exp2.ok && ctlCheckDigit(comp2) === b.charAt(35),
+        };
+      }
+      // TD1 (CNI depuis 2021, titres de sejour) : 3 x 30
+      if (a.length >= 29 && a.length <= 31 && b.length >= 29 && b.length <= 31 && d.length >= 29 && d.length <= 31 && /^[ACI]/.test(a)) {
+        a = (a + "<").slice(0, 30); b = (b + "<").slice(0, 30); d = (d + "<").slice(0, 30);
+        var n1 = ctlMrzNames(d);
+        var doc1 = a.slice(5, 14), birth1 = ctlField(b.slice(0, 6), b.charAt(6)), exp1 = ctlField(b.slice(8, 14), b.charAt(14));
+        var comp1 = a.slice(5, 30) + birth1.v + b.charAt(6) + exp1.v + b.charAt(14) + b.slice(18, 29);
+        return {
+          format: "TD1", type_document: ctlDocType(a.slice(0, 2).replace(/</g, "")),
+          pays: a.slice(2, 5).replace(/</g, ""), nom: n1.nom, prenom: n1.prenom,
+          numero_document: doc1.replace(/</g, ""), nationalite: b.slice(15, 18).replace(/</g, ""),
+          date_naissance: ctlMrzDate(birth1.v), sexe: b.charAt(7).replace("<", ""),
+          date_expiration: ctlMrzDate(exp1.v, true),
+          valide: ctlCheckDigit(doc1) === a.charAt(14) && birth1.ok && exp1.ok && ctlCheckDigit(comp1) === b.charAt(29),
+        };
+      }
+    }
+    return null;
+  }
+
+  // Permis de conduire europeen (recto) : rubriques numerotees 1., 2., 3., 5.
+  function ctlParseLicence(lines) {
+    var out = { type_document: "permis", nom: "", prenom: "", date_naissance: "", numero_document: "" };
+    var text = (lines || []).join("\n").toUpperCase();
+    if (text.indexOf("PERMIS DE CONDUIRE") < 0 && text.indexOf("DRIVING LICENCE") < 0) return null;
+    (lines || []).forEach(function (raw) {
+      var m = /^\s*(1|2|3|5)\s*[.,]\s*(.+)$/.exec(raw);
+      if (!m) return;
+      var v = m[2].trim();
+      if (m[1] === "1" && !out.nom) out.nom = v.toUpperCase();
+      else if (m[1] === "2" && !out.prenom) out.prenom = v.replace(/,/g, " ").replace(/\s+/g, " ");
+      else if (m[1] === "3" && !out.date_naissance) {
+        var dm = /(\d{2})[.\/-](\d{2})[.\/-](\d{4})/.exec(v);
+        if (dm) out.date_naissance = dm[3] + "-" + dm[2] + "-" + dm[1];
+      } else if (m[1] === "5" && !out.numero_document) out.numero_document = v.replace(/\s/g, "").toUpperCase().slice(0, 20);
+    });
+    return out.nom || out.numero_document ? out : null;
+  }
+
+  function ctlClassifyCode(format, value) {
+    var v = String(value || "");
+    if (/cartebtp/i.test(v)) return "carte_btp";
+    // Badges ACO / 24h : code-barres lineaire de 16 chiffres sur les exemples
+    if (/^\d{8,20}$/.test(v) && format !== "qr_code") return "badge";
+    if (format === "qr_code" || format === "aztec" || format === "pdf417" || format === "data_matrix") return "titre";
+    return "autre";
+  }
+
+  function ctlSiretOk(s) {
+    if (!/^\d{9}$|^\d{14}$/.test(s)) return false;
+    var t = 0;
+    for (var i = 0; i < s.length; i++) {
+      var n = parseInt(s.charAt(s.length - 1 - i), 10);
+      if (i % 2 === 1) { n *= 2; if (n > 9) n -= 9; }
+      t += n;
+    }
+    if (t % 10 === 0) return true;
+    if (s.length === 14 && s.indexOf("356000000") === 0) {
+      return s.split("").reduce(function (x, ch) { return x + parseInt(ch, 10); }, 0) % 5 === 0;
+    }
+    return false;
+  }
+
+  // --- Ecran ----------------------------------------------------------------
+
+  function _ctlEl(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function _ctlInput(id, label, opts) {
+    opts = opts || {};
+    var wrap = _ctlEl("label", "ctl-field");
+    wrap.appendChild(_ctlEl("span", "ctl-field-label", label));
+    var inp = document.createElement("input");
+    inp.id = id;
+    inp.className = "ctl-input";
+    inp.type = opts.type || "text";
+    inp.autocomplete = "off";
+    inp.setAttribute("autocapitalize", opts.caps || "characters");
+    inp.spellcheck = false;
+    if (opts.inputmode) inp.setAttribute("inputmode", opts.inputmode);
+    if (opts.placeholder) inp.placeholder = opts.placeholder;
+    if (opts.maxlength) inp.maxLength = opts.maxlength;
+    wrap.appendChild(inp);
+    _ctl.els[id] = inp;
+    return wrap;
+  }
+
+  function _ctlBtn(cls, icon, label, onclick) {
+    var b = _ctlEl("button", cls);
+    b.type = "button";
+    if (icon) b.appendChild(_mkIcon(icon));
+    if (label) b.appendChild(_ctlEl("span", null, label));
+    b.addEventListener("click", onclick);
+    return b;
+  }
+
+  function buildControleModal() {
+    var root = _ctlEl("div", "ctl-root");
+    root.id = "controle-modal";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-label", "Controle");
+    root.hidden = true;
+
+    var head = _ctlEl("div", "ctl-head");
+    var back = _ctlBtn("icon-btn ctl-back", "arrow_back", null, ctlBack);
+    back.setAttribute("aria-label", "Retour");
+    head.appendChild(back);
+    var title = _ctlEl("h2", "ctl-title", "Controle");
+    head.appendChild(title);
+    var close = _ctlBtn("icon-btn", "close", null, closeControleModal);
+    close.setAttribute("aria-label", "Fermer");
+    head.appendChild(close);
+    root.appendChild(head);
+    _ctl.els.title = title;
+    _ctl.els.back = back;
+
+    // 1. Accueil : lire un document ou chercher a la main
+    var home = _ctlEl("div", "ctl-step ctl-home");
+    home.dataset.step = "accueil";
+    var scanTile = _ctlBtn("ctl-scan-tile", "document_scanner", null, function () { ctlGo("scan"); });
+    var st = _ctlEl("span", "ctl-scan-tile-text");
+    st.appendChild(_ctlEl("strong", null, "Lire un document"));
+    st.appendChild(_ctlEl("small", null, "Piece d'identite, passeport, permis, badge, carte BTP, QR code"));
+    scanTile.appendChild(st);
+    home.appendChild(scanTile);
+
+    home.appendChild(_ctlEl("div", "ctl-sep", "ou rechercher"));
+    var tabs = _ctlEl("div", "ctl-tabs");
+    tabs.setAttribute("role", "tablist");
+    [["personne", "person", "Personne"], ["entreprise", "business", "Entreprise"], ["code", "qr_code_2", "Badge / titre"]].forEach(function (t) {
+      var b = _ctlBtn("ctl-tab", t[1], t[2], function () { ctlSetTab(t[0]); });
+      b.dataset.tab = t[0];
+      b.setAttribute("role", "tab");
+      tabs.appendChild(b);
+    });
+    home.appendChild(tabs);
+
+    var fp = _ctlEl("div", "ctl-form");
+    fp.dataset.form = "personne";
+    fp.appendChild(_ctlInput("ctl-nom", "Nom", { maxlength: 80 }));
+    fp.appendChild(_ctlInput("ctl-prenom", "Prenom", { maxlength: 80, caps: "words" }));
+    var row = _ctlEl("div", "ctl-row");
+    row.appendChild(_ctlInput("ctl-naissance", "Date de naissance", { type: "date" }));
+    row.appendChild(_ctlInput("ctl-doc", "N° de document", { maxlength: 20 }));
+    fp.appendChild(row);
+    home.appendChild(fp);
+
+    var fe = _ctlEl("div", "ctl-form");
+    fe.dataset.form = "entreprise";
+    fe.appendChild(_ctlInput("ctl-raison", "Raison sociale", { maxlength: 120 }));
+    fe.appendChild(_ctlInput("ctl-siret", "SIRET ou SIREN", { inputmode: "numeric", maxlength: 17, placeholder: "14 ou 9 chiffres" }));
+    home.appendChild(fe);
+
+    var fc = _ctlEl("div", "ctl-form");
+    fc.dataset.form = "code";
+    fc.appendChild(_ctlInput("ctl-code", "Numero du badge ou du titre", { inputmode: "text", maxlength: 512 }));
+    fc.appendChild(_ctlEl("p", "ctl-hint", "Numero sous le code-barres, ou utilisez Lire un document pour scanner le code."));
+    home.appendChild(fc);
+
+    home.appendChild(_ctlEl("div", "ctl-field-label ctl-motif-label", "Motif"));
+    var motifs = _ctlEl("div", "ctl-motifs");
+    CTL_MOTIFS.forEach(function (m) {
+      var b = _ctlBtn("ctl-chip", null, m[1], function () { ctlSetMotif(m[0]); });
+      b.dataset.motif = m[0];
+      motifs.appendChild(b);
+    });
+    home.appendChild(motifs);
+    var err = _ctlEl("div", "ctl-error");
+    err.hidden = true;
+    home.appendChild(err);
+    _ctl.els.error = err;
+    var go = _ctlBtn("btn-primary ctl-go", "person_search", "Rechercher", function () { ctlSearch(); });
+    home.appendChild(go);
+    _ctl.els.go = go;
+    root.appendChild(home);
+
+    // 2. Lecture camera
+    var scan = _ctlEl("div", "ctl-step ctl-scan");
+    scan.dataset.step = "scan";
+    var stage = _ctlEl("div", "ctl-stage");
+    var video = document.createElement("video");
+    video.setAttribute("playsinline", "");
+    video.muted = true;
+    video.autoplay = true;
+    stage.appendChild(video);
+    var frame = _ctlEl("div", "ctl-frame");
+    frame.appendChild(_ctlEl("div", "ctl-frame-mrz"));
+    stage.appendChild(frame);
+    var torch = _ctlBtn("ctl-torch", "flashlight_off", null, ctlToggleTorch);
+    torch.setAttribute("aria-label", "Lampe");
+    torch.hidden = true;
+    stage.appendChild(torch);
+    scan.appendChild(stage);
+    var status = _ctlEl("div", "ctl-scan-status", "Placez le document dans le cadre, bande MRZ en bas.");
+    scan.appendChild(status);
+    var linesBox = _ctlEl("div", "ctl-lines");
+    linesBox.hidden = true;
+    scan.appendChild(linesBox);
+    scan.appendChild(_ctlBtn("btn-primary btn-cancel ctl-manual", "keyboard", "Saisir a la main", function () { ctlGo("accueil"); }));
+    root.appendChild(scan);
+    _ctl.video = video;
+    _ctl.canvas = document.createElement("canvas");
+    _ctl.els.torch = torch;
+    _ctl.els.scanStatus = status;
+    _ctl.els.lines = linesBox;
+
+    // 3. Resultat
+    var res = _ctlEl("div", "ctl-step ctl-result");
+    res.dataset.step = "resultat";
+    root.appendChild(res);
+    _ctl.els.result = res;
+
+    document.body.appendChild(root);
+    _ctl.root = root;
+    ["ctl-nom", "ctl-prenom", "ctl-doc", "ctl-raison", "ctl-siret", "ctl-code"].forEach(function (id) {
+      _ctl.els[id].addEventListener("keydown", function (e) { if (e.key === "Enter") ctlSearch(); });
+      _ctl.els[id].addEventListener("input", function () { _ctl.els.error.hidden = true; });
+    });
+  }
+
+  function openControleModal() {
+    if (!state.controle) return;
+    bumpActivity();
+    if (!_ctl.root) buildControleModal();
+    ctlReset();
+    _ctl.root.hidden = false;
+    ctlGo("accueil");
+  }
+
+  function closeControleModal() {
+    ctlStopCamera();
+    if (_ctl.root) _ctl.root.hidden = true;
+    ctlReset();     // rien ne reste affiche ni en memoire
+  }
+
+  function ctlReset() {
+    ["ctl-nom", "ctl-prenom", "ctl-naissance", "ctl-doc", "ctl-raison", "ctl-siret", "ctl-code"].forEach(function (id) {
+      if (_ctl.els[id]) _ctl.els[id].value = "";
+    });
+    _ctl.found = null;
+    _ctl.ocrLines = [];
+    _ctl.fillTarget = "nom";
+    if (_ctl.els.lines) { _ctl.els.lines.textContent = ""; _ctl.els.lines.hidden = true; }
+    _ctl.source = "manuel";
+    _ctl.motif = "acces";
+    _ctl.pending = false;
+    if (_ctl.els.result) _ctl.els.result.textContent = "";
+    if (_ctl.els.error) _ctl.els.error.hidden = true;
+    if (_ctl.root) { ctlSetTab("personne"); ctlSetMotif("acces"); ctlRenderFound(); }
+  }
+
+  function ctlGo(step) {
+    _ctl.step = step;
+    _ctl.root.dataset.step = step;
+    _ctl.els.back.hidden = step === "accueil";
+    _ctl.els.title.textContent = step === "scan" ? "Lire un document" : step === "resultat" ? "Resultat" : "Controle";
+    if (step === "scan") ctlStartCamera(); else ctlStopCamera();
+    if (step === "accueil") ctlRenderFound();
+  }
+
+  function ctlBack() {
+    ctlGo("accueil");
+  }
+
+  function ctlSetTab(tab) {
+    _ctl.tab = tab;
+    _ctl.root.querySelectorAll(".ctl-tab").forEach(function (b) {
+      var on = b.dataset.tab === tab;
+      b.classList.toggle("selected", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    _ctl.root.querySelectorAll(".ctl-form").forEach(function (f) { f.hidden = f.dataset.form !== tab; });
+    _ctl.els.error.hidden = true;
+  }
+
+  function ctlSetMotif(motif) {
+    _ctl.motif = motif;
+    _ctl.root.querySelectorAll(".ctl-chip[data-motif]").forEach(function (b) {
+      b.classList.toggle("selected", b.dataset.motif === motif);
+    });
+  }
+
+  // Bandeau "Lu sur le document" au-dessus du formulaire (relecture)
+  function ctlRenderFound() {
+    var home = _ctl.root.querySelector(".ctl-home");
+    var old = home.querySelector(".ctl-found");
+    if (old) old.remove();
+    if (!_ctl.found) return;
+    var f = _ctl.found;
+    var box = _ctlEl("div", "ctl-found" + (f.valide === false ? " warn" : ""));
+    box.appendChild(_mkIcon(f.valide === false ? "warning" : "fact_check"));
+    var txt = _ctlEl("div", "ctl-found-text");
+    var label = f.kind === "code" ? CTL_CODE_LABELS[f.type_code] : (CTL_DOC_LABELS[f.type_document] || "Document");
+    txt.appendChild(_ctlEl("strong", null, label + (f.pays && f.pays !== "FRA" ? " (" + f.pays + ")" : "")));
+    var sub = f.kind === "code" ? "Code lu : verifiez le numero."
+      : f.valide === false ? "Lecture incertaine : verifiez chaque champ avant de rechercher."
+      : "Lu sur le document : verifiez avant de rechercher.";
+    if (f.date_expiration && f.date_expiration < new Date().toISOString().slice(0, 10)) sub = "Document EXPIRE le " + f.date_expiration + ". " + sub;
+    txt.appendChild(_ctlEl("small", null, sub));
+    box.appendChild(txt);
+    home.insertBefore(box, home.querySelector(".ctl-tabs"));
+  }
+
+  // --- Camera et lecture ----------------------------------------------------
+
+  function ctlStartCamera() {
+    if (_ctl.stream) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      _ctl.els.scanStatus.textContent = "Camera indisponible sur cet appareil.";
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false,
+    }).then(function (s) {
+      if (_ctl.step !== "scan") { s.getTracks().forEach(function (t) { t.stop(); }); return; }
+      _ctl.stream = s;
+      _ctl.track = s.getVideoTracks()[0] || null;
+      _ctl.video.srcObject = s;
+      var caps = _ctl.track && _ctl.track.getCapabilities ? _ctl.track.getCapabilities() : null;
+      _ctl.els.torch.hidden = !(caps && caps.torch);
+      _ctl.torchOn = false;
+      if (!_ctl.detector && "BarcodeDetector" in window) {
+        try { _ctl.detector = new window.BarcodeDetector({ formats: SCN_FORMATS }); } catch (e) { _ctl.detector = null; }
+      }
+      if (!(NATIVE && _ctl.native !== false)) ctlNoOcrNotice();
+      _ctl.timer = setTimeout(ctlScanTick, 400);
+    }).catch(function () {
+      _ctl.els.scanStatus.textContent = "Acces a la camera refuse.";
+    });
+  }
+
+  function ctlStopCamera() {
+    if (_ctl.timer) { clearTimeout(_ctl.timer); _ctl.timer = null; }
+    if (_ctl.stream) {
+      try { _ctl.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    }
+    _ctl.stream = null;
+    _ctl.track = null;
+    if (_ctl.video) _ctl.video.srcObject = null;
+    _ctl.busy = false;
+  }
+
+  function ctlToggleTorch() {
+    if (!_ctl.track) return;
+    var on = !_ctl.torchOn;
+    _ctl.track.applyConstraints({ advanced: [{ torch: on }] }).then(function () {
+      _ctl.torchOn = on;
+      var ic = _ctl.els.torch.querySelector(".material-symbols-outlined");
+      if (ic) ic.textContent = on ? "flashlight_on" : "flashlight_off";
+    }).catch(function () { /* refuse par l'appareil */ });
+  }
+
+  function ctlNoOcrNotice() {
+    _ctl.els.scanStatus.textContent = _ctl.detector
+      ? "Codes QR et code-barres seulement : la lecture des pieces demande l'application Android a jour."
+      : "Lecture automatique indisponible sur cet appareil : saisissez a la main.";
+  }
+
+  function ctlScanTick() {
+    _ctl.timer = null;
+    if (_ctl.step !== "scan" || !_ctl.stream) return;
+    var v = _ctl.video;
+    if (_ctl.busy || !v || v.readyState < 2 || !v.videoWidth) { _ctl.timer = setTimeout(ctlScanTick, 250); return; }
+    _ctl.busy = true;
+    var done = function () {
+      _ctl.busy = false;
+      if (_ctl.step === "scan" && _ctl.stream && !_ctl.timer) _ctl.timer = setTimeout(ctlScanTick, CTL_SCAN_EVERY_MS);
+    };
+    if (NATIVE && _ctl.native !== false) {
+      var scale = Math.min(1, CTL_FRAME_MAX_W / v.videoWidth);
+      var cv = _ctl.canvas;
+      cv.width = Math.round(v.videoWidth * scale);
+      cv.height = Math.round(v.videoHeight * scale);
+      cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height);
+      var data = cv.toDataURL("image/jpeg", 0.85).split(",")[1];
+      NATIVE.scanImage({ image: data }).then(function (r) {
+        _ctl.native = true;
+        ctlHandleRead((r && r.lines) || [], (r && r.barcodes) || []);
+      }).catch(function (e) {
+        // Application 1.3 ou plus ancienne : pas de lecture native
+        if (_ctl.native === null) { _ctl.native = false; ctlNoOcrNotice(); tlog("controle", "lecture native indisponible : " + ((e && e.message) || "?")); }
+      }).then(done);
+      return;
+    }
+    if (_ctl.detector) {
+      _ctl.detector.detect(v).then(function (codes) {
+        ctlHandleRead([], (codes || []).map(function (c) { return { value: c.rawValue, format: c.format }; }));
+      }).catch(function () { /* image suivante */ }).then(done);
+      return;
+    }
+    _ctl.busy = false;
+  }
+
+  function ctlHandleRead(lines, barcodes) {
+    if (_ctl.step !== "scan") return;
+    var texts = lines.map(function (l) { return typeof l === "string" ? l : (l && l.text) || ""; }).filter(Boolean);
+    var mrz = ctlParseMrz(texts);
+    if (mrz && mrz.valide) { ctlAcceptDocument(mrz, "mrz"); return; }
+    var code = barcodes.filter(function (b) { return b && b.value; })[0];
+    if (code) {
+      ctlAcceptCode(code.format || "", String(code.value));
+      return;
+    }
+    var lic = ctlParseLicence(texts);
+    if (lic && lic.nom && lic.numero_document) { ctlAcceptDocument(lic, "ocr"); return; }
+    if (mrz) _ctl.els.scanStatus.textContent = "Bande MRZ reperee, lecture en cours... tenez le document immobile.";
+    else if (texts.length) _ctl.els.scanStatus.textContent = "Texte lu : touchez une ligne pour la reporter, ou continuez a viser la bande MRZ.";
+    ctlShowLines(texts);
+  }
+
+  // Lignes lues (badge, document sans MRZ) : touchees, elles remplissent le
+  // champ choisi. Le dernier lot reste affiche tant qu'il n'est pas vide.
+  function ctlShowLines(texts, force) {
+    // Liste figee 3 s apres un toucher : sinon elle bouge sous le doigt
+    if (!force && Date.now() - _ctl.linesTouchedAt < 3000) return;
+    var keep = texts.filter(function (t) { return t.trim().length >= 2 && t.length <= 60; }).slice(0, 14);
+    if (!keep.length) return;
+    _ctl.ocrLines = keep;
+    var box = _ctl.els.lines;
+    box.textContent = "";
+    box.hidden = false;
+    var targets = _ctlEl("div", "ctl-targets");
+    targets.appendChild(_ctlEl("span", "ctl-field-label", "Remplir :"));
+    [["nom", "Nom"], ["prenom", "Prenom"], ["doc", "N° doc"], ["raison", "Entreprise"]].forEach(function (t) {
+      var b = _ctlBtn("ctl-chip" + (_ctl.fillTarget === t[0] ? " selected" : ""), null, t[1], function () {
+        _ctl.fillTarget = t[0];
+        _ctl.linesTouchedAt = Date.now();
+        ctlShowLines(_ctl.ocrLines, true);
+      });
+      targets.appendChild(b);
+    });
+    box.appendChild(targets);
+    var list = _ctlEl("div", "ctl-line-list");
+    keep.forEach(function (t) {
+      list.appendChild(_ctlBtn("ctl-line", null, t, function () { ctlFillFromLine(t); }));
+    });
+    box.appendChild(list);
+  }
+
+  function ctlFillFromLine(text) {
+    var map = { nom: "ctl-nom", prenom: "ctl-prenom", doc: "ctl-doc", raison: "ctl-raison" };
+    var inp = _ctl.els[map[_ctl.fillTarget]];
+    if (!inp) return;
+    inp.value = _ctl.fillTarget === "doc" ? text.replace(/\s/g, "").toUpperCase() : text.trim();
+    _ctl.source = "ocr";
+    ctlSetTab(_ctl.fillTarget === "raison" ? "entreprise" : "personne");
+    var order = ["nom", "prenom", "doc"];
+    var i = order.indexOf(_ctl.fillTarget);
+    if (i >= 0 && i < order.length - 1) _ctl.fillTarget = order[i + 1];
+    try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) {}
+    toast("Reporte : " + text.slice(0, 30), "ok");
+    _ctl.linesTouchedAt = Date.now();
+    ctlShowLines(_ctl.ocrLines, true);
+  }
+
+  function ctlAcceptDocument(doc, source) {
+    try { if (navigator.vibrate) navigator.vibrate([60, 40, 60]); } catch (e) {}
+    _ctl.found = Object.assign({ kind: "document" }, doc);
+    _ctl.source = source;
+    _ctl.els["ctl-nom"].value = doc.nom || "";
+    _ctl.els["ctl-prenom"].value = doc.prenom || "";
+    _ctl.els["ctl-naissance"].value = doc.date_naissance || "";
+    _ctl.els["ctl-doc"].value = doc.numero_document || "";
+    ctlSetTab("personne");
+    ctlGo("accueil");
+  }
+
+  function ctlAcceptCode(format, value) {
+    try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
+    var type = ctlClassifyCode(format, value);
+    _ctl.found = { kind: "code", type_code: type, format: format };
+    _ctl.source = "code";
+    _ctl.els["ctl-code"].value = value;
+    ctlSetTab("code");
+    ctlGo("accueil");
+  }
+
+  // --- Recherche ------------------------------------------------------------
+
+  function ctlBuildQuery() {
+    var v = function (id) { return (_ctl.els[id].value || "").trim(); };
+    if (_ctl.tab === "personne") {
+      var q = { type: "personne", nom: v("ctl-nom"), prenom: v("ctl-prenom"),
+                date_naissance: v("ctl-naissance"), numero_document: v("ctl-doc").replace(/\s/g, "").toUpperCase() };
+      if (q.nom.length < 2 && !q.numero_document) return { error: "nom_requis" };
+      if (_ctl.found && _ctl.found.kind === "document") {
+        q.type_document = _ctl.found.type_document || "";
+        q.nationalite = _ctl.found.nationalite || "";
+      }
+      return { query: q };
+    }
+    if (_ctl.tab === "entreprise") {
+      var siret = v("ctl-siret").replace(/\s/g, "");
+      if (siret && !ctlSiretOk(siret)) return { error: "siret_invalide" };
+      if (v("ctl-raison").length < 2 && !siret) return { error: "entreprise_requise" };
+      return { query: { type: "entreprise", raison_sociale: v("ctl-raison"), siret: siret } };
+    }
+    if (!v("ctl-code")) return { error: "code_requis" };
+    var f = _ctl.found && _ctl.found.kind === "code" ? _ctl.found : null;
+    return { query: { type: "code", valeur: v("ctl-code"), format: f ? f.format : "manual",
+                      type_code: f ? f.type_code : ctlClassifyCode("manual", v("ctl-code")) } };
+  }
+
+  function ctlShowError(code) {
+    _ctl.els.error.textContent = CTL_ERRORS[code] || ("Recherche impossible (" + code + ").");
+    _ctl.els.error.hidden = false;
+  }
+
+  function ctlSearch() {
+    if (_ctl.pending) return;
+    var b = ctlBuildQuery();
+    if (b.error) { ctlShowError(b.error); return; }
+    if (!navigator.onLine || state.forceOffline) { ctlShowError("hors_ligne"); return; }
+    var source = _ctl.tab === "code" ? (_ctl.source === "code" ? "code" : "manuel")
+      : (_ctl.source === "code" ? "manuel" : _ctl.source);
+    _ctl.pending = true;
+    _ctl.els.go.disabled = true;
+    _ctl.els.go.classList.add("loading");
+    var criteria = b.query;
+    fetchWithTimeout("/field/controle/search", {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+      body: JSON.stringify({ query: criteria, source: source, motif: _ctl.motif }),
+    }, 20000).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, d: d }; });
+    }).then(function (x) {
+      if (x.status === 200 && x.d && x.d.ok) { ctlRenderResult(criteria, x.d); return; }
+      ctlShowError((x.d && x.d.error) || ("http_" + x.status));
+      if (x.d && x.d.error === "controle_non_autorise") { state.controle = false; applyControleButton(); }
+    }).catch(function () {
+      ctlShowError("consultation_indisponible");
+    }).then(function () {
+      _ctl.pending = false;
+      _ctl.els.go.disabled = false;
+      _ctl.els.go.classList.remove("loading");
+    });
+  }
+
+  function ctlCriteriaText(q) {
+    if (q.type === "personne") {
+      return [q.nom.toUpperCase(), q.prenom, q.date_naissance ? "ne(e) le " + q.date_naissance.split("-").reverse().join("/") : "",
+              q.numero_document ? "doc. " + q.numero_document : ""].filter(Boolean).join(" · ");
+    }
+    if (q.type === "entreprise") return [q.raison_sociale, q.siret ? "SIRET " + q.siret : ""].filter(Boolean).join(" · ");
+    return (CTL_CODE_LABELS[q.type_code] || "Code") + " " + q.valeur.slice(0, 60);
+  }
+
+  var CTL_VERDICTS = {
+    aucun: ["search_off", "Aucune correspondance", "Rien dans les fichiers consultes."],
+    correspondance: ["check_circle", "Correspondance trouvee", "Verifiez le detail ci-dessous."],
+    attention: ["warning", "A verifier", "Un point demande votre attention."],
+    alerte: ["e911_emergency", "ALERTE", "Suivez les consignes. Prevenez le PC Org."],
+  };
+
+  function ctlRenderResult(criteria, d) {
+    var box = _ctl.els.result;
+    box.textContent = "";
+    var statut = CTL_VERDICTS[d.statut] ? d.statut : "aucun";
+    var v = CTL_VERDICTS[statut];
+    var banner = _ctlEl("div", "ctl-verdict ctl-v-" + statut);
+    banner.appendChild(_mkIcon(v[0]));
+    var bt = _ctlEl("div", "ctl-verdict-text");
+    bt.appendChild(_ctlEl("strong", null, v[1]));
+    bt.appendChild(_ctlEl("small", null, v[2]));
+    banner.appendChild(bt);
+    box.appendChild(banner);
+    if (d.demo) box.appendChild(_ctlEl("div", "ctl-demo", "Resultats fictifs : tablette en mode test."));
+    box.appendChild(_ctlEl("div", "ctl-criteria", "Recherche : " + ctlCriteriaText(criteria)));
+
+    (d.resultats || []).forEach(function (r) {
+      var card = _ctlEl("div", "ctl-card ctl-n-" + (r.niveau || "info"));
+      card.appendChild(_ctlEl("div", "ctl-card-title", r.titre));
+      if (r.sous_titre) card.appendChild(_ctlEl("div", "ctl-card-sub", r.sous_titre));
+      if (r.message) card.appendChild(_ctlEl("p", "ctl-card-msg", r.message));
+      if (r.consignes) {
+        var cons = _ctlEl("div", "ctl-card-consignes");
+        cons.appendChild(_mkIcon("campaign"));
+        cons.appendChild(_ctlEl("span", null, r.consignes));
+        card.appendChild(cons);
+      }
+      if (r.champs && r.champs.length) {
+        var dl = _ctlEl("dl", "ctl-card-fields");
+        r.champs.forEach(function (c) {
+          dl.appendChild(_ctlEl("dt", null, c.label));
+          dl.appendChild(_ctlEl("dd", null, c.valeur || "-"));
+        });
+        card.appendChild(dl);
+      }
+      if (r.source) card.appendChild(_ctlEl("div", "ctl-card-source", "Source : " + r.source));
+      box.appendChild(card);
+    });
+    (d.messages || []).forEach(function (m) { box.appendChild(_ctlEl("p", "ctl-message", m)); });
+    if (d.sources && d.sources.length) {
+      var src = _ctlEl("div", "ctl-sources");
+      src.appendChild(_ctlEl("span", "ctl-field-label", "Fichiers consultes"));
+      d.sources.forEach(function (s) {
+        var chip = _ctlEl("span", "ctl-source ctl-s-" + s.etat, s.nom + (s.etat === "indisponible" ? " (indisponible)" : s.etat === "non_consulte" ? " (non consulte)" : ""));
+        src.appendChild(chip);
+      });
+      box.appendChild(src);
+    }
+    box.appendChild(_ctlEl("div", "ctl-ref", "Reference " + String(d.consultation_id || "").slice(0, 8)));
+    var actions = _ctlEl("div", "ctl-actions");
+    actions.appendChild(_ctlBtn("btn-primary btn-cancel", "edit", "Modifier", function () { ctlGo("accueil"); }));
+    actions.appendChild(_ctlBtn("btn-primary", "restart_alt", "Nouveau controle", function () { ctlReset(); ctlGo("accueil"); }));
+    box.appendChild(actions);
+    ctlGo("resultat");
+    if (statut === "alerte") { try { if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]); } catch (e) {} }
+    tlog("controle", criteria.type + " : " + statut + " (" + (d.resultats || []).length + ")");
+  }
+
+  // Bouton visible pour les seuls groupes coches (lu a chaud)
+  function applyControleButton() {
+    var b = $("btn-controle");
+    if (b) b.hidden = !state.controle;
+    if (!state.controle && _ctl.root && !_ctl.root.hidden) closeControleModal();
+  }
+
+  // =====================================================================
   // SCAN modal (QR / barcodes) - alternative au modal camera. Meme flux :
   // viewfinder live, accumulation de codes, compose pane (categorie /
   // urgence / commentaire + joindre fiche), envoi non-bloquant avec
@@ -9750,7 +10543,8 @@
     var btnRouteClear = $("btn-route-clear");
     if (btnRouteClear) btnRouteClear.addEventListener("click", clearRoute);
     $("btn-layers").addEventListener("click", cycleLayer);
-    $("btn-grid").addEventListener("click", openLayersPanel);
+    var btnControle = $("btn-controle");
+    if (btnControle) btnControle.addEventListener("click", openControleModal);
     var btnGridFab = $("btn-grid-fab");
     if (btnGridFab) btnGridFab.addEventListener("click", function () { toggleGrid(); });
     var cameraBtn = $("btn-camera");
@@ -10485,6 +11279,8 @@
     state.declarant = !!dev.declarant;
     if (NATIVE) refreshGpsProfile();
     state.routePiste = !!dev.route_piste;
+    state.controle = !!dev.controle;
+    applyControleButton();
     state.deviceCategory = dev.category || state.deviceCategory || null;
     // Ouverture depuis la notification d'un message du PC : /field?constat=<id>
     try {
@@ -10612,6 +11408,7 @@
       if (state.fichesTimer) { clearTimeout(state.fichesTimer); state.fichesTimer = null; }
       // Liberer la camera quand l'app passe en arriere-plan (batterie + LED)
       stopCameraStream();
+      ctlStopCamera();
       refreshGpsProfile();      // peut passer en "paused" si pas critique
       releaseWakeLock();
       return;
@@ -10619,6 +11416,7 @@
     // Retour visible
     document.body.removeAttribute("data-app-hidden");
     acquireWakeLock();
+    if (_ctl.root && !_ctl.root.hidden && _ctl.step === "scan") ctlStartCamera();
     refreshGpsProfile();
     if (!state.clockTimer) startClock();
     // Poll immediat dans tous les cas : si "hidden" n'a pas ete recu (iOS),

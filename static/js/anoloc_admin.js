@@ -290,6 +290,13 @@
         pst.title = "Itineraires par la piste autorises aux tablettes Field du groupe";
         tdLabel.appendChild(pst);
       }
+      if (grp.controle) {
+        var ctl = document.createElement("span");
+        ctl.style.cssText = "margin-left:6px; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; background:#ede9fe; color:#5b21b6;";
+        ctl.textContent = "Controle";
+        ctl.title = "Controle de documents autorise aux tablettes Field du groupe";
+        tdLabel.appendChild(ctl);
+      }
       tr.appendChild(tdLabel);
 
       // Devices count
@@ -367,6 +374,7 @@
       if (pcoCatSel) pcoCatSel.value = grp.pco_category || "";
       $('input[name="declarant"]', form).checked = !!grp.declarant;
       $('input[name="route_piste"]', form).checked = !!grp.route_piste;
+      $('input[name="controle"]', form).checked = !!grp.controle;
     } else {
       title.textContent = "Nouveau groupe de balises";
       $('input[name="id"]', form).value = "";  // forcer id vide pour nouveau groupe
@@ -528,6 +536,7 @@
       pco_category: pcoCategory,
       declarant: $('input[name="declarant"]', form).checked,
       route_piste: $('input[name="route_piste"]', form).checked,
+      controle: $('input[name="controle"]', form).checked,
     };
 
     if (!config.beacon_groups) config.beacon_groups = [];

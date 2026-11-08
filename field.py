@@ -33,6 +33,7 @@ import pcorg_history as PH
 import dispatch_auto as DA
 import patrols as PATROLS
 import event_courant as EC
+import controle as CONTROLE
 
 try:
     from PIL import Image, ImageOps
@@ -839,6 +840,17 @@ def _device_route_piste(db, device, groups=None):
     return bool((groups.get(device.get("beacon_group_id")) or {}).get("route_piste"))
 
 
+def _device_controle(db, device, groups=None):
+    """Controle de documents (08/11/2026) : drapeau `controle` du GROUPE de
+    balises de la tablette, lu a chaud comme `declarant`. Ouvre le bouton
+    Controle de Field et la route /field/controle/search (controle.py)."""
+    if not device:
+        return False
+    if groups is None:
+        groups = _beacon_groups(db)
+    return bool((groups.get(device.get("beacon_group_id")) or {}).get("controle"))
+
+
 # Photos des declarants : gardees 1 an (constats de degats), sous un dossier
 # a part que la purge reconnait sans lire Mongo.
 DECLARANT_PHOTO_SUBDIR = "_declarant"
@@ -1373,6 +1385,7 @@ def field_index():
     groups = _beacon_groups(db)
     pub["declarant"] = _device_declarant(db, device, groups)
     pub["route_piste"] = _device_route_piste(db, device, groups)
+    pub["controle"] = _device_controle(db, device, groups)
     return _renew_device_cookie(
         db, device, token,
         render_template("field.html", device=pub, categories=FIELD_CATEGORIES))
@@ -1559,6 +1572,24 @@ def field_push_subscribe():
         upsert=True,
     )
     return jsonify({"ok": True})
+
+
+@field_bp.route("/field/controle/search", methods=["POST"])
+@field_token_required
+def field_controle_search():
+    """Controle de documents : transmet la demande au serveur de consultation
+    (controle.py, contrat dans docs/controle-documents.md). Groupe coche
+    "Controle de documents" obligatoire, verifie a chaque appel."""
+    db = _get_mongo_db()
+    device = request.device
+    groups = _beacon_groups(db)
+    if not _device_controle(db, device, groups):
+        return jsonify({"ok": False, "error": "controle_non_autorise"}), 403
+    last = device.get("last_position") or {}
+    position = {"lat": last.get("lat"), "lng": last.get("lng")} if last.get("lat") is not None else None
+    body, status = CONTROLE.search(db, device, request.get_json(silent=True) or {},
+                                   group_id=device.get("beacon_group_id"), position=position)
+    return jsonify(body), status
 
 
 @field_bp.route("/field/push/fcm-register", methods=["POST"])
@@ -3373,6 +3404,7 @@ def field_admin_beacon_groups():
             "pco_category": g.get("pco_category"),
             "declarant": bool(g.get("declarant")),
             "route_piste": bool(g.get("route_piste")),
+            "controle": bool(g.get("controle")),
             "disabled": g.get("enabled") is False,
         })
     resp = jsonify({"groups": groups})
@@ -5052,6 +5084,8 @@ def field_my_fiches():
         "declarant": declarant,
         # Acces piste des itineraires (groupe de balises, decoche a chaud)
         "route_piste": _device_route_piste(db, dev_fresh),
+        # Controle de documents (groupe de balises, decoche a chaud)
+        "controle": _device_controle(db, dev_fresh),
         # Proposition automatique en attente de reponse (compte a rebours)
         "proposal": None if declarant else DA.proposal_for_device(db, dev_fresh),
         # Cloture par l'unite autorisee pour sa categorie (fin avec issue)

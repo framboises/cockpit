@@ -41,6 +41,7 @@ Pas de tests automatisés ni de linter configurés.
 | `TITAN_JWKS_URL` | JWKS EdDSA du portail TITAN Home v2 (`decoder_jeton_portail` de `app.py` : EdDSA par le JWKS, HS256 par `JWT_SECRET`, puis révocation partagée `titan_shared`). JWKS injoignable : jetons EdDSA refusés, HS256 acceptés | `http://127.0.0.1:8080/.well-known/jwks.json` |
 | `CODING` | `true` bypass l'auth en dev | `false` |
 | `FIELD_FCM_CREDENTIALS` | Chemin de la cle de service du projet Firebase DEDIE a l'application Android Field (notifications FCM, `field.py`). Ne pas reutiliser `firebase-service-account.json` (Vision) | — (notifications Android impossibles, Web Push inchange) |
+| `CONTROLE_API_URL` / `CONTROLE_API_SECRET` | Serveur de consultation du controle de documents des tablettes Field (`controle.py`, contrat dans `docs/controle-documents.md`) : URL HTTPS et secret HMAC (32 car. min.). Aussi `CONTROLE_API_TIMEOUT` (8 s), `CONTROLE_RATE_10MIN` (40), `CONTROLE_RETENTION_DAYS` (365, TTL du journal `controle_consultations`) | — (503, resultats fictifs pour une tablette en mode test) |
 | `COCKPIT_ANTHROPIC_API_KEY` | Clé API Anthropic de Cockpit (clé console « cockpit-prod »). ⚠️ Seule lue : `ANTHROPIC_API_KEY` est volontairement ignorée (lue par tout script du même compte Windows, elle rendait la consommation indiscernable) | — (routes IA en 503 si vide) |
 | `CLAUDE_MODEL` | Modèle Claude utilisé par l'Assistant IA | `claude-sonnet-5-5` |
 | `CLAUDE_TIMEOUT_SECONDS` | Timeout HTTP appel Claude (entre 2 chunks SSE) | `120` |
@@ -161,7 +162,7 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/presents.md` : Presents sur site (presents_etat.py) : remises a zero, pics, serie N-1
 - `docs/claude/montre.md` : Montre Garmin (cote serveur et pieges Connect IQ) : trafic_etat, meteo_etat, payload, guidage
 - `docs/claude/main-courante.md` : Main courante pcorg : pcorg_history, fusion SQL/Cockpit, droits, CSRF d'onglet ancien, aide a la saisie (pcorg_assist)
-- `docs/claude/field.md` : Tablettes Field : categories, dispatch automatique, idempotence, statuts hors ligne, SOS, application Android (`mobile/field-android/`, service de position natif, FCM)
+- `docs/claude/field.md` : Tablettes Field : categories, dispatch automatique, idempotence, statuts hors ligne, SOS, application Android (`mobile/field-android/`, service de position natif, FCM). Controle de documents (bouton loupe, MRZ / permis / badges, relais signe vers le serveur de consultation) : `docs/controle-documents.md`
 - `docs/claude/alertes.md` : Centrale d'alerte : rendu pilote par la definition, display_mode, explication IA, saturation porte
 - `docs/claude/alfred.md` : Alfred (agent IA WhatsApp) : webhook WAHA, breaker, resumes Ollama ; chat Alfred des operateurs (widget, outils exposes a la VM, jeton de portee). Brief du wrapper VM : `docs/alfred-vm-brief.md`
 - `docs/claude/ai-reports.md` : Briefing de situation et RETEX de fin d'edition (ai_reports.py)

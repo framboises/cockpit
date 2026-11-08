@@ -140,6 +140,27 @@ public class FieldNativePlugin extends Plugin {
         call.resolve();
     }
 
+    /** Controle de documents : texte et codes lus sur une image JPEG (base64). */
+    @PluginMethod
+    public void scanImage(PluginCall call) {
+        String image = call.getString("image");
+        if (image == null || image.isEmpty()) {
+            call.reject("image_absente");
+            return;
+        }
+        FieldScanner.scan(image, new FieldScanner.Callback() {
+            @Override
+            public void done(JSObject result) {
+                call.resolve(result);
+            }
+
+            @Override
+            public void failed(String error) {
+                call.reject(error);
+            }
+        });
+    }
+
     @PluginMethod
     public void getFcmToken(PluginCall call) {
         if (FirebaseApp.getApps(getContext()).isEmpty()) {
