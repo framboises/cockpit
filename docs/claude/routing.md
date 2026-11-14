@@ -37,7 +37,7 @@ Données OSM (Le Mans)  →  Saison  →  Épreuve (facultative)  =  Scénario c
 - `routing.py` : `/api/route` (modale fiche `routing.js`, bac à sable `routing_test.js`) et `/field/api/route` (tablette). Cases « Intervention prioritaire » et « Accès piste ». Évitements Waze conservés en modes normaux (`avoid_locations` / `exclude_polygons`), jamais en god.
 - **Piste sur tablette** : drapeau `route_piste` du **groupe de balises** (case « Accès piste dans les itinéraires » de la modale de groupe, `edit.html` / `anoloc_admin.js`), lu à chaud par `field._device_route_piste` comme `declarant`. Sans le drapeau, la case n'apparaît pas et le serveur **refuse** (`403 piste_not_allowed`) plutôt que de dégrader en silence.
 - `balises_trace.py` : recalage `/trace_attributes` en **`god_piste`** (véhicules d'intervention, piste dans les deux sens).
-- `/api/admin/itineraire/route-test` : testeur, A → B dans les 4 modes (sans Waze, sans repli).
+- `/api/admin/itineraire/route-test` : testeur, A → B dans les 4 modes **plus à pied** (`mode: "pedestrian"`, `costing: pedestrian` passé en `recipe` à `_call_valhalla`, jamais via `route_recipe` qui retomberait sur `normal`), sans Waze, sans repli. Sur la carte : trajets sur leur calque `itTest` (z-index 640, liseré blanc), couleurs hors palette des règles, voies / portails / pictos estompés à 25 % pendant le test (`.is-testing`).
 - **Aucun chemin** (HTTP 400 de Valhalla, typiquement un passage `fermer`) → erreur `no_route`, **jamais** le trait droit estimé ; le repli `engine: "stub"` reste réservé à Valhalla injoignable (dont les ~30 s de rechargement).
 
 ### Page d'administration `/admin/itineraire`
