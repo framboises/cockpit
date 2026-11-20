@@ -290,6 +290,10 @@ def serialize_zone(doc):
 
     # Tri chrono pour cumul "presents" coherent (entree - sortie depuis debut periode)
     intervals_sorted = sorted(doc['intervals'], key=lambda x: x['ts'])
+    # Remise a zero nocturne (evenement de journee, cf. scan_import) : le
+    # solde repart de 0 au premier creneau de chaque journee d'exploitation.
+    reset_hour = doc.get('presence_reset_hour')
+    current_day = None
     presents = 0
     for it in intervals_sorted:
         ts = it['ts']
@@ -297,6 +301,11 @@ def serialize_zone(doc):
         hm = ts.strftime('%H:%M')
         e = int(it.get('entree') or 0)
         s = int(it.get('sortie') or 0)
+        if reset_hour is not None:
+            op_day = (ts - timedelta(hours=int(reset_hour))).date()
+            if current_day is not None and op_day != current_day:
+                presents = 0
+            current_day = op_day
         presents += e - s
         by_day[d].append({'hm': hm, 'e': e, 's': s, 'p': presents})
         day_totals[d]['e'] += e
@@ -2400,9 +2409,20 @@ function aggregatePortesEnceinte() {
   let totalE = 0, totalS = 0;
   let dailyPeakP = new Map(); // 'YYYY-MM-DD' -> {peak, hm}
   let hourlyFlow = new Map(); // 'YYYY-MM-DD HH:00' -> {e, s, flow}
+  // Remise a zero nocturne des presents (meme regle que les documents).
+  const resetHour = (DATA.presence_reset_hour === null || DATA.presence_reset_hour === undefined)
+    ? null : Number(DATA.presence_reset_hour);
+  let opDay = null;
   sorted.forEach(k => {
     const v = byTs.get(k);
     totalE += v.e; totalS += v.s;
+    if (resetHour !== null) {
+      const t = new Date(k.slice(0, 10) + 'T' + k.slice(11) + ':00Z');
+      t.setUTCHours(t.getUTCHours() - resetHour);
+      const day = t.toISOString().slice(0, 10);
+      if (opDay !== null && day !== opDay) cumul = 0;
+      opDay = day;
+    }
     cumul += v.e - v.s;
     if (cumul > peak.val) peak = { val: cumul, ts: k };
     const d = k.slice(0, 10);

@@ -77,11 +77,14 @@ _ZONE_PREFIX_RE = re.compile(r'^(?:AA|P|PK|PKG|PARKING|CAMPING|AIRE|AIRE D ACCUE
 class ScanImportError(Exception):
     """Erreur d'import exposee au front. `code` est l'identifiant machine."""
 
-    def __init__(self, code, status=400, detail=None):
+    def __init__(self, code, status=400, detail=None, **extra):
         super().__init__(code)
         self.code = code
         self.status = status
         self.detail = detail
+        # Contexte supplementaire renvoye au front (ex. colonnes detectees
+        # quand un journal ne peut pas etre lu sans mapping manuel).
+        self.extra = extra
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +200,9 @@ def _build_column_map(header_row, sense_row, first_data_col):
 def _classify_device(name):
     """'pda' | 'tripode' | 'autre' d'apres le prefixe du device."""
     norm = normalize_label(name)
-    if norm.startswith('PDA'):
+    # SUNMI / ZEBRA / HONEYWELL : terminaux portatifs des journaux Weezevent
+    # (GP Explorer 2025), equivalents des PDA Sirius.
+    if norm.startswith(('PDA', 'SUNMI', 'ZEBRA', 'HONEYWELL')):
         return 'pda'
     if norm.startswith('TRI'):
         return 'tripode'
@@ -342,6 +347,8 @@ def parse_scan_xlsx(path):
         'porte_count': sum(1 for u in units if u['kind'] == 'porte'),
         'device_hours': {k: dict(v) for k, v in device_hours.items()},
         'uam_devices': sorted(uam_devices),
+        'has_tripodes': any(u['tripode_count'] for u in units),
+        'format': 'matrice',
     }
 
 
@@ -465,6 +472,22 @@ def _load_overrides(db, event=None, year=None):
             'no_location': doc.get('no_location'),
             'targeted': targeted,
         }
+    return out
+
+
+def _load_overrides_by_name(db, event=None, year=None):
+    """Corrections manuelles indexees sur le seul nom normalise.
+
+    Dans un journal de scans, la nature porte / zone d'une unite n'est pas
+    structurelle : elle suit la categorie choisie. Un choix memorise sous
+    l'autre nature doit donc etre retrouve quand meme. Un override de porte
+    l'emporte sur un override de zone du meme nom.
+    """
+    out = {}
+    for (kind, norm), val in _load_overrides(db, event, year).items():
+        if norm in out and kind != 'porte':
+            continue
+        out[norm] = val
     return out
 
 
@@ -608,7 +631,8 @@ def _candidates_for(unit, geo):
     return found
 
 
-def resolve_features(db, units, event=None, year=None, overrides=None):
+def resolve_features(db, units, event=None, year=None, overrides=None,
+                     any_kind=False):
     """Rattache chaque unite a une feature geographique.
 
     Trois niveaux, du plus fiable au moins fiable :
@@ -619,6 +643,10 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
     `overrides` (optionnel) : mapping ad hoc fourni par l'UI pour cet import,
     au format {(kind, name): {_id_feature, feature_collection}} — prioritaire
     sur tout le reste.
+
+    `any_kind` : un choix memorise sous l'autre nature (porte / zone) est
+    repris a defaut d'un choix exact. Reserve aux journaux de scans, ou la
+    nature suit la categorie ; dans une matrice Sirius elle est structurelle.
 
     Retourne {(kind, name): {_id_feature, feature_collection, feature_source,
                              feature_label, candidates}}.
@@ -631,6 +659,7 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
     geo = _load_geo_index(db)
     known = _harvest_known_doors(db)
     saved = _load_overrides(db, event, year)
+    saved_by_name = _load_overrides_by_name(db, event, year) if any_kind else {}
     live = overrides or {}
 
     result = {}
@@ -651,7 +680,8 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
         # Fusion, pas remplacement : un choix de l'UI qui ne porte QUE sur la
         # categorie ne doit pas effacer un rattachement geographique deja
         # memorise (et reciproquement).
-        manual = dict(saved.get((unit['kind'], norm)) or {})
+        manual = dict(saved.get((unit['kind'], norm))
+                      or saved_by_name.get(norm) or {})
         manual.update({k: v for k, v in (live.get(key) or {}).items()
                        if v is not None})
         if manual.get('no_location'):
@@ -775,6 +805,68 @@ def _sorted_slots(unit):
     return sorted(unit['slots'].items())
 
 
+# ---------------------------------------------------------------------------
+# Remise a zero nocturne des presents
+# ---------------------------------------------------------------------------
+#
+# Le solde entree - sortie cumule sur toute la periode suppose que chaque
+# sortie est scannee. Sur un evenement de journee (GP Explorer 2025), les
+# evacuations du soir se font portes ouvertes, sans scan : le vendredi laisse
+# ~26 700 « presents » fantomes, le samedi ~18 000, et le pic du dimanche
+# montait a 135 000 pour ~83 000 personnes reelles (86 458 billets distincts
+# entres ce jour-la). La remise a zero repart de 0 au premier creneau de chaque
+# journee d'exploitation, journee qui commence a `reset_hour`.
+#
+# Jamais deduite : sur un evenement de 24 h le public dort dans l'enceinte et
+# le solde doit traverser la nuit. C'est un reglage de l'edition, choisi a
+# l'import et memorise dans `complet.presence_reset_hour` (None = continu).
+
+def normalize_reset_hour(value):
+    """Heure de remise a zero (0-23) ou None."""
+    if value in (None, '', False):
+        return None
+    try:
+        h = int(value)
+    except (TypeError, ValueError):
+        return None
+    return h if 0 <= h <= 23 else None
+
+
+def operating_day(ts, reset_hour):
+    """Journee d'exploitation d'un instant : la veille avant `reset_hour`."""
+    return (ts - timedelta(hours=reset_hour)).date()
+
+
+def _as_dt(raw):
+    if isinstance(raw, datetime):
+        return raw
+    try:
+        return datetime.fromisoformat(str(raw)[:19])
+    except ValueError:
+        return None
+
+
+def running_presence(points, reset_hour=None):
+    """[(instant, entrees, sorties)] tries -> presents apres chaque point.
+
+    `instant` : datetime ou chaine ISO. Sans `reset_hour`, solde continu
+    (comportement historique, inchange).
+    """
+    reset_hour = normalize_reset_hour(reset_hour)
+    out, present, current_day = [], 0, None
+    for ts, e, s in points:
+        if reset_hour is not None:
+            dt = _as_dt(ts)
+            if dt is not None:
+                day = operating_day(dt, reset_hour)
+                if current_day is not None and day != current_day:
+                    present = 0
+                current_day = day
+        present += e - s
+        out.append(present)
+    return out
+
+
 def _hourly(unit):
     """Agrege les creneaux 15 min en creneaux horaires alignes."""
     buckets = defaultdict(lambda: {'e': 0, 's': 0, 'a': 0})
@@ -786,7 +878,8 @@ def _hourly(unit):
 
 
 def build_complet_doc(parsed, resolved, event, year, race_iso=None,
-                      imported_by=None, imported_at=None, uam_by_porte=None):
+                      imported_by=None, imported_at=None, uam_by_porte=None,
+                      presence_reset_hour=None):
     """Document `type: "complet"` — granularite 15 min, source du rapport.
 
     `entree`/`sortie`/`autre` sont des deltas par creneau ; `present` est le
@@ -798,14 +891,16 @@ def build_complet_doc(parsed, resolved, event, year, race_iso=None,
     qui rapproche dangereusement le document de la limite BSON de 16 Mo.
     """
     uam_by_porte = uam_by_porte or {}
+    reset_hour = normalize_reset_hour(presence_reset_hour)
     ignored = ignored_keys(resolved)
     units_out = []
     for unit in parsed['units']:
         feat = resolved.get(unit['key'], {})
-        present = 0
+        slots = _sorted_slots(unit)
+        presents = running_presence(
+            [(ts, c['e'], c['s']) for ts, c in slots], reset_hour)
         series = []
-        for ts, counts in _sorted_slots(unit):
-            present += counts['e'] - counts['s']
+        for (ts, counts), present in zip(slots, presents):
             series.append({
                 'date': _iso(ts),
                 'entree': counts['e'],
@@ -853,16 +948,23 @@ def build_complet_doc(parsed, resolved, event, year, race_iso=None,
         'race': race_iso,
         'granularity': '15min',
         'source_file': parsed.get('source_file'),
+        # 'matrice' (export Sirius 15 min) ou 'journal' (une ligne par scan,
+        # agregee a l'import) : deux mesures qui ne se comparent pas forcement.
+        'source_format': parsed.get('format') or 'matrice',
         'imported_at': imported_at or datetime.now(),
         'imported_by': imported_by,
         'period_start': _iso(parsed['period_start']),
         'period_end': _iso(parsed['period_end']),
         'slot_count': parsed['slot_count'],
+        # Heure de remise a zero des presents (None = solde continu). Lu par
+        # la reconstruction du mapping, la vue Frequentation et le rapport.
+        'presence_reset_hour': reset_hour,
         'complet': units_out,
     }
 
 
-def build_frequentation_doc(parsed, event, year, race_iso=None, resolved=None):
+def build_frequentation_doc(parsed, event, year, race_iso=None, resolved=None,
+                            presence_reset_hour=None):
     """Document `type: "frequentation"` — serie globale horaire de l'enceinte.
 
     Shape strictement identique a l'existant : une seule serie sous la cle
@@ -896,7 +998,13 @@ def build_frequentation_doc(parsed, event, year, race_iso=None, resolved=None):
 
     data = []
     cum_e = cum_s = 0
-    for hour, counts in sorted(hourly.items()):
+    ordered = sorted(hourly.items())
+    reset_hour = normalize_reset_hour(presence_reset_hour)
+    # `entree`/`sortie` restent des cumuls sur toute la periode (contrat des
+    # lecteurs) ; seul `present` suit la remise a zero eventuelle.
+    presents = running_presence(
+        [(h, c['e'], c['s']) for h, c in ordered], reset_hour)
+    for (hour, counts), present in zip(ordered, presents):
         cum_e += counts['e']
         cum_s += counts['s']
         data.append({
@@ -904,7 +1012,7 @@ def build_frequentation_doc(parsed, event, year, race_iso=None, resolved=None):
             'date': _iso(hour),
             'entree': cum_e,
             'sortie': cum_s,
-            'present': cum_e - cum_s,
+            'present': present,
         })
 
     # Tracabilite : la courbe de presents sous-compte mecaniquement de tous
@@ -924,6 +1032,7 @@ def build_frequentation_doc(parsed, event, year, race_iso=None, resolved=None):
         # Portes volontairement ecartees : sans cette trace, un lecteur futur
         # ne peut pas savoir pourquoi le total differe d'une autre generation.
         'ignored_doors': sorted(name for kind, name in ignored if kind == 'porte'),
+        'presence_reset_hour': reset_hour,
     }
 
 
@@ -1325,6 +1434,11 @@ def compute_uam_help(parsed, tripode_portes):
     simplement vide partout — ce n'est pas une anomalie.
     """
     uam = set(parsed.get('uam_devices') or [])
+    # Fichier sans aucun tripode (journal tout en terminaux portatifs) : un
+    # PDA sur une porte a tripodes est l'equipement normal de l'edition, pas
+    # un debordement. Le signaler marquerait toutes les portes en renfort.
+    if parsed.get('has_tripodes') is False:
+        tripode_portes = set()
     per_porte_uam = defaultdict(lambda: defaultdict(lambda: {'pdas': set(), 'scans': 0}))
     per_porte_renfort = defaultdict(lambda: defaultdict(lambda: {'pdas': set(), 'scans': 0}))
 

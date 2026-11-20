@@ -228,6 +228,9 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
             'total_entree': int(unit.get('total_entree') or 0),
             'total_sortie': int(unit.get('total_sortie') or 0),
             'intervals': intervals,
+            # Remise a zero nocturne des presents choisie a l'import (None :
+            # solde continu, comportement historique).
+            'presence_reset_hour': doc.get('presence_reset_hour'),
             # Pas de staffing ici : il est calcule en fin de generation, par
             # `scan_staffing.attach_to_payload`. Reprendre celui du document
             # ferait survivre le resultat de l'ancienne chaine a validation
@@ -277,6 +280,9 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
         # Provenance, affichee dans l'en-tete du tableau de bord.
         'source': source,
         'source_label': source_label(doc, source),
+        # Lu par aggregatePortesEnceinte() dans le gabarit : la meme remise a
+        # zero que les documents, sinon le KPI du tableau de bord divergerait.
+        'presence_reset_hour': doc.get('presence_reset_hour'),
     }
     info = {
         'source': source,

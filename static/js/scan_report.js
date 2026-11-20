@@ -115,13 +115,23 @@
       "Importer des scans — " + currentEvent() + " " + currentYear();
     $("#scan-file-input").value = "";
     $("#scan-upload-progress").hidden = true;
+    clear($("#scan-format-fix"));
+    var oldErr = $("#scan-step-file").querySelector(".scan-note.err");
+    if (oldErr) oldErr.remove();
     clear($("#scan-result-body"));
     showStep("file");
     $("#scan-import-modal").hidden = false;
   }
 
+  // Aligne sur MAX_UPLOAD_BYTES (scan_report.py) et sur la limite IIS du
+  // web.config : refuser cote client evite d'envoyer 300 Mo pour rien.
+  var MAX_UPLOAD_MB = 200;
+
   function upload(file) {
     if (!file) return;
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      return failFile({ error: "fichier_trop_volumineux" });
+    }
     var fd = new FormData();
     fd.append("file", file);
     fd.append("event", currentEvent());
@@ -147,22 +157,27 @@
       fill.style.width = p + "%";
       pct.textContent = p + " %";
       if (p >= 100) {
-        // Le parsing serveur prend quelques secondes : on bascule en
-        // indetermine plutot que de laisser la barre figee a 100 %.
-        label.textContent = "Analyse du classeur...";
+        label.textContent = "Fichier recu, analyse...";
         pct.textContent = "";
         prog.querySelector(".scan-progress-bar").classList.add("indeterminate");
       }
     };
 
     xhr.onload = function () {
-      prog.hidden = true;
-      prog.querySelector(".scan-progress-bar").classList.remove("indeterminate");
       var data;
       try { data = JSON.parse(xhr.responseText); }
-      catch (e) { data = { ok: false, error: "reponse_illisible" }; }
-      if (!data.ok) return failFile(data);
-      renderPreview(data);
+      catch (e) {
+        // IIS rejette un corps trop gros en 404.13 / 413, en HTML, avant
+        // meme que la requete n'atteigne l'application.
+        data = { ok: false, error: (xhr.status === 404 || xhr.status === 413)
+          ? "fichier_trop_volumineux" : "reponse_illisible" };
+      }
+      if (!data.ok) {
+        prog.hidden = true;
+        return failFile(data);
+      }
+      state.token = data.token;
+      followImportJob(data.job_id);
     };
     xhr.onerror = function () {
       prog.hidden = true;
@@ -171,11 +186,298 @@
     xhr.send(fd);
   }
 
+  /**
+   * Suit l'analyse du fichier, faite en tache de fond par le serveur : un
+   * journal de 750 000 lignes prend ~35 s, trop pres du delai du proxy IIS
+   * pour tenir dans la requete d'envoi.
+   */
+  function followImportJob(jobId) {
+    var prog = $("#scan-upload-progress");
+    var bar = prog.querySelector(".scan-progress-bar");
+    var fill = prog.querySelector(".scan-progress-fill");
+    var pct = $("#scan-upload-pct");
+    var label = $("#scan-upload-label");
+    var startedAt = Date.now();
+    prog.hidden = false;
+    bar.classList.remove("indeterminate");
+
+    function tick() {
+      apiGet("/scan-report/generate/status?job=" + encodeURIComponent(jobId))
+        .then(function (d) {
+          if (!d.ok) {
+            prog.hidden = true;
+            return failFile(d);
+          }
+          var p = d.progress || 0;
+          var sec = Math.round((Date.now() - startedAt) / 1000);
+          fill.style.width = p + "%";
+          pct.textContent = p + " %";
+          label.textContent = (d.step || "Analyse") + (sec > 2 ? " — " + sec + " s" : "");
+          if (d.status === "running" || d.status === "queued") {
+            setTimeout(tick, 1000);
+            return;
+          }
+          prog.hidden = true;
+          if (d.status === "done") return renderPreview(d.result);
+          // Colonnes non reconnues : le serveur renvoie ce qu'il a vu du
+          // fichier, l'utilisateur complete le mapping sans le renvoyer.
+          var r = d.result || {};
+          failFile({ error: d.error, detail: d.detail });
+          if (r.format && r.format.columns && r.format.columns.length) {
+            showStep("file");
+            renderFormatBlock($("#scan-format-fix"), r.format, true);
+          }
+        })
+        .catch(function () {
+          setTimeout(tick, 3000);
+        });
+    }
+    tick();
+  }
+
+  // ---- Format du fichier et colonnes ---------------------------------------
+
+  var SENS_CHOICES = [["e", "Entree"], ["s", "Sortie"], ["a", "Sans direction"],
+                      ["x", "Exclure"]];
+  // Hors presents : passage compte a la porte, mais ni entree ni present
+  // (un scan de vehicule ne dit pas combien de personnes sont a bord).
+  var FAMILY_CHOICES = [["p", "Personnes (presents)"], ["h", "Hors presents (vehicules)"],
+                        ["x", "Exclure de l'import"]];
+
+  /**
+   * Bloc « format lu » : type de fichier, chiffres de lecture et, pour un
+   * journal, le choix des colonnes et des options, modifiable puis relu par
+   * le serveur sans reteleverser le fichier.
+   */
+  function renderFormatBlock(host, fmtInfo, open) {
+    clear(host);
+    if (!fmtInfo) return;
+    var box = document.createElement("details");
+    box.className = "scan-format";
+    if (open) box.open = true;
+    var sum = document.createElement("summary");
+    var st = fmtInfo.stats || {};
+    var bits = [fmtInfo.label];
+    if (st.lignes != null) {
+      bits.push(fmt(st.lignes) + " lignes lues, " + fmt(st.retenues || 0) + " retenues");
+    }
+    sum.textContent = bits.join(" — ");
+    box.appendChild(sum);
+
+    if (fmtInfo.id !== "journal") {
+      host.appendChild(box);
+      return;
+    }
+
+    var details = [];
+    if (st.doublons) details.push(fmt(st.doublons) + " doublon(s) stricts retires");
+    if (st.refuses) details.push(fmt(st.refuses) + " scan(s) refuse(s) ecarte(s)");
+    if (st.hors_presents) details.push(fmt(st.hors_presents) + " passage(s) hors presents (vehicules)");
+    if (st.exclus_famille) details.push(fmt(st.exclus_famille) + " ligne(s) exclue(s) par famille de titre");
+    if (st.exclus_sens) details.push(fmt(st.exclus_sens) + " ligne(s) exclue(s) par le sens");
+    if (st.sans_date) details.push(fmt(st.sans_date) + " ligne(s) sans date lisible");
+    if (st.sans_point) details.push(fmt(st.sans_point) + " ligne(s) sans point de controle");
+    if (st.precision_horaire) details.push(fmt(st.precision_horaire) + " ligne(s) a l'heure pres seulement");
+    if (details.length) {
+      var p = document.createElement("div");
+      p.className = "scan-format-stats";
+      p.textContent = details.join(" · ");
+      box.appendChild(p);
+    }
+    if ((fmtInfo.warnings || []).indexOf("sens_absent") >= 0) {
+      box.appendChild(note("warn", "Aucune colonne de sens reconnue : sans entrees ni " +
+        "sorties, aucun present ne pourra etre calcule."));
+    }
+
+    // Choix des colonnes, role par role.
+    var grid = document.createElement("div");
+    grid.className = "scan-format-grid";
+    var selects = {};
+    (fmtInfo.roles || []).forEach(function (role) {
+      var lab = document.createElement("label");
+      var t = document.createElement("span");
+      t.textContent = role.label + (role.required ? " *" : "");
+      var sel = document.createElement("select");
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = "(aucune)";
+      sel.appendChild(none);
+      (fmtInfo.columns || []).forEach(function (c) {
+        var o = document.createElement("option");
+        o.value = String(c.index);
+        o.textContent = c.header + (c.sample && c.sample.length
+          ? " — ex. " + c.sample.slice(0, 2).join(" / ") : "");
+        if (fmtInfo.mapping && fmtInfo.mapping[role.id] === c.index) o.selected = true;
+        sel.appendChild(o);
+      });
+      selects[role.id] = sel;
+      lab.appendChild(t);
+      lab.appendChild(sel);
+      grid.appendChild(lab);
+    });
+    box.appendChild(grid);
+
+    // Options de lecture.
+    var opts = fmtInfo.options || {};
+    var optBox = document.createElement("div");
+    optBox.className = "scan-format-opts";
+    var checks = {};
+    [["strip_tags", "Retirer les etiquettes entre crochets des noms ([GPE25]...)"],
+     ["dedup", "Retirer les doublons stricts (meme billet, boitier, seconde et sens)"],
+     ["day_first", "Dates au format jour/mois (decocher pour mois/jour)"]]
+      .forEach(function (o) {
+        var lab = document.createElement("label");
+        lab.className = "scan-check";
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = opts[o[0]] !== false && (o[0] !== "dedup" || !!opts.dedup);
+        var sp = document.createElement("span");
+        sp.textContent = o[1];
+        lab.appendChild(cb);
+        lab.appendChild(sp);
+        optBox.appendChild(lab);
+        checks[o[0]] = cb;
+      });
+    box.appendChild(optBox);
+
+    // Valeurs du sens et du resultat : ce que le serveur en a compris,
+    // corrigeable valeur par valeur (IN/OUT, 1/0, libelles maison...).
+    var sensSel = {};
+    if ((fmtInfo.sens_values || []).length) {
+      box.appendChild(subTitle("Valeurs du sens"));
+      var sg = document.createElement("div");
+      sg.className = "scan-format-values";
+      fmtInfo.sens_values.forEach(function (v) {
+        var lab = document.createElement("label");
+        var t = document.createElement("span");
+        t.textContent = (v.label || "(vide)") + " — " + fmt(v.count);
+        var sel = document.createElement("select");
+        SENS_CHOICES.forEach(function (c) {
+          var o = document.createElement("option");
+          o.value = c[0];
+          o.textContent = c[1];
+          if (c[0] === v.map) o.selected = true;
+          sel.appendChild(o);
+        });
+        sensSel[v.value] = sel;
+        lab.appendChild(t);
+        lab.appendChild(sel);
+        sg.appendChild(lab);
+      });
+      box.appendChild(sg);
+    }
+    // Familles de titre : seules les personnes font des presents.
+    var famSel = {};
+    if ((fmtInfo.famille_values || []).length) {
+      box.appendChild(subTitle("Familles de titre — le pic de presents ne compte que les personnes"));
+      var fg = document.createElement("div");
+      fg.className = "scan-format-values";
+      fmtInfo.famille_values.forEach(function (v) {
+        var lab = document.createElement("label");
+        var t = document.createElement("span");
+        t.textContent = (v.label || "(vide)") + " — " + fmt(v.count);
+        var sel = document.createElement("select");
+        FAMILY_CHOICES.forEach(function (c) {
+          var o = document.createElement("option");
+          o.value = c[0];
+          o.textContent = c[1];
+          if (c[0] === v.map) o.selected = true;
+          sel.appendChild(o);
+        });
+        famSel[v.value] = sel;
+        lab.appendChild(t);
+        lab.appendChild(sel);
+        fg.appendChild(lab);
+      });
+      box.appendChild(fg);
+    }
+
+    var resBox = {};
+    if ((fmtInfo.result_values || []).length) {
+      box.appendChild(subTitle("Resultats retenus"));
+      var rg = document.createElement("div");
+      rg.className = "scan-format-values";
+      fmtInfo.result_values.forEach(function (v) {
+        var lab = document.createElement("label");
+        lab.className = "scan-check";
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !!v.map;
+        var sp = document.createElement("span");
+        sp.textContent = (v.label || "(vide)") + " — " + fmt(v.count);
+        lab.appendChild(cb);
+        lab.appendChild(sp);
+        resBox[v.value] = cb;
+        rg.appendChild(lab);
+      });
+      box.appendChild(rg);
+    }
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-secondary scan-format-go";
+    btn.textContent = "Relire le fichier avec ces reglages";
+    btn.addEventListener("click", function () {
+      var mapping = {};
+      Object.keys(selects).forEach(function (k) {
+        mapping[k] = selects[k].value === "" ? null : parseInt(selects[k].value, 10);
+      });
+      var options = {
+        strip_tags: checks.strip_tags.checked,
+        dedup: checks.dedup.checked,
+        day_first: checks.day_first.checked,
+        sens_map: {}, result_map: {}, famille_map: {}
+      };
+      Object.keys(sensSel).forEach(function (k) { options.sens_map[k] = sensSel[k].value; });
+      Object.keys(famSel).forEach(function (k) { options.famille_map[k] = famSel[k].value; });
+      Object.keys(resBox).forEach(function (k) { options.result_map[k] = resBox[k].checked; });
+      reanalyze(mapping, options, btn);
+    });
+    box.appendChild(btn);
+    host.appendChild(box);
+  }
+
+  function subTitle(text) {
+    var d = document.createElement("div");
+    d.className = "scanmap-col-label";
+    d.style.marginTop = "10px";
+    d.textContent = text;
+    return d;
+  }
+
+  function reanalyze(mapping, options, btn) {
+    if (!state.token) return failFile({ error: "import_expire" });
+    btn.disabled = true;
+    var old = $("#scan-step-file").querySelector(".scan-note.err");
+    if (old) old.remove();
+    // La relecture se suit dans l'etape 1, ou vit la barre de progression.
+    clear($("#scan-format-fix"));
+    showStep("file");
+    apiPostJson("/scan-report/import/reanalyze", {
+      token: state.token, mapping: mapping, options: options
+    }).then(function (d) {
+      btn.disabled = false;
+      if (!d.ok) return failFile(d);
+      followImportJob(d.job_id);
+    }).catch(function () {
+      btn.disabled = false;
+      failFile({ error: "reseau_indisponible" });
+    });
+  }
+
   var ERRORS = {
     fichier_manquant: "Aucun fichier recu.",
-    extension_invalide: "Format non accepte : seuls les .xlsx et .xlsm le sont.",
+    extension_invalide: "Format non accepte : .xlsx, .xlsm, .csv ou .txt.",
     fichier_vide: "Le fichier est vide.",
-    fichier_trop_volumineux: "Fichier trop volumineux (25 Mo maximum).",
+    fichier_trop_volumineux: "Fichier trop volumineux (200 Mo maximum).",
+    fichier_vide_ou_illisible: "Fichier vide ou illisible.",
+    colonne_point_absente:
+      "Colonne du point de controle (porte, tribune...) non reconnue : la choisir ci-dessous.",
+    colonne_date_absente:
+      "Colonne de date du scan non reconnue : la choisir ci-dessous.",
+    matrice_csv_non_supportee:
+      "Une matrice Sirius doit etre deposee au format .xlsx (cellules fusionnees).",
+    analyse_fichier_en_cours: "L'analyse du fichier n'est pas terminee.",
     xlsx_illisible: "Classeur illisible ou corrompu.",
     xlsx_trop_court: "Le classeur ne contient pas de lignes de donnees.",
     xlsx_sans_colonnes_scan: "Aucune colonne Entree/Sortie/Autre trouvee en ligne 2.",
@@ -226,6 +528,15 @@
     var s = data.summary;
     var notes = $("#scan-preview-notes");
     clear(notes);
+    clear($("#scan-format-fix"));
+    renderFormatBlock($("#scan-format-block"), data.format, false);
+    if (data.kind_from_category) {
+      notes.appendChild(note("info",
+        "Journal de scans : rien dans le fichier ne dit quels points sont des " +
+        "portes d'enceinte. La categorie <strong>Porte d'enceinte</strong> fait " +
+        "entrer une unite dans la serie de l'enceinte generale (presents, " +
+        "reference N-1) ; toute autre categorie en fait une zone."));
+    }
 
     var existing = (data.existing && data.existing.types) || [];
     if (existing.length) {
@@ -235,6 +546,14 @@
         esc(existing.map(function (t) { return t.type; }).join(", ")) +
         "). Ils seront archives dans <code>historique_controle_archive</code> " +
         "puis remplaces — l'ancien restera consultable."));
+    }
+    if (!data.race) {
+      // Sans date de course, la vue Frequentation ignore l'edition (alignement
+      // J-n impossible) : l'onglet resterait vide sans explication.
+      notes.appendChild(note("err",
+        "<strong>Aucune date de course trouvee</strong> pour " + esc(data.event) + " " +
+        esc(data.year) + " (ni en base, ni dans les parametrages). La saisir " +
+        "ci-dessous, sinon l'onglet Frequentation du rapport restera vide."));
     }
     if (data.needs_confirm) {
       notes.appendChild(note("err",
@@ -246,8 +565,9 @@
     if (s.has_autre) {
       notes.appendChild(note("info",
         "Le fichier contient <strong>" + fmt(s.totals.autre) + " scans sans direction</strong> " +
-        "(boitiers non configures en entree/sortie). Ils sont comptes dans le total " +
-        "de passages de chaque porte mais exclus du calcul des presents."));
+        "(boitiers non configures en entree/sortie, ou titres classes hors presents " +
+        "comme les vehicules). Ils sont comptes dans le total de passages de chaque " +
+        "porte mais exclus des entrees et du calcul des presents."));
     }
 
     var tiles = [
@@ -271,11 +591,16 @@
     });
 
     $("#scan-race").value = data.race || "";
+    // Remise a zero nocturne : reprise de la derniere edition de l'evenement.
+    var rh = data.presence_reset_hour;
+    $("#scan-reset-on").checked = rh !== null && rh !== undefined;
+    $("#scan-reset-hour").value = (rh !== null && rh !== undefined) ? rh : 5;
 
     state.categories = data.categories || [];
     importCtx.units = state.units;
     importCtx.overrides = state.overrides;
     importCtx.categories = state.categories;
+    importCtx.kindFromCategory = !!data.kind_from_category;
     var unresolved = state.units.filter(function (u) {
       return !u._id_feature && !u.no_location;
     });
@@ -322,11 +647,25 @@
     return "is-auto";
   }
 
+  // Cle des choix d'une unite. Le serveur la fournit pour un import (dans un
+  // journal, `kind` suit la categorie et change en cours de saisie : la cle,
+  // elle, ne doit pas bouger) ; l'editeur de mapping la reconstruit.
+  function unitKey(u) {
+    return u.key || (u.kind + "|" + u.name);
+  }
+
+  function subLabel(u) {
+    return (u.kind === "porte" ? "porte" : "zone") +
+      (u.zone && u.zone !== u.name ? " · " + u.zone : "") +
+      " · " + fmt(u.total_entree + u.total_sortie + u.total_autre) + " scans" +
+      (u.feature_label ? " · " + u.feature_label : "");
+  }
+
   function renderMapRows(ctx) {
     var host = $(ctx.host);
     clear(host);
     ctx.units.forEach(function (u) {
-      var key = u.kind + "|" + u.name;
+      var key = unitKey(u);
       var noLoc = isNoLocation(ctx, u, key);
       var row = document.createElement("div");
       row.className = "scanmap-row " + rowState(ctx, u, key);
@@ -337,11 +676,7 @@
       var left = document.createElement("div");
       left.innerHTML = '<div class="scanmap-name"></div><div class="scanmap-sub"></div>';
       left.querySelector(".scanmap-name").textContent = u.name;
-      left.querySelector(".scanmap-sub").textContent =
-        (u.kind === "porte" ? "porte" : "zone") +
-        (u.zone && u.zone !== u.name ? " · " + u.zone : "") +
-        " · " + fmt(u.total_entree + u.total_sortie + u.total_autre) + " scans" +
-        (u.feature_label ? " · " + u.feature_label : "");
+      left.querySelector(".scanmap-sub").textContent = subLabel(u);
 
       // Ecarter une unite : elle ne figurera dans aucun des trois documents.
       var ignLabel = document.createElement("label");
@@ -372,6 +707,14 @@
       });
       catSel.addEventListener("change", function () {
         setOverride(ctx, key, null, null, catSel.value);
+        if (ctx.kindFromCategory) {
+          // Journal : la categorie decide de la nature (porte d'enceinte ou
+          // zone), le serveur appliquera le meme choix a l'ecriture.
+          u.kind = catSel.value === "porte" ? "porte" : "zone";
+          u.zone = u.kind === "porte" ? "ENCEINTE GENERALE" : u.name;
+          left.querySelector(".scanmap-sub").textContent = subLabel(u);
+          refreshIgnoreRecap(ctx);
+        }
         row.className = "scanmap-row " + rowState(ctx, u, key);
       });
       catBox.appendChild(catSel);
@@ -505,7 +848,7 @@
     var box = $(ctx.recap);
     if (!box) return;
     var off = ctx.units.filter(function (u) {
-      return isIgnored(ctx, u, u.kind + "|" + u.name);
+      return isIgnored(ctx, u, unitKey(u));
     });
     if (!off.length) { box.hidden = true; return; }
     var scans = off.reduce(function (s, u) {
@@ -585,6 +928,8 @@
       event: currentEvent(),
       year: parseInt(currentYear(), 10),
       race: $("#scan-race").value || null,
+      presence_reset_hour: $("#scan-reset-on").checked
+        ? parseInt($("#scan-reset-hour").value, 10) : null,
       save_overrides: $("#scan-save-overrides").checked,
       overrides: {}
     };

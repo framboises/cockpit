@@ -291,10 +291,13 @@ _STAGING_LOCK = threading.Lock()
 STAGING_TTL_SECONDS = 30 * 60
 STAGING_MAX_ENTRIES = 3
 
-# Un xlsx de scans complet pese ~700 Ko ; 25 Mo laisse de la marge sans
-# permettre de saturer la memoire du process.
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-ALLOWED_UPLOAD_EXT = {'.xlsx', '.xlsm'}
+# Une matrice Sirius pese ~700 Ko, mais un journal (une ligne par scan) pese
+# bien plus : 63 Mo pour le GP Explorer 2025 (746 516 lignes). Le fichier est
+# ecrit sur disque puis lu en flux, jamais charge en memoire d'un bloc.
+# ⚠ IIS plafonne aussi le corps des requetes (`maxAllowedContentLength` du
+# web.config, 30 Mo par defaut) : les deux limites doivent rester alignees.
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+ALLOWED_UPLOAD_EXT = {'.xlsx', '.xlsm', '.csv', '.txt'}
 
 # Ecart relatif au-dela duquel on exige une confirmation explicite : reecrire
 # un document `frequentation` change les comparaisons N-1 de tout le cockpit
@@ -427,10 +430,13 @@ def scan_report_features():
 
 @scan_report_bp.route('/scan-report/import/analyze', methods=['POST'])
 def scan_report_import_analyze():
-    """Parse le classeur televerse et rend l'apercu, sans rien ecrire."""
-    from app import db
-    import scan_import
+    """Recoit le fichier et lance son analyse en tache de fond.
 
+    Asynchrone depuis l'arrivee des journaux de scans : lire 746 000 lignes
+    prend ~35 s, trop pres du delai du proxy IIS (ARR, 2 min) pour tenir dans
+    la requete. Retourne {token, job_id} ; l'apercu arrive dans le `result`
+    du job (GET /scan-report/generate/status), au meme format qu'avant.
+    """
     upload = request.files.get('file')
     if upload is None or not upload.filename:
         return _err('fichier_manquant')
@@ -438,58 +444,217 @@ def scan_report_import_analyze():
     if ext not in ALLOWED_UPLOAD_EXT:
         return _err('extension_invalide')
 
-    raw = upload.read()
-    if not raw:
-        return _err('fichier_vide')
-    if len(raw) > MAX_UPLOAD_BYTES:
-        return _err('fichier_trop_volumineux', 413)
-
     tmp_dir = os.path.join(REPORT_DIR, 'uploads', 'scan_imports')
     os.makedirs(tmp_dir, exist_ok=True)
     token = uuid.uuid4().hex
     # Le fichier source est conserve : tracabilite de ce qui a ete importe.
+    # Ecrit en flux : un journal de plusieurs dizaines de Mo ne transite
+    # jamais en entier par la memoire du process.
     tmp_path = os.path.join(tmp_dir, token + ext)
-    with open(tmp_path, 'wb') as fh:
-        fh.write(raw)
-
-    try:
-        parsed = scan_import.parse_scan_xlsx(tmp_path)
-    except scan_import.ScanImportError as exc:
+    upload.save(tmp_path)
+    size = os.path.getsize(tmp_path)
+    if not size:
         os.remove(tmp_path)
-        return _err(exc.code, exc.status, detail=exc.detail)
-    except Exception as exc:
+        return _err('fichier_vide')
+    if size > MAX_UPLOAD_BYTES:
         os.remove(tmp_path)
-        logger.exception('Parsing du classeur de scans impossible')
-        return _err('parsing_impossible', 400, detail=str(exc))
+        return _err('fichier_trop_volumineux', 413)
 
     event = (request.form.get('event') or DEFAULT_EVENT).strip()
-    year = request.form.get('year') or scan_import.guess_year(parsed)
-    try:
-        year = int(year)
-    except (TypeError, ValueError):
-        os.remove(tmp_path)
-        return _err('annee_invalide')
-
-    resolved = scan_import.resolve_features(db, parsed['units'], event, year)
-    race = scan_import.resolve_race(db, event, year)
-    existing = _existing_summary(db, event, year)
+    year = request.form.get('year') or None
+    if year is not None:
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            os.remove(tmp_path)
+            return _err('annee_invalide')
 
     with _STAGING_LOCK:
         _sweep_staging()
         _STAGING[token] = {
-            'created_at': time.time(), 'path': tmp_path, 'parsed': parsed,
+            'created_at': time.time(), 'path': tmp_path, 'parsed': None,
             'event': event, 'year': year, 'user': _current_user_email(),
             # Le fichier est stocke sous un jeton, mais c'est le nom d'origine
             # qui doit apparaitre dans le document : sans lui on ne sait plus
             # quel export a produit les donnees.
             'filename': upload.filename,
         }
-    parsed['source_file'] = upload.filename
+    job_id = _start_import_job(token, None, None)
+    return jsonify({'ok': True, 'token': token, 'job_id': job_id})
+
+
+@scan_report_bp.route('/scan-report/import/reanalyze', methods=['POST'])
+def scan_report_import_reanalyze():
+    """Relit le fichier en attente avec des colonnes / options corrigees.
+
+    Body : {token, mapping: {role: index|null}, options: {day_first,
+    strip_tags, dedup, sens_map, result_map}}. Rien n'est reteleverse.
+    """
+    body = request.get_json(silent=True) or {}
+    token = body.get('token')
+    with _STAGING_LOCK:
+        _sweep_staging()
+        staged = _STAGING.get(token)
+        if staged:
+            staged['created_at'] = time.time()  # l'utilisateur travaille encore
+    if not staged:
+        return _err('import_expire', 410)
+    mapping = body.get('mapping') if isinstance(body.get('mapping'), dict) else None
+    options = body.get('options') if isinstance(body.get('options'), dict) else None
+    job_id = _start_import_job(token, mapping, options)
+    return jsonify({'ok': True, 'token': token, 'job_id': job_id})
+
+
+def _start_import_job(token, mapping, options):
+    with _JOBS_LOCK:
+        _sweep_jobs()
+        job_id = uuid.uuid4().hex
+        _JOBS[job_id] = {
+            'id': job_id, 'event': None, 'year': None,
+            'status': 'queued', 'progress': 0, 'step': 'En attente',
+            'error': None, 'detail': None, 'result': None,
+            'started_at': time.time(), 'finished_at': None,
+        }
+    threading.Thread(target=_run_import_analysis,
+                     args=(job_id, token, mapping, options),
+                     daemon=True).start()
+    return job_id
+
+
+def _run_import_analysis(job_id, token, mapping, options):
+    """Thread d'analyse d'un fichier en attente. Meme protection BaseException
+    que la generation : un job ne doit jamais rester bloque « en cours »."""
+    from app import db
+    import scan_formats
+    import scan_import
+
+    def progress(pct, msg):
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+            if job:
+                job['progress'] = max(0, min(100, int(pct)))
+                job['step'] = msg
+
+    def fail(code, detail=None, result=None):
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+            if job:
+                job.update({'status': 'error', 'error': code, 'detail': detail,
+                            'step': 'Echec', 'result': result})
+
+    try:
+        with _JOBS_LOCK:
+            _JOBS[job_id]['status'] = 'running'
+        with _STAGING_LOCK:
+            staged = _STAGING.get(token)
+        if not staged:
+            return fail('import_expire')
+        # Familles de titre : a defaut d'un choix dans la modale, celui de la
+        # derniere edition importee de l'evenement (IMPORT [ACO] = vehicules
+        # ne se devine pas au libelle, il ne faut le dire qu'une fois).
+        options = dict(options or {})
+        if 'famille_map' not in options:
+            remembered = _last_title_families(db, staged['event'])
+            if remembered:
+                options['famille_map'] = remembered
+        try:
+            analysis = scan_formats.analyze_file(staged['path'], mapping, options, progress)
+        except scan_import.ScanImportError as exc:
+            # Colonnes non reconnues : on renvoie ce qui a ete detecte pour
+            # que l'utilisateur complete le mapping, sans reteleverser.
+            det = (exc.extra or {}).get('detection')
+            result = {'token': token, 'format': _format_block(det, None)} if det else None
+            return fail(exc.code, exc.detail, result)
+
+        progress(96, 'Rattachement aux entites cartographiques')
+        event = staged['event']
+        if analysis['format'] == 'journal':
+            journal = analysis['journal']
+            # Annee : celle de la page, sinon celle majoritaire du fichier.
+            year = staged['year']
+            if year is None:
+                tmp = scan_formats.build_parsed(journal, {})
+                year = scan_import.guess_year(tmp)
+            parsed, resolved, _ = scan_formats.resolve_journal(
+                db, journal, event, year, source_file=staged['filename'])
+        else:
+            journal = None
+            parsed = analysis['parsed']
+            year = staged['year'] or scan_import.guess_year(parsed)
+            resolved = scan_import.resolve_features(db, parsed['units'], event, year)
+        parsed['source_file'] = staged['filename']
+
+        with _STAGING_LOCK:
+            cur = _STAGING.get(token)
+            if not cur:
+                return fail('import_expire')
+            cur.update({'parsed': parsed, 'journal': journal, 'year': year,
+                        'format': analysis['format'],
+                        'detection': analysis['detection'],
+                        'created_at': time.time()})
+
+        payload = _preview_payload(db, token, staged['filename'], event, year,
+                                   parsed, resolved)
+        payload['format'] = _format_block(analysis['detection'],
+                                          journal['profile'] if journal else None)
+        with _JOBS_LOCK:
+            _JOBS[job_id].update({'status': 'done', 'progress': 100,
+                                  'step': 'Termine', 'result': payload})
+    except BaseException as exc:
+        logger.exception('Analyse du fichier de scans impossible')
+        fail('parsing_impossible', str(exc))
+    finally:
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+            if job:
+                job['finished_at'] = time.time()
+
+
+def _last_title_families(db, event):
+    """Choix par famille de titre de la derniere edition importee, ou {}."""
+    doc = db['historique_controle'].find_one(
+        {'event': event, 'type': 'complet', 'title_families': {'$exists': True}},
+        {'title_families': 1}, sort=[('year', -1)])
+    return dict((doc or {}).get('title_families') or {})
+
+
+def _format_block(detection, profile):
+    """Description du format lu, des colonnes et des options, pour l'UI."""
+    import scan_formats
+    if not detection:
+        return None
+    out = {
+        'id': detection['format'],
+        'label': scan_formats.FORMAT_LABELS.get(detection['format'], detection['format']),
+        'columns': detection.get('columns') or [],
+        'mapping': detection.get('mapping') or {},
+        'options': {k: v for k, v in (detection.get('options') or {}).items()
+                    if k in ('day_first', 'strip_tags', 'dedup')},
+        'roles': scan_formats.ROLES if detection['format'] == 'journal' else [],
+        'warnings': detection.get('warnings') or [],
+    }
+    if profile:
+        out.update({'stats': profile['stats'], 'sens_values': profile['sens_values'],
+                    'result_values': profile['result_values'],
+                    'famille_values': profile.get('famille_values') or [],
+                    'dedup_active': profile['dedup']})
+    return out
+
+
+def _preview_payload(db, token, filename, event, year, parsed, resolved):
+    """Apercu de l'import : unites, rattachements, ecart avec l'existant."""
+    import scan_import
+    race = scan_import.resolve_race(db, event, year)
+    existing = _existing_summary(db, event, year)
 
     units = []
     for unit in parsed['units']:
         res = resolved[unit['key']]
         units.append({
+            # Cle stable de l'unite pour toute la session d'import : dans un
+            # journal, `kind` suit la categorie et peut changer dans la modale,
+            # la cle des choix de l'utilisateur ne doit pas bouger avec lui.
+            'key': unit['kind'] + '|' + unit['name'],
             'name': unit['name'], 'kind': unit['kind'], 'zone': unit['zone'],
             'device_count': unit['device_count'],
             'total_entree': unit['total_entree'],
@@ -520,14 +685,14 @@ def scan_report_import_analyze():
     if prev:
         delta_pct = round((eg_entree - prev) * 100.0 / prev, 1)
 
-    return jsonify({
+    return {
         'ok': True,
         'token': token,
         'event': event,
         'year': year,
         'race': race,
         'summary': {
-            'source_file': upload.filename,
+            'source_file': filename,
             'period_start': parsed['period_start'].isoformat(timespec='minutes'),
             'period_end': parsed['period_end'].isoformat(timespec='minutes'),
             'slot_count': parsed['slot_count'],
@@ -544,7 +709,29 @@ def scan_report_import_analyze():
         'delta_pct': delta_pct,
         'needs_confirm': delta_pct is not None
                          and abs(delta_pct) > DELTA_CONFIRM_THRESHOLD * 100,
-    })
+        # Journal : la categorie « Porte d'enceinte » decide qu'une unite
+        # compte dans la serie de l'enceinte generale (cf. resolve_journal).
+        'kind_from_category': bool(parsed.get('kind_from_category')),
+        # Remise a zero nocturne des presents : reprise de la derniere edition
+        # importee de l'evenement, jamais deduite (un 24 h dort sur place).
+        'presence_reset_hour': _last_reset_hour(db, event, year),
+    }
+
+
+def _last_reset_hour(db, event, year):
+    """Reglage de remise a zero de l'edition, sinon de la plus recente."""
+    import scan_import
+    cur = db['historique_controle'].find(
+        {'event': event, 'type': 'complet'},
+        {'year': 1, 'presence_reset_hour': 1}).sort('year', -1)
+    docs = list(cur)
+    for d in docs:
+        if d.get('year') == int(year):
+            return scan_import.normalize_reset_hour(d.get('presence_reset_hour'))
+    for d in docs:
+        if 'presence_reset_hour' in d:
+            return scan_import.normalize_reset_hour(d.get('presence_reset_hour'))
+    return None
 
 
 @scan_report_bp.route('/scan-report/import/commit', methods=['POST'])
@@ -593,10 +780,23 @@ def scan_report_import_commit():
             'save': bool(val.get('save')),
         }
 
-    parsed = staged['parsed']
+    if staged.get('parsed') is None:
+        return _err('analyse_fichier_en_cours', 409)
+
+    if staged.get('format') == 'journal':
+        # La nature porte / zone suit la categorie choisie : les unites sont
+        # reconstruites depuis le journal agrege (sans relire le fichier), et
+        # les choix re-cles sous leur nature finale avant d'etre memorises.
+        import scan_formats
+        by_name = {name: val for (_kind, name), val in overrides.items()}
+        parsed, resolved, overrides = scan_formats.resolve_journal(
+            db, staged['journal'], event, year, overrides_by_name=by_name,
+            source_file=staged.get('filename'))
+    else:
+        parsed = staged['parsed']
+        resolved = scan_import.resolve_features(db, parsed['units'], event, year,
+                                                overrides=overrides)
     parsed['source_file'] = staged.get('filename') or parsed.get('source_file')
-    resolved = scan_import.resolve_features(db, parsed['units'], event, year,
-                                            overrides=overrides)
     user = _current_user_email()
     run_id = uuid.uuid4().hex
     now = datetime.now()
@@ -611,14 +811,31 @@ def scan_report_import_commit():
         logger.warning('Calcul UAM/renforts impossible', exc_info=True)
         uam_by_porte = {}
 
+    # Remise a zero nocturne des presents : choix explicite de la modale
+    # (null = solde continu sur toute la periode).
+    reset_hour = scan_import.normalize_reset_hour(body.get('presence_reset_hour'))
+
     docs = [
         scan_import.build_complet_doc(parsed, resolved, event, year, race,
                                       imported_by=user, imported_at=now,
-                                      uam_by_porte=uam_by_porte),
+                                      uam_by_porte=uam_by_porte,
+                                      presence_reset_hour=reset_hour),
         scan_import.build_portes_doc(parsed, resolved, event, year, race),
         scan_import.build_frequentation_doc(parsed, event, year, race,
-                                            resolved=resolved),
+                                            resolved=resolved,
+                                            presence_reset_hour=reset_hour),
     ]
+    if staged.get('format') == 'journal':
+        profile = (staged.get('journal') or {}).get('profile') or {}
+        fams = profile.get('famille_values') or []
+        if fams:
+            # Memorise pour les imports suivants de l'evenement, et trace de
+            # ce qui compte (ou non) dans les presents de cette edition.
+            # Cles = libelles normalises (sans ponctuation, donc sans '.' ni
+            # '$', interdits dans une cle Mongo) ; la valeur vide est omise.
+            docs[0]['title_families'] = {f['value']: f['map'] for f in fams if f['value']}
+            docs[0]['title_families_counts'] = {f['value']: f['count'] for f in fams if f['value']}
+        docs[0]['import_stats'] = profile.get('stats')
 
     try:
         scan_import.ensure_indexes(db)

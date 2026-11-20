@@ -54,11 +54,13 @@ ACCESS_PRESENCE_FLOOR = 0.25    # presence >= 25 % du pic de l'edition
 ACCESS_COLLAPSE_RATIO = 0.20    # scans < 20 % de l'attendu pour cette heure
 ACCESS_MIN_HOURS = 2            # une heure isolee n'est pas un evenement
 
-# Editions dont les donnees sont inexploitables, verifiees une par une :
-#   GPE 2022 : le cumul d'entrees finit a 0
-#   GPE 2023 : `race` = 2023-09-09 alors que les donnees sont en octobre,
-#              l'alignement serait decale de 28 jours
-EXCLUDED_EDITIONS = {('GPE', 2022), ('GPE', 2023)}
+# Editions dont les donnees sont inexploitables, verifiees une par une.
+# Vide depuis le 20/11/2026 : GPE 2022 (cumul retombant a 0 en fin de
+# periode) et GPE 2023 (frequentation datee d'octobre pour une course le
+# 09/09) ont ete reparees en base, originaux dans historique_controle_archive
+# (archived_reason 'reparation_donnees', champ `repaired` sur le document).
+# Les noms testes incluent les alias (`evenement.short`).
+EXCLUDED_EDITIONS = set()
 
 # Sources de frequentation, par ordre de preference (parametre
 # `source_priority`). Le DEFAUT reste l'import seul : presents_etat.historique_n1
@@ -305,12 +307,19 @@ def enclosure_series(db, event, year, source_priority=DEFAULT_SOURCE_PRIORITY):
                 agg['e'] += int(rec.get('entree') or 0)
                 agg['s'] += int(rec.get('sortie') or 0)
         if slots:
+            import scan_import
+            keys = sorted(slots)
+            # Remise a zero nocturne choisie a l'import (evenement de journee,
+            # evacuations du soir sans scan de sortie) ; None = solde continu.
+            presents = scan_import.running_presence(
+                [(k, slots[k]['e'], slots[k]['s']) for k in keys],
+                doc.get('presence_reset_hour'))
             out, cum_e, cum_s = [], 0, 0
-            for key in sorted(slots):
+            for key, present in zip(keys, presents):
                 cum_e += slots[key]['e']
                 cum_s += slots[key]['s']
                 out.append({'date': key, 'entree': cum_e, 'sortie': cum_s,
-                            'present': cum_e - cum_s})
+                            'present': present})
             return out, '15min'
 
     # Ancienne chaine : `porte_scans` porte les memes creneaux de 15 min, sous
@@ -568,10 +577,15 @@ def load_editions(db, event, year, back=2, source_priority=DEFAULT_SOURCE_PRIORI
     raw = []
     y = int(year)
     candidate = y
+    # L'exclusion vaut pour tous les noms de l'evenement : GPE 2022 / 2023
+    # sont stockees sous le sigle, mais l'edition 2025 s'appelle GP EXPLORER.
+    # Tester le seul nom courant laissait revenir GPE 2023 (date de course
+    # fausse, alignee a J+28) dans la comparaison.
+    names = set(event_aliases(db, event)) or {event}
     # On remonte plus loin que `back` : certaines editions manquent (LMC est
     # biennal, 24H CAMIONS n'a pas 2025).
     while len(raw) <= back and candidate > y - (back + 4):
-        if (event, candidate) not in EXCLUDED_EDITIONS:
+        if not any((n, candidate) in EXCLUDED_EDITIONS for n in names):
             item = None
             for src in source_priority:
                 if src == SOURCE_IMPORT:
