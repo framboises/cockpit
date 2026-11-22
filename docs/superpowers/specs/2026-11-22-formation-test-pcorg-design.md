@@ -1,6 +1,6 @@
 # Module Formation : campagne d'e-mails et test en ligne du PC Organisation
 
-Date : 22/11/2026. Statut : conception relue (approche A), decisions du DOA en section 12, en attente de validation.
+Date : 22/11/2026. Statut : conception relue (approche A), decisions du DOA en section 12 et 6.1, validee le 22/11.
 
 Sources : `~/Dropbox/ACO/2026/PC ORG REBOOT/Prompt_ClaudeCode_test_en_ligne.md` (cahier des charges detaille,
 fait foi sur tout ce que ce document ne precise pas), `test_pcorg.html` (maquette jouable, 7 epreuves),
@@ -124,14 +124,29 @@ le gabarit, en-tete `X-CSRFToken`). En-tetes : `Cache-Control: no-store`, `Refer
 Etats d'une epreuve : `a_faire`, `en_cours` (debut serveur), `terminee` (figee, fin serveur, score), `abandonnee`.
 Etats de la tentative : `en_cours`, `terminee`, `interrompue` (close avec les epreuves faites), `reinitialisee`.
 
-- Coupure (onglet ferme, reseau) : le candidat se reconnecte ; si l'heure qui suit le debut de la tentative
-  n'est pas ecoulee et qu'il n'a encore jamais repris, il reprend **au debut de l'epreuve interrompue**
-  (l'epreuve interrompue est rejouee, les terminees restent figees). La reprise est tracee (date, epreuve, IP).
-- Deuxieme interruption, ou reconnexion plus d'une heure apres le debut : tentative `interrompue`, page de fin.
-- Est une interruption : une connexion alors qu'une epreuve est `en_cours`. Le simple rechargement de la page
-  pendant une epreuve compte donc comme reprise (le candidat en est averti sur l'ecran d'avertissement).
-- Une epreuve rejouee recoit un nouveau tirage d'ordre (questions et choix) ; avec la banque actuelle le
-  contenu est le meme (limite acceptee, signalee dans l'administration par le compteur de reprises).
+**Decision du DOA (22/11) : jamais de « je coupe et je recommence ».** Ceci remplace la regle du prompt
+(« reprendre au debut de l'epreuve interrompue ») : une epreuve n'est **jamais rejouee**.
+
+- Chaque reponse et chaque action est envoyee au serveur **au fil de l'eau** (pas seulement en fin d'epreuve),
+  pour qu'une coupure ne fasse perdre que l'action en vol.
+- Coupure (onglet ferme, reseau, rechargement) pendant une epreuve : l'epreuve est **close en l'etat**
+  (`abandonnee`), notee sur ce que le serveur a recu (les messages, incidents, badges ou questions non traites
+  comptent comme manques). Elle ne sera pas rejouee.
+- Le candidat qui se reconnecte dans l'heure qui suit le debut de la tentative, et pour la premiere fois,
+  **continue a l'epreuve suivante**. La reprise est tracee (date, epreuve abandonnee, IP).
+- Deuxieme interruption, ou reconnexion plus d'une heure apres le debut : tentative `interrompue`, close avec
+  les epreuves faites, page de fin.
+- Coupure hors epreuve (prise de poste, ecran de regles d'une epreuve pas encore commencee) : rien n'est perdu,
+  le candidat retrouve cet ecran ; ce n'est pas compte comme une reprise.
+- Une coupure franche reste traitable par le DOA : reinitialisation avec motif (ci-dessous), a sa seule
+  appreciation (par exemple sur e-mail du candidat).
+- **Messages au candidat**, sans ambiguite, sur la page d'accueil, l'ecran d'avertissement et l'e-mail :
+  une seule fois, aucune possibilite de recommencer ; toute epreuve interrompue (fermeture, rechargement,
+  coupure) est perdue et comptee en l'etat ; s'installer au calme, seul, sur un ordinateur (pas de telephone),
+  avec une connexion stable (de preference filaire ou un bon Wi-Fi, eviter le partage 4G), batterie branchee,
+  notifications coupees, environ 25 minutes devant soi ; ne pas recharger la page ni utiliser le bouton retour.
+  Rappel discret en tete de chaque epreuve (« Ne rechargez pas la page »), et alerte du navigateur
+  (`beforeunload`) pendant une epreuve.
 - Reinitialisation par le DOA : motif obligatoire, journalisee ; l'ancienne tentative est conservee en
   `reinitialisee` (consultable), le candidat peut recommencer de zero.
 
