@@ -11,10 +11,13 @@ au temps ecoule et non par accumulation de setInterval) :
   (0,-1) comme la maquette (le chemin retenu est donc unique).
 - Incident i : ouvert a `T_i = t * 1000`, echeance `D_i = T_i + dl * 1000`.
 - Moyen u : position initiale de UNITS, libre a 0.
-- Engagements `{type: "engager", moyen, incident, t_ms}` pris dans l'ordre du temps :
+- Engagements `{type: "engager", moyen, incident, t_ms}` pris dans l'ordre du temps,
+  journal assaini par `correction.journal` (jamais d'exception : action qui
+  n'est pas un objet, id non texte, `t_ms` invalide ou non fini -> ignore, drapeau) :
   * incident inconnu, pas encore ouvert (t < T_i), echu (t >= D_i) ou deja
     attribue -> ignore, drapeau ;
   * moyen inconnu -> ignore, drapeau ;
+  * aucun chemin -> ignore, drapeau `chemin_impossible` ;
   * moyen encore occupe (t < libre_a) -> ignore, drapeau `moyen_occupe` ;
   * type du moyen different du type de l'incident -> une erreur, rien d'autre
     (l'incident reste ouvert, le moyen ne bouge pas) ;
@@ -85,12 +88,16 @@ def rejouer(actions, coef, incidents=None):
         if nom not in drapeaux:
             drapeaux.append(nom)
 
-    engagements = [a for a in actions if a.get("type") == "engager"]
-    engagements.sort(key=lambda a: float(a.get("t_ms") or 0))
-    for a in engagements:
-        t = float(a.get("t_ms") or 0) / coef
-        inc = incs.get(a.get("incident"))
-        u = units.get(a.get("moyen"))
+    if not isinstance(coef, (int, float)) or not coef > 0:
+        coef = 1.0
+
+    from formation.correction import journal  # import tardif : correction importe ce module
+
+    for t_ms, a in journal(actions, ("engager",), drapeaux):
+        t = t_ms / coef
+        iid, uid = a.get("incident"), a.get("moyen")
+        inc = incs.get(iid) if isinstance(iid, str) else None
+        u = units.get(uid) if isinstance(uid, str) else None
         if inc is None or u is None:
             ignores += 1
             drapeau("action_inconnue")
@@ -120,10 +127,10 @@ def rejouer(actions, coef, incidents=None):
         trajet = chemin(u["pos"], inc["pos"])
         if trajet is None:
             ignores += 1
-            drapeau("action_inconnue")
+            drapeau("chemin_impossible")
             continue
         arrivee = t + (len(trajet) - 1) * PAS_MS
-        e["moyen"] = a["moyen"]
+        e["moyen"] = uid
         e["arrivee_ms"] = round(arrivee)
         if arrivee <= ech:
             e["statut"] = "traite"

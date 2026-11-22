@@ -4,85 +4,85 @@
  "radio": [
   {
    "id": "r01",
-   "texte": "PC Est de Patrouille 2 : en position porte 9, rien à signaler.",
+   "texte": "PC Org de Patrouille 2 : en position porte 9, rien à signaler.",
    "pour_moi": true,
    "priorite": false
   },
   {
    "id": "r02",
-   "texte": "PC Nord de Tango 1 : barriérage allée 12 terminé.",
+   "texte": "Tango 2 de Tango 1 : barriérage allée 12 terminé, je te rejoins.",
    "pour_moi": false,
    "priorite": false
   },
   {
    "id": "r03",
-   "texte": "PC Est de Placier Houx : un véhicule bloque l'allée H, je demande une dépanneuse.",
+   "texte": "PC Org de Placier Houx : un véhicule bloque l'allée H, je demande une dépanneuse.",
    "pour_moi": true,
    "priorite": false
   },
   {
    "id": "r04",
-   "texte": "Patrouille 2 de PC Est : bien reçu, restez en position.",
+   "texte": "Patrouille 2 de PC Org : bien reçu, restez en position.",
    "pour_moi": false,
    "priorite": false
   },
   {
    "id": "r05",
-   "texte": "PRIORITÉ, PRIORITÉ. PC Sud de Secours 1 : malaise grave tribune T5.",
+   "texte": "PRIORITÉ, PRIORITÉ. Secours 2 de Secours 1 : malaise grave tribune T5, rejoins-moi.",
    "pour_moi": false,
    "priorite": true
   },
   {
    "id": "r06",
-   "texte": "PC Est de Accueil porte 9 : un groupe demande où partent les navettes.",
+   "texte": "PC Org de Accueil porte 9 : un groupe demande où partent les navettes.",
    "pour_moi": true,
    "priorite": false
   },
   {
    "id": "r07",
-   "texte": "PC Village de Moto 1 : parking P4 complet.",
+   "texte": "Moto 2 de Moto 1 : parking P4 complet, je bascule sur le P5.",
    "pour_moi": false,
    "priorite": false
   },
   {
    "id": "r08",
-   "texte": "PRIORITÉ, PRIORITÉ. PC Est de Placier Houx : un barbecue a mis le feu à une tente, emplacement H40 !",
+   "texte": "PRIORITÉ, PRIORITÉ. PC Org de Placier Houx : un barbecue a mis le feu à une tente, emplacement H40 !",
    "pour_moi": true,
    "priorite": true
   },
   {
    "id": "r09",
-   "texte": "PC Nord de Patrouille 1 : je quitte la porte 2 pour une ronde.",
+   "texte": "Patrouille 3 de Patrouille 1 : je quitte la porte 2 pour une ronde, tu prends le relais.",
    "pour_moi": false,
    "priorite": false
   },
   {
    "id": "r10",
-   "texte": "Tango 1 de PC Nord : intervention allée 12 annulée.",
+   "texte": "Tango 1 de PC Org : intervention allée 12 annulée.",
    "pour_moi": false,
    "priorite": false
   },
   {
    "id": "r11",
-   "texte": "PC Est de Tango 2 : panne d'éclairage rue des Sapins, je prends en charge.",
+   "texte": "PC Org de Tango 2 : panne d'éclairage rue des Sapins, je prends en charge.",
    "pour_moi": true,
    "priorite": false
   },
   {
    "id": "r12",
-   "texte": "PC Est de Patrouille 2 : personne en état d'ivresse au camping H, je reste avec elle.",
+   "texte": "PC Org de Patrouille 2 : personne en état d'ivresse au camping H, je reste avec elle.",
    "pour_moi": true,
    "priorite": false
   },
   {
    "id": "r13",
-   "texte": "PC Sud de Accueil tribune : un spectateur cherche sa voiture.",
+   "texte": "Patrouille 3 de Accueil tribune : un spectateur cherche sa voiture, tu peux passer ?",
    "pour_moi": false,
    "priorite": false
   },
   {
    "id": "r14",
-   "texte": "PC Est de Sécurité Camping : bagarre entre deux groupes, emplacement H12, je demande du renfort.",
+   "texte": "PC Org de Sécurité Camping : bagarre entre deux groupes, emplacement H12, je demande du renfort.",
    "pour_moi": true,
    "priorite": false
   }
@@ -285,7 +285,7 @@
    {
     "id": "m1",
     "de": "Tango 1",
-    "texte": "PC Orga de Tango 1, 22 h 41 : la barrière de l'allée 12 au Grand Paddock est réparée, je quitte les lieux.",
+    "texte": "PC Org de Tango 1, 22 h 41 : la barrière de l'allée 12 au Grand Paddock est réparée, je quitte les lieux.",
     "ans": {
      "cat": "Technique",
      "zone": "Grand Paddock",
@@ -296,7 +296,7 @@
    {
     "id": "m2",
     "de": "Moto 1",
-    "texte": "PC Orga de Moto 1, 22 h 53 : un véhicule est garé sur l'accès pompiers du Parking Sud, propriétaire introuvable, je demande l'enlèvement.",
+    "texte": "PC Org de Moto 1, 22 h 53 : un véhicule est garé sur l'accès pompiers du Parking Sud, propriétaire introuvable, je demande l'enlèvement.",
     "ans": {
      "cat": "Fourrière",
      "zone": "Parking Sud",
@@ -307,7 +307,7 @@
    {
     "id": "m3",
     "de": "Patrouille 2",
-    "texte": "PC Orga de Patrouille 2, 23 h 02 : deux personnes en altercation devant la buvette de Maison Blanche, situation calmée, pas de blessé.",
+    "texte": "PC Org de Patrouille 2, 23 h 02 : deux personnes en altercation devant la buvette de Maison Blanche, situation calmée, pas de blessé.",
     "ans": {
      "cat": "Sécurité",
      "zone": "Maison Blanche",
@@ -841,13 +841,13 @@
   "radio": [
    {
     "id": "e01",
-    "texte": "PC Est de Patrouille 1 : je commence ma ronde au Village.",
+    "texte": "PC Org de Patrouille 4 : arrivée au parking P2, rien à signaler.",
     "pour_moi": true,
     "priorite": false
    },
    {
     "id": "e02",
-    "texte": "PC Nord de Moto 1 : je suis en position au parking P2.",
+    "texte": "Tango 3 de PC Org : bien reçu, terminé.",
     "pour_moi": false,
     "priorite": false
    }

@@ -108,3 +108,32 @@ def test_patrouilles_coef_allonge_echeances():
     assert i1["statut"] == "manque" and i1["arrivee_ms"] == 34000
     r = patrouilles.rejouer(actions, 1.33)
     assert r["traites"] == 1
+
+
+def test_rejouer_entrainement():
+    inc = banque.charger()["entrainement"]["patrouilles"]["INCIDENTS"]
+    actions = [{"type": "engager", "moyen": "P1", "incident": "E1", "t_ms": 3000}]
+    r = patrouilles.rejouer(actions, 1.0, incidents=inc)
+    assert r["traites"] == 1 and r["manques"] == 0
+    assert [d["id"] for d in r["detail_incidents"]] == ["E1"]
+    assert r["detail_incidents"][0]["arrivee_ms"] == 3000 + 2 * patrouilles.PAS_MS
+    # les incidents de l'epreuve ne sont pas connus de l'entrainement
+    r = patrouilles.rejouer([{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": 3000}], 1.0, incidents=inc)
+    assert r["traites"] == 0 and "action_inconnue" in r["drapeaux"]
+
+
+def test_chemin_impossible():
+    inc = [{"id": "X1", "t": 0, "pos": [3, 3], "type": "Sécurité", "txt": "", "zone": "", "dl": 30}]
+    r = patrouilles.rejouer([{"type": "engager", "moyen": "P1", "incident": "X1", "t_ms": 1000}], 1.0, incidents=inc)
+    assert r["ignores"] == 1
+    assert r["drapeaux"] == ["chemin_impossible"]
+
+
+def test_rejouer_journal_hostile():
+    actions = ["x", None, 3, {"type": "engager", "moyen": ["P1"], "incident": "I1", "t_ms": 3000},
+               {"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": "abc"},
+               {"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": float("nan")}]
+    r = patrouilles.rejouer(actions, 1.0)
+    assert r["traites"] == 0
+    assert "action_inconnue" in r["drapeaux"] and "horodatage_incoherent" in r["drapeaux"]
+    assert patrouilles.rejouer({"x": 1}, 1.0)["traites"] == 0
