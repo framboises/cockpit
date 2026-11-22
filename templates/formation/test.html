@@ -5,11 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
 <title>Test PC Organisation</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/formation.css') }}">
 </head>
-<body>
-<main id="formation-test" data-etat="{{ etat | tojson | forceescape }}">
-  <p>Chargement du test...</p>
-</main>
+<body data-base="{{ url_for('formation.accueil') }}">
+<div class="wrap">
+  <header class="bar">
+    <div class="brand"><span class="dot" aria-hidden="true"></span>
+      <div><h1>PC Organisation</h1><small>Vacation de nuit · test en ligne</small></div></div>
+    <div class="hud">
+      <span class="clock" id="f-horloge" aria-label="Heure de la vacation">20:55</span>
+      <button class="chip" id="f-son" type="button" aria-pressed="false">Son</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="nav" id="f-nav" aria-label="Déroulé de la nuit"></nav>
+    <main class="stage" id="formation-test" data-etat="{{ etat | tojson | forceescape }}">
+      <p>Chargement du test…</p>
+      <noscript><p>Ce test a besoin de JavaScript : activez-le dans votre navigateur.</p></noscript>
+    </main>
+  </div>
+</div>
+{% for js in ("core", "radio", "appel", "mc", "acces", "logique", "situations") %}
+<script src="{{ url_for('static', filename='js/formation/' ~ js ~ '.js') }}" defer></script>
+{% endfor %}
 </body>
 </html>

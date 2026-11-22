@@ -5,42 +5,75 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
 <title>Test PC Organisation</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/formation.css') }}">
 </head>
-<body>
-<main id="formation-accueil" data-fenetre="{{ fenetre }}">
-  <h1>Test PC Organisation</h1>
+<body data-base="{{ url_for('formation.accueil') }}">
+<div class="wrap">
+  <header class="bar">
+    <div class="brand"><span class="dot" aria-hidden="true"></span>
+      <div><h1>PC Organisation</h1><small>Sélection des opérateurs · test en ligne</small></div></div>
+  </header>
 
-  {% if fenetre == "non_configure" %}
-  <p>Le test n'est pas encore disponible.</p>
-  {% else %}
-    {% if fenetre == "avant" %}
-    <p>Le test n'est pas encore ouvert. Il ouvrira le {{ ouverture }}.</p>
+  <main id="formation-accueil" class="stage accueil" data-fenetre="{{ fenetre }}">
+    <div class="stage-head"><div>
+      <div class="eyebrow">TEST EN LIGNE</div>
+      <h2>Test de sélection des opérateurs du PC Organisation</h2>
+      <p class="lead">Ce test simule une vacation de nuit au PC Organisation : sept épreuves courtes, environ
+      25 minutes. Aucune connaissance du site n'est nécessaire : toutes les règles sont affichées à l'écran.</p>
+    </div></div>
+
+    {% if fenetre == "non_configure" %}
+    <div class="avis"><p>Le test n'est pas encore disponible. Revenez à la date indiquée dans votre e-mail
+    d'invitation.</p></div>
+    {% elif fenetre == "avant" %}
+    <div class="avis"><p>Le test n'est pas encore ouvert. Il ouvrira le {{ ouverture }}. Vos identifiants
+    (adresse e-mail et 4 chiffres) resteront les mêmes.</p></div>
     {% elif fenetre == "apres" %}
-    <p>Le test est terminé : il était ouvert jusqu'au {{ fermeture }}.</p>
+    <div class="avis"><p>Le test est terminé : il était ouvert jusqu'au {{ fermeture }}. Si vous l'aviez
+    commencé, vous pouvez vous reconnecter ci-dessous.</p></div>
     {% endif %}
 
-    <p>Ce test ne peut être passé qu'une seule fois, sans possibilité de recommencer : toute épreuve
-    interrompue (fermeture, rechargement, coupure) est perdue et comptée en l'état.</p>
+    {% if fenetre in ("ouvert", "apres") %}
+    <div class="rules">
+      <h3>À savoir avant de vous connecter</h3>
+      <ul>
+        <li>Ce test ne se passe <b>qu'une seule fois</b>, sans aucune possibilité de recommencer.</li>
+        <li>Toute épreuve interrompue (fermeture de la page, rechargement, coupure de connexion) est
+        <b>perdue et comptée en l'état</b>.</li>
+        <li>Installez-vous au calme, seul, sur un ordinateur ou une tablette en mode paysage. Pas de téléphone.</li>
+        <li>Connexion stable : de préférence filaire ou un bon Wi-Fi, évitez le partage de connexion 4G.</li>
+        <li>Batterie branchée, notifications coupées, environ 25 minutes devant vous.</li>
+        <li>Pendant le test, ne rechargez pas la page et n'utilisez pas le bouton retour du navigateur.</li>
+      </ul>
+    </div>
 
-    <form id="formation-connexion" autocomplete="on" novalidate>
+    <p class="etroit avis">Ce test se passe sur un ordinateur ou une tablette en mode paysage. Revenez depuis
+    un ordinateur : vos identifiants restent valables.</p>
+
+    <form id="formation-connexion" class="large" autocomplete="on" novalidate>
       <label>Adresse e-mail utilisée dans le questionnaire
-        <input type="email" name="email" required autocomplete="email"></label>
+        <input type="email" name="email" required autocomplete="email" spellcheck="false"></label>
       <label>4 derniers chiffres de votre téléphone mobile
-        <input type="text" name="tel4" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4"></label>
-      <button type="submit">{% if fenetre == "ouvert" %}Accéder au test{% else %}Me reconnecter{% endif %}</button>
-      <p id="formation-message" role="alert"></p>
+        <input type="text" name="tel4" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+          autocomplete="off"></label>
+      <div class="row"><button class="btn" type="submit">{% if fenetre == "ouvert" %}Accéder au test{% else %}Me reconnecter{% endif %}</button></div>
+      <p id="formation-message" class="erreur" role="alert"></p>
     </form>
-  {% endif %}
+    {% endif %}
 
-  {% if contact_rgpd %}
-  <section id="formation-rgpd">
-    <h2>Vos données</h2>
-    <p>Vos réponses et les informations de votre candidature servent uniquement à la sélection des
-    opérateurs du PC Organisation. Elles seront supprimées le {{ conservation }}. Pour toute question
-    ou pour exercer vos droits : {{ contact_rgpd }}.</p>
-  </section>
-  {% endif %}
-</main>
+    {% if contact_rgpd %}
+    <section id="formation-rgpd" class="rgpd">
+      <h2>Vos données</h2>
+      <p>Vos réponses et les informations de votre candidature servent uniquement à la sélection des
+      opérateurs du PC Organisation. Elles sont conservées jusqu'au {{ conservation }}, puis supprimées.
+      Vous pouvez demander à y accéder ou à les faire supprimer en écrivant à
+      {% if "@" in contact_rgpd %}<a href="mailto:{{ contact_rgpd }}">{{ contact_rgpd }}</a>{% else %}{{ contact_rgpd }}{% endif %}.</p>
+    </section>
+    {% endif %}
+  </main>
+</div>
+<script src="{{ url_for('static', filename='js/formation/core.js') }}" defer></script>
 </body>
 </html>
