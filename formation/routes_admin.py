@@ -1,7 +1,7 @@
 """Page et API d'administration du module Formation. Squelette : complete par les taches suivantes."""
 from functools import wraps
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 formation_admin_bp = Blueprint("formation_admin", __name__)
 
@@ -26,3 +26,23 @@ def page_admin():
 @_role_required("admin")
 def api_etat():
     return jsonify({"ok": True})
+
+
+def _auteur():
+    u = getattr(request, "user_payload", None) or {}
+    return u.get("email") or "?"
+
+
+@formation_admin_bp.post("/api/formation/admin/import")
+@_role_required("admin")
+def api_import():
+    from formation import store
+    from formation.importer import importer
+    f = request.files.get("fichier")
+    if f is None:
+        return jsonify({"ok": False, "error": "fichier_manquant"}), 400
+    try:
+        rapport = importer(store.get_db(), f.read(), _auteur())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "fichier_illisible", "detail": str(exc)[:200]}), 400
+    return jsonify({"ok": True, "rapport": rapport})
