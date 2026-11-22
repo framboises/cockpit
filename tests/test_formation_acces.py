@@ -11,7 +11,7 @@ from flask_wtf.csrf import CSRFProtect
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from formation import acces, store
+from formation import acces, banque, store
 from formation.normalise import normaliser_email, normaliser_tel
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -462,7 +462,13 @@ def test_entrainement(app, db):
     r = c.get("/api/entrainement/radio")
     assert r.status_code == 200 and r.get_json()["ok"] is True
     assert r.get_json()["contenu"]
-    assert c.get("/api/entrainement/patrouilles").status_code == 200
+    r = c.get("/api/entrainement/patrouilles")
+    assert r.status_code == 200
+    ent = r.get_json()["contenu"]
+    # plan et moyens de l'epreuve, mais seulement l'incident d'entrainement
+    for k in ("RW", "CL", "PASS", "TRAV", "MAPZONES", "UNITS"):
+        assert ent[k] == banque.charger()["patrouilles"][k]
+    assert [i["id"] for i in ent["INCIDENTS"]] == ["E1"]
     assert c.get("/api/entrainement/logique").status_code == 404
     assert db["tentatives"].count_documents({}) == 0
 

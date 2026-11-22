@@ -571,7 +571,7 @@
         "et ne sera pas rejouée. Le test continue à l'épreuve suivante.</div>";
     }
     if (!mod) {
-      // TODO Task 7 : module des patrouilles. En attendant, l'epreuve est ouverte puis close sans action.
+      // Module absent (script non charge) : l'epreuve est ouverte puis close sans action.
       corps.innerHTML = avis + "<div class=\"rules\"><h3>Épreuve indisponible</h3><p>Cette épreuve n'est pas " +
         "disponible pour le moment. Cliquez sur « Continuer » pour passer à la suivante.</p></div>" +
         "<div class=\"row actions\"><button class=\"btn\" type=\"button\" id=\"f-go\">Continuer</button></div>" +

@@ -260,4 +260,11 @@ def api_entrainement(nom):
         return _erreur_session()
     if nom not in ENTRAINEMENTS:
         return _err(404, error="entrainement")
-    return jsonify({"ok": True, "contenu": banque.charger()["entrainement"][nom]})
+    b = banque.charger()
+    contenu = b["entrainement"][nom]
+    if nom == "patrouilles":
+        # Plan et moyens de l'epreuve, incidents d'entrainement seulement : ceux de
+        # l'epreuve ne partent qu'avec son enonce.
+        plan = {k: v for k, v in b["patrouilles"].items() if k != "INCIDENTS"}
+        contenu = dict(plan, INCIDENTS=contenu["INCIDENTS"])
+    return jsonify({"ok": True, "contenu": contenu})

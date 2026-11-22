@@ -31,7 +31,7 @@
     </main>
   </div>
 </div>
-{% for js in ("core", "radio", "appel", "mc", "acces", "logique", "situations") %}
+{% for js in ("core", "radio", "appel", "mc", "patrouilles", "acces", "logique", "situations") %}
 <script src="{{ url_for('static', filename='js/formation/' ~ js ~ '.js') }}" defer></script>
 {% endfor %}
 </body>
