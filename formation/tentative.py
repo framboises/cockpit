@@ -50,7 +50,8 @@ def _ms(debut, now):
     return int((now - _utc(debut)).total_seconds() * 1000)
 
 
-def _active(db, candidat_id):
+def active(db, candidat_id):
+    """Tentative active (en_cours, terminee, interrompue) du candidat, ou None."""
     return _col(db).find_one({"campagne": store.CAMPAGNE, "candidat_id": candidat_id,
                               "statut": {"$in": store.STATUTS_TENTATIVE_ACTIFS}})
 
@@ -134,7 +135,7 @@ def connexion(db, candidat, sid, ip, now):
     La reprise est comptee quel que soit le temps passe depuis le debut de
     l'epreuve : ne pas appeler `expirer_si_besoin` avant `connexion`."""
     for _ in range(_ESSAIS):
-        t = _active(db, _cid(candidat))
+        t = active(db, _cid(candidat))
         if t is None:
             return etat_client(None)
         if t["statut"] != "en_cours":
@@ -168,7 +169,7 @@ def connexion(db, candidat, sid, ip, now):
 def commencer(db, candidat, sid, coef_reglage, now):
     """Cree la tentative (irreversible, coefficient fige). Idempotent : une
     tentative active existante est renvoyee telle quelle."""
-    t = _active(db, _cid(candidat))
+    t = active(db, _cid(candidat))
     if t is not None:
         return etat_client(t)
     coef = correction.coef_valide(coef_reglage) if candidat.get("amenagement") is True else 1.0
@@ -182,11 +183,11 @@ def commencer(db, candidat, sid, coef_reglage, now):
         _col(db).insert_one(doc)
     except DuplicateKeyError:
         pass  # double clic concurrent : l'autre requete a cree la tentative
-    return etat_client(_active(db, _cid(candidat)))
+    return etat_client(active(db, _cid(candidat)))
 
 
 def _charger(db, candidat, sid):
-    t = _active(db, _cid(candidat))
+    t = active(db, _cid(candidat))
     if t is None or t["statut"] != "en_cours":
         raise ValueError("tentative")
     if t.get("sid") != sid:

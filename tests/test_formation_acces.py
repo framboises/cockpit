@@ -277,19 +277,33 @@ def test_accueil_mention_rgpd(app, db):
 
 # ---------------------------------------------------------------- API du test
 
+def _cles_secretes(obj, chemin=""):
+    """Chemins des cles de reponse (points, ans, a, ok) presentes dans obj."""
+    out = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in ("points", "ans", "a", "ok"):
+                out.append(chemin + "." + k)
+            out += _cles_secretes(v, chemin + "." + k)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out += _cles_secretes(v, "%s[%d]" % (chemin, i))
+    return out
+
+
 def test_enonce_api_sans_reponses(app, db):
     c = _demarre(app, db)
-    for e in store.EPREUVES[:store.EPREUVES.index("logique")]:
-        assert c.post("/api/epreuve/%s/debut" % e).status_code == 200
+    enonces = {}
+    for e in store.EPREUVES:
+        r = c.post("/api/epreuve/%s/debut" % e)
+        assert r.status_code == 200
+        enonces[e] = r.get_json()["enonce"]
         assert c.post("/api/epreuve/%s/fin" % e).status_code == 200
-    r = c.post("/api/epreuve/logique/debut")
-    assert r.status_code == 200
-    enonce = r.get_json()["enonce"]
-    assert enonce["questions"]
-    for q in enonce["questions"]:
-        assert "a" not in q
-        for ch in q["choix"]:
-            assert "a" not in ch and "ok" not in ch
+    assert enonces["appel"]["appels"] and enonces["mc"]["fiches"]
+    for e in ("logique", "situations"):
+        assert enonces[e]["questions"]
+    for e in ("appel", "mc", "logique", "situations"):
+        assert _cles_secretes(enonces[e]) == [], e
 
 
 def test_ordre_409(app, db):
@@ -348,6 +362,46 @@ def test_etat_n_appelle_pas_connexion(app, db):
     a.get("/api/etat")
     t = db["tentatives"].find_one({})
     assert t["epreuves"]["radio"]["etat"] == "en_cours" and t["reprises"] == 0
+
+
+@pytest.mark.parametrize("entete", [("Sec-Purpose", "prefetch"), ("Sec-Purpose", "prefetch;prerender"),
+                                    ("Purpose", "prefetch")])
+def test_prechargement_ne_touche_pas_la_session(app, db, entete):
+    a = _demarre(app, db)
+    a.post("/api/epreuve/radio/debut")
+    vieux = a.c.get_cookie("formation_session", path=BASE).value
+    r = a.get("/test", headers={entete[0]: entete[1]})
+    assert r.status_code == 204
+    assert r.headers.get("Cache-Control") == "no-store"
+    assert "formation_session" not in (r.headers.get("Set-Cookie") or "")
+    assert a.c.get_cookie("formation_session", path=BASE).value == vieux
+    t = db["tentatives"].find_one({})
+    assert t["epreuves"]["radio"]["etat"] == "en_cours" and t["reprises"] == 0
+    assert a.get("/api/etat").status_code == 200
+
+
+def test_valueerror_inattendue_409_requete(app, db, monkeypatch):
+    from formation import tentative
+
+    def boum(*a, **k):
+        raise ValueError("epreuve inconnue : details internes")
+    c = _demarre(app, db)
+    monkeypatch.setattr(tentative, "debut_epreuve", boum)
+    r = c.post("/api/epreuve/radio/debut")
+    assert r.status_code == 409
+    assert r.get_json() == {"ok": False, "error": "requete"}
+
+
+def test_essais_simultanes_comptes_avant_verification(db):
+    """L'essai est enregistre avant le comptage : un 6e essai est bloque meme
+    avec la bonne paire, et un succes ne laisse pas d'echec derriere lui."""
+    _candidat(db)
+    now = datetime.now(timezone.utc)
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.7.7.7", now)[0] == "ok"
+    assert db["essais_connexion"].count_documents({}) == 0
+    for _ in range(5):
+        assert acces.essayer(db, "f.arbia@gmail.com", "0000", "10.7.7.7", now)[0] == "refuse"
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.7.7.8", now) == ("bloque", None)
 
 
 def test_page_test_sans_session_redirige(app, db):

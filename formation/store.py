@@ -23,9 +23,13 @@ _db_tests = None
 _client = None
 
 
+def est_prod():
+    """Meme regle qu'app.py (IS_PROD) : prod si TITAN_ENV vaut prod ou production."""
+    return os.getenv("TITAN_ENV", "dev").strip().lower() in ("prod", "production")
+
+
 def nom_base():
-    env = os.getenv("TITAN_ENV", "dev").strip().lower()
-    return "cockpit_formation" if env in ("prod", "production") else "cockpit_formation_dev"
+    return "cockpit_formation" if est_prod() else "cockpit_formation_dev"
 
 
 def set_db_for_tests(db):

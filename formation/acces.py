@@ -33,7 +33,8 @@ _SECRET_DEV = "dev-formation-secret-ne-jamais-utiliser-en-production"
 
 
 def est_dev():
-    return os.getenv("TITAN_ENV", "dev").strip().lower() in ("dev", "development", "")
+    """Dev sauf TITAN_ENV prod / production (meme regle qu'app.py et store)."""
+    return not store.est_prod()
 
 
 def _secret():
@@ -50,33 +51,50 @@ def _cles(email, ip):
     return ["email:" + e, "ip:" + str(ip or "")]
 
 
+def _compte(db, cle, depuis):
+    return db["essais_connexion"].count_documents({"cle": cle, "t": {"$gt": depuis}})
+
+
 def est_bloque(db, email, ip, now):
+    """>= 5 echecs sur 15 min pour l'e-mail ou pour l'IP."""
     depuis = now - FENETRE_ECHECS
-    col = db["essais_connexion"]
-    return any(col.count_documents({"cle": c, "t": {"$gt": depuis}}, limit=SEUIL_ECHECS)
-               >= SEUIL_ECHECS for c in _cles(email, ip))
+    return any(_compte(db, c, depuis) >= SEUIL_ECHECS for c in _cles(email, ip))
 
 
-def _echec(db, email, ip, now):
-    db["essais_connexion"].insert_many(
-        [{"campagne": store.CAMPAGNE, "cle": c, "t": now} for c in _cles(email, ip)])
+def _paire(db, email, tel4):
+    e = normaliser_email(email) if isinstance(email, str) else None
+    t4 = tel4.strip() if isinstance(tel4, str) else ""
+    if not e or not re.fullmatch(r"[0-9]{4}", t4):
+        return None
+    cand = db["candidats"].find_one({"campagne": store.CAMPAGNE, "email": e})
+    if cand is None or not hmac.compare_digest(str(cand.get("tel4") or ""), t4):
+        return None
+    return cand
+
+
+def essayer(db, email, tel4, ip, now):
+    """Un essai d'identification : ("ok", candidat), ("refuse", None) ou
+    ("bloque", None). L'essai est enregistre comme echec AVANT le comptage
+    (e-mail et IP) : des requetes simultanees se voient entre elles et ne
+    passent pas toutes sous le seuil. Plus de 5 essais sur 15 min (celui-ci
+    compris) : bloque, l'essai reste compte. Paire correcte : l'essai est
+    retire (un succes n'est pas un echec)."""
+    docs = [{"campagne": store.CAMPAGNE, "cle": c, "t": now} for c in _cles(email, ip)]
+    ids = db["essais_connexion"].insert_many(docs).inserted_ids
+    depuis = now - FENETRE_ECHECS
+    if any(_compte(db, d["cle"], depuis) > SEUIL_ECHECS for d in docs):
+        return "bloque", None
+    cand = _paire(db, email, tel4)
+    if cand is None:
+        return "refuse", None
+    db["essais_connexion"].delete_many({"_id": {"$in": ids}})
+    return "ok", cand
 
 
 def identifier(db, email, tel4, ip, now):
     """Candidat dont la paire (e-mail, 4 chiffres) correspond, ou None (paire
     inconnue ou acces bloque). Chaque echec est enregistre pour l'e-mail et l'IP."""
-    if est_bloque(db, email, ip, now):
-        return None
-    e = normaliser_email(email) if isinstance(email, str) else None
-    t4 = tel4.strip() if isinstance(tel4, str) else ""
-    cand = None
-    if e and re.fullmatch(r"[0-9]{4}", t4):
-        cand = db["candidats"].find_one({"campagne": store.CAMPAGNE, "email": e})
-        if cand is not None and not hmac.compare_digest(str(cand.get("tel4") or ""), t4):
-            cand = None
-    if cand is None:
-        _echec(db, email, ip, now)
-    return cand
+    return essayer(db, email, tel4, ip, now)[1]
 
 
 def emettre_jeton(candidat_id, sid, now):

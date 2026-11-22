@@ -11,6 +11,7 @@ clot donc l'epreuve en cours (reprise comptee) et l'ancien onglet recoit
 `expirer_si_besoin` n'est appele que dans les requetes de la session active.
 """
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
 from functools import wraps
@@ -25,6 +26,9 @@ from formation import acces, banque, store, tentative
 formation_bp = Blueprint("formation", __name__, url_prefix="/test-pc-organisation")
 
 MAX_ACTION_OCTETS = 16 * 1024
+# Refus des regles du passage unique (tentative.py) transmis tels quels au client
+CODES_REFUS = ("ordre", "etat", "donnees", "tentative")
+logger = logging.getLogger(__name__)
 ENTRAINEMENTS = ("radio", "patrouilles")
 _PARIS = ZoneInfo("Europe/Paris")
 
@@ -50,12 +54,6 @@ def _erreur_session():
 
 def _ip():
     return request.remote_addr or ""
-
-
-def _tentative_active(db, candidat):
-    return db["tentatives"].find_one({"campagne": store.CAMPAGNE,
-                                      "candidat_id": str(candidat["_id"]),
-                                      "statut": {"$in": store.STATUTS_TENTATIVE_ACTIFS}})
 
 
 def _candidat_du_cookie(db):
@@ -96,7 +94,7 @@ def api_session(fn):
         cand, sid = sess
         now = _now()
         try:
-            t = _tentative_active(db, cand)
+            t = tentative.active(db, str(cand["_id"]))
             if t is not None:
                 if t.get("sid") != sid:
                     return _erreur_session()
@@ -105,7 +103,11 @@ def api_session(fn):
         except PermissionError:
             return _erreur_session()
         except ValueError as e:
-            return _err(409, error=str(e))
+            code = str(e)
+            if code not in CODES_REFUS:
+                logger.exception("formation : refus inattendu sur %s", request.path)
+                code = "requete"
+            return _err(409, error=code)
         except RuntimeError:
             return _err(503, error="reessayez")
     return wrapper
@@ -136,8 +138,19 @@ def accueil():
         ouverture=_date_fr(r.get("ouverture")), fermeture=_date_fr(r.get("fermeture")))
 
 
+def _prechargement():
+    """Requete de prechargement / prerendu du navigateur (Sec-Purpose, Purpose)."""
+    for h in ("Sec-Purpose", "Purpose"):
+        v = (request.headers.get(h) or "").lower()
+        if "prefetch" in v or "prerender" in v:
+            return True
+    return False
+
+
 @formation_bp.get("/test")
 def page_test():
+    if _prechargement():
+        return "", 204  # un prechargement ne doit jamais clore une epreuve en cours
     db = store.get_db()
     sess = _candidat_du_cookie(db)
     if sess is None:
@@ -161,13 +174,13 @@ def api_connexion():
     db = store.get_db()
     now = _now()
     email, tel4, ip = d.get("email"), d.get("tel4"), _ip()
-    if acces.est_bloque(db, email, ip, now):
+    resultat, cand = acces.essayer(db, email, tel4, ip, now)
+    if resultat == "bloque":
         return _err(429, message=acces.MESSAGE_BLOQUE)
-    cand = acces.identifier(db, email, tel4, ip, now)
     if cand is None:
         return _err(401, message=acces.MESSAGE_GENERIQUE)
     fenetre = acces.etat_fenetre(store.reglages(db), now)
-    if fenetre != "ouvert" and _tentative_active(db, cand) is None:
+    if fenetre != "ouvert" and tentative.active(db, str(cand["_id"])) is None:
         return _err(403, fenetre=fenetre)
     try:
         etat, jeton = _nouvelle_session(db, cand, now)
@@ -211,7 +224,7 @@ def api_debut(db, cand, sid, t, now, epreuve):
 def api_action(db, cand, sid, t, now, epreuve):
     if (request.content_length or 0) > MAX_ACTION_OCTETS:
         return _err(413, error="trop_grand")
-    brut = request.get_data(cache=False)
+    brut = request.stream.read(MAX_ACTION_OCTETS + 1)  # borne meme sans Content-Length
     if len(brut) > MAX_ACTION_OCTETS:
         return _err(413, error="trop_grand")
     try:

@@ -111,7 +111,8 @@ csrf = CSRFProtect(app)
 
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
-    if request.path.startswith('/api/'):
+    # /test-pc-organisation/api/ : API candidat du module Formation, JSON aussi
+    if request.path.startswith(('/api/', '/test-pc-organisation/api/')):
         # code "csrf" : le front renouvelle son jeton (/api/csrf-token) et rejoue
         return jsonify({"error": "CSRF token manquant ou invalide", "code": "csrf"}), 400
     return e.get_body(), 400
