@@ -13,9 +13,10 @@ CAMPAGNE = "pcorg-2026-12"
 EPREUVES = ["radio", "appel", "mc", "patrouilles", "acces", "logique", "situations"]
 
 # MongoDB n'accepte pas $ne dans un index partiel : l'unicite d'une tentative
-# par candidat porte sur les statuts ci-dessous (tout sauf "reinitialisee").
-# Un nouveau statut de tentative doit etre ajoute ici.
-STATUTS_TENTATIVE_ACTIFS = ["en_cours", "terminee", "expiree", "abandonnee"]
+# par candidat porte sur les statuts ci-dessous. Les statuts d'une tentative
+# sont exactement en_cours, terminee, interrompue, reinitialisee (cette
+# derniere est exclue de l'unicite).
+STATUTS_TENTATIVE_ACTIFS = ["en_cours", "terminee", "interrompue"]
 
 _PARIS = ZoneInfo("Europe/Paris")
 _db_tests = None

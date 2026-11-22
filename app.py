@@ -2909,6 +2909,11 @@ app.register_blueprint(declarations_bp)
 from formation import formation_bp, formation_admin_bp
 app.register_blueprint(formation_bp)
 app.register_blueprint(formation_admin_bp)
+try:
+    from formation import store as _formation_store
+    _formation_store.ensure_indexes(_formation_store.get_db())
+except Exception as _e:
+    logger.warning("formation index init: %s", _e)
 from bibler_postes import bibler_bp
 app.register_blueprint(bibler_bp)
 csrf.exempt(field_declaration_create)

@@ -69,3 +69,10 @@ def test_index_envois_invitation_et_relance(db):
         e.insert_one(dict(base, type="invitation"))
     with pytest.raises(DuplicateKeyError):
         e.insert_one(dict(base, type="relance"))
+
+
+def test_index_tentative_interrompue_compte(db):
+    t = db["tentatives"]
+    t.insert_one({"campagne": store.CAMPAGNE, "candidat_id": "c2", "statut": "interrompue"})
+    with pytest.raises(DuplicateKeyError):
+        t.insert_one({"campagne": store.CAMPAGNE, "candidat_id": "c2", "statut": "en_cours"})
