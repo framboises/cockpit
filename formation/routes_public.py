@@ -9,6 +9,8 @@ appele qu'a une identification reussie et a chaque chargement de la page
 clot donc l'epreuve en cours (reprise comptee) et l'ancien onglet recoit
 401 {"error": "session"}. `/api/etat` n'appelle jamais `connexion`.
 `expirer_si_besoin` n'est appele que dans les requetes de la session active.
+Cookie glissant : `/api/commencer` et chaque `/debut` le reemettent (meme sid,
+une heure neuve).
 """
 import json
 import logging
@@ -210,14 +212,24 @@ def api_commencer(db, cand, sid, t, now):
     if fenetre != "ouvert":
         return _err(403, fenetre=fenetre)
     etat = tentative.commencer(db, cand, sid, r.get("coef_amenagement"), now)
-    return jsonify({"ok": True, "etat": etat})
+    return _prolonger(jsonify({"ok": True, "etat": etat}), cand, sid, now)
+
+
+def _prolonger(reponse, cand, sid, now):
+    """Cookie glissant : meme sid, une heure neuve (un candidat lent, ou avec
+    amenagement, ne voit pas son jeton expirer en plein test)."""
+    acces.poser_cookie(reponse, acces.emettre_jeton(str(cand["_id"]), sid, now))
+    return reponse
 
 
 @formation_bp.post("/api/epreuve/<epreuve>/debut")
 @api_session
 def api_debut(db, cand, sid, t, now, epreuve):
     enonce = tentative.debut_epreuve(db, cand, sid, epreuve, now)
-    return jsonify({"ok": True, "enonce": enonce})
+    # Reponse precedente perdue : `t` (lu avant) a deja l'epreuve en cours, le
+    # client recale son chrono sur le temps serveur ecoule.
+    return _prolonger(jsonify({"ok": True, "enonce": enonce,
+                               "ecoule_ms": tentative.ecoule_ms(t, epreuve, now)}), cand, sid, now)
 
 
 @formation_bp.post("/api/epreuve/<epreuve>/action")

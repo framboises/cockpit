@@ -197,8 +197,17 @@ def _charger(db, candidat, sid):
 
 def debut_epreuve(db, candidat, sid, epreuve, now):
     """Demarre `epreuve` si c'est la premiere `a_faire` et qu'aucune n'est en
-    cours ; renvoie l'enonce tire (conserve dans la tentative). Jamais deux fois."""
+    cours ; renvoie l'enonce tire (conserve dans la tentative). Jamais deux fois.
+
+    Reponse perdue (timeout, coupure) : la meme session qui redemande l'epreuve
+    deja `en_cours` sans aucune action recue obtient l'enonce conserve, sans
+    nouvelle transition ni nouveau `debut` (le client recale son chrono avec
+    `ecoule_ms`). Des qu'une action est recue : refus `ordre` comme avant ; une
+    autre session est refusee par `_charger` (PermissionError)."""
     t = _charger(db, candidat, sid)
+    ep = t["epreuves"].get(epreuve) if epreuve in store.EPREUVES else None
+    if ep is not None and ep["etat"] == "en_cours" and not ep.get("actions") and ep.get("enonce") is not None:
+        return ep["enonce"]
     if epreuve not in store.EPREUVES or _en_cours(t) is not None or _premiere_a_faire(t) != epreuve:
         raise ValueError("ordre")
     i = store.EPREUVES.index(epreuve)
@@ -213,6 +222,15 @@ def debut_epreuve(db, candidat, sid, epreuve, now):
         _charger(db, candidat, sid)  # session remplacee entre-temps -> PermissionError
         raise ValueError("ordre")
     return enonce
+
+
+def ecoule_ms(t, epreuve, now):
+    """Ms serveur ecoulees depuis le debut de `epreuve` si elle est en cours, 0
+    sinon (premier demarrage)."""
+    ep = (t or {}).get("epreuves", {}).get(epreuve) or {}
+    if ep.get("etat") != "en_cours" or ep.get("debut") is None:
+        return 0
+    return max(0, _ms(ep["debut"], now))
 
 
 def _assainir(donnees):

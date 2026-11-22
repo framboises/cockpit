@@ -136,8 +136,10 @@
 
   F.api = function (path, body, opts) {
     opts = opts || {};
+    // referrerPolicy : le controle HTTPS de Flask-WTF exige un Referer de meme origine si X-Forwarded-Proto
+    // devient un jour fiable ; les pages gardent Referrer-Policy: no-referrer pour la navigation.
     var init = {method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store",
-                headers: {"Accept": "application/json"}};
+                referrerPolicy: "same-origin", headers: {"Accept": "application/json"}};
     if (body !== undefined) {
       init.headers["Content-Type"] = "application/json";
       init.headers["X-CSRFToken"] = csrf();
@@ -178,7 +180,7 @@
   };
 
   function renouvelerJeton() {
-    return fetch(BASE + "/api/csrf", {credentials: "same-origin", cache: "no-store",
+    return fetch(BASE + "/api/csrf", {credentials: "same-origin", cache: "no-store", referrerPolicy: "same-origin",
                                      headers: {"Accept": "application/json"}}).then(function (res) {
       return res.ok ? res.json() : null;
     }).then(function (d) {
@@ -605,7 +607,8 @@
     focaliserTitre();
   }
 
-  function demarrer(id, mod) {
+  function demarrer(id, mod, essai) {
+    essai = essai || 0;
     var bouton = document.getElementById("f-go");
     var err = document.getElementById("f-erreur");
     if (bouton) { bouton.disabled = true; bouton.textContent = "Démarrage…"; }
@@ -613,7 +616,9 @@
       if (perdue) return;
       if (r.status === 200 && r.data && r.data.ok) {
         F.toutArreter();  // entrainement eventuel
-        F.t0 = performance.now();
+        // Reponse precedente perdue : le serveur renvoie le meme enonce et le temps deja ecoule.
+        var ecoule = typeof r.data.ecoule_ms === "number" && r.data.ecoule_ms > 0 ? r.data.ecoule_ms : 0;
+        F.t0 = performance.now() - ecoule;
         garde = true;
         var corps = ecran(id);
         var une = false;
@@ -632,6 +637,14 @@
         return;
       }
       if (r.status === 409) { rafraichir(); return; }
+      // Reseau coupe ou timeout : l'epreuve a pu demarrer cote serveur. On redemande /debut (le serveur
+      // rend le meme enonce a la meme session tant qu'aucune action n'est recue), jamais /etat qui
+      // trouverait l'epreuve en cours et la clorait.
+      if (aReessayer(r.status) && essai < 8) {
+        if (err) err.textContent = "Connexion lente, nouvel essai…";
+        setTimeout(function () { demarrer(id, mod, essai + 1); }, attente(essai));
+        return;
+      }
       if (bouton) { bouton.disabled = false; bouton.textContent = mod ? "Commencer l'épreuve" : "Continuer"; }
       if (err) err.textContent = "Service momentanément indisponible, réessayez dans un instant.";
     });

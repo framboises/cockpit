@@ -350,6 +350,42 @@ def test_ordre_409(app, db):
     assert r.get_json() == {"ok": False, "error": "ordre"}
 
 
+def test_debut_rejoue_apres_reponse_perdue(app, db):
+    """Second /debut du meme onglet sans action : meme enonce et temps ecoule
+    serveur ; apres une action : 409 ordre."""
+    c = _demarre(app, db)
+    r1 = c.post("/api/epreuve/radio/debut")
+    assert r1.status_code == 200 and r1.get_json()["ecoule_ms"] == 0
+    r2 = c.post("/api/epreuve/radio/debut")
+    assert r2.status_code == 200
+    assert r2.get_json()["enonce"] == r1.get_json()["enonce"]
+    assert r2.get_json()["ecoule_ms"] >= 0
+    assert c.post("/api/epreuve/radio/action", {"type": "prise", "msg": "r01", "t_ms": 10}).status_code == 200
+    r3 = c.post("/api/epreuve/radio/debut")
+    assert r3.status_code == 409 and r3.get_json()["error"] == "ordre"
+
+
+def _sid_du_cookie(reponse):
+    m = re.search(r"formation_session=([^;]+)", reponse.headers.get("Set-Cookie", ""))
+    assert m, reponse.headers
+    return acces.lire_jeton(m.group(1))
+
+
+def test_cookie_glissant_commencer_et_debut(app, db):
+    """/commencer et chaque /debut reemettent le cookie (meme sid, 1 h neuve) :
+    un candidat lent ne perd pas sa session en plein test."""
+    _candidat(db)
+    c = Client(app)
+    p0 = _sid_du_cookie(c.connexion())
+    r = c.post("/api/commencer", {"accepte": True})
+    p1 = _sid_du_cookie(r)
+    assert p1["sid"] == p0["sid"] and p1["exp"] >= p0["exp"]
+    assert "Max-Age=3600" in r.headers["Set-Cookie"]
+    r = c.post("/api/epreuve/radio/debut")
+    assert _sid_du_cookie(r)["sid"] == p0["sid"]
+    assert c.get("/api/etat").status_code == 200
+
+
 def test_action_trop_grande_413_et_non_objet_400(app, db):
     c = _demarre(app, db)
     c.post("/api/epreuve/radio/debut")

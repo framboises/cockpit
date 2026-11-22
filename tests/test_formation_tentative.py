@@ -80,9 +80,32 @@ def test_ordre_des_epreuves_impose(db):
     with pytest.raises(ValueError, match="ordre"):
         tentative.debut_epreuve(db, cand, "s1", "appel", T0)
     with pytest.raises(ValueError, match="ordre"):
-        tentative.debut_epreuve(db, cand, "s1", "radio", T0)
-    with pytest.raises(ValueError, match="ordre"):
         tentative.debut_epreuve(db, cand, "s1", "inconnue", T0)
+
+
+def test_debut_rejoue_meme_session_sans_action(db):
+    """Reponse de /debut perdue : le meme onglet redemande l'epreuve et recoit le
+    meme enonce, sans seconde transition ; des qu'une action est recue, ou depuis
+    une autre session, c'est un refus."""
+    cand = _demarre(db)
+    enonce = tentative.debut_epreuve(db, cand, "s1", "radio", T0)
+    t1 = _t(db, cand)
+    t5 = T0 + timedelta(seconds=5)
+    assert tentative.debut_epreuve(db, cand, "s1", "radio", t5) == enonce
+    t2 = _t(db, cand)
+    assert t2["epreuves"]["radio"]["debut"] == t1["epreuves"]["radio"]["debut"]
+    assert t2["epreuves"]["radio"]["etat"] == "en_cours"
+    assert tentative.ecoule_ms(t2, "radio", t5) == 5000
+    assert tentative.ecoule_ms(t2, "appel", t5) == 0
+    tentative.action(db, cand, "s1", "radio", {"type": "prise", "msg": "r01", "t_ms": 6000},
+                     T0 + timedelta(seconds=6))
+    with pytest.raises(ValueError, match="ordre"):
+        tentative.debut_epreuve(db, cand, "s1", "radio", T0 + timedelta(seconds=7))
+    # autre session : jamais l'enonce de l'epreuve en cours
+    autre = _demarre(db)
+    tentative.debut_epreuve(db, autre, "s1", "radio", T0)
+    with pytest.raises(PermissionError):
+        tentative.debut_epreuve(db, autre, "s9", "radio", t5)
 
 
 def test_enonce_deterministe_par_seed(db):
