@@ -115,7 +115,7 @@ def test_lien_depuis_env(db, monkeypatch):
 def test_un_message_par_destinataire(db):
     for i in range(3):
         _cand(db, "c%d@x.fr" % i)
-    assert mailer.planifier(db, "non_invites", "adm", _now()) == 3
+    assert mailer.planifier(db, "non_invites", "adm", _now())["planifies"] == 3
     fil = _fil()
     fil.traiter_tout(db)
     assert len(FauxSMTP.envoyes) == 3
@@ -135,17 +135,17 @@ def test_fictifs_exclus(db):
     _cand(db, "vrai@x.fr")
     _cand(db, "faux@x.fr", fictif=True)
     assert mailer.compter(db, "non_invites") == 1
-    assert mailer.planifier(db, "non_invites", "adm", _now()) == 1
+    assert mailer.planifier(db, "non_invites", "adm", _now())["planifies"] == 1
     assert db["envois"].count_documents({"email": "faux@x.fr"}) == 0
 
 
 def test_planifier_deux_fois_ne_double_pas(db):
     _cand(db, "a@x.fr")
     _cand(db, "b@x.fr")
-    assert mailer.planifier(db, "non_invites", "adm", _now()) == 2
-    assert mailer.planifier(db, "non_invites", "adm", _now()) == 0
+    assert mailer.planifier(db, "non_invites", "adm", _now())["planifies"] == 2
+    assert mailer.planifier(db, "non_invites", "adm", _now())["planifies"] == 0
     _fil().traiter_tout(db)
-    assert mailer.planifier(db, "non_invites", "adm", _now()) == 0
+    assert mailer.planifier(db, "non_invites", "adm", _now())["planifies"] == 0
     assert len(FauxSMTP.envoyes) == 2
     assert db["envois"].count_documents({"type": "invitation"}) == 2
 
@@ -168,8 +168,8 @@ def test_relance_seulement_non_commences(db):
                                  "statut": "envoye", "email": "x"})
     db["tentatives"].insert_one({"campagne": store.CAMPAGNE, "candidat_id": b, "statut": "en_cours"})
     assert mailer.compter(db, "relance_non_commences") == 1
-    assert mailer.planifier(db, "relance_non_commences", "adm", _now()) == 1
-    assert mailer.planifier(db, "relance_non_commences", "adm", _now()) == 0
+    assert mailer.planifier(db, "relance_non_commences", "adm", _now())["planifies"] == 1
+    assert mailer.planifier(db, "relance_non_commences", "adm", _now())["planifies"] == 0
     r = db["envois"].find_one({"type": "relance"})
     assert r["candidat_id"] == a
 
@@ -203,7 +203,7 @@ def test_echec_smtp_marque_echec_et_continue(db):
 def test_reprise_apres_redemarrage(db, monkeypatch):
     _cand(db, "a@x.fr")
     mailer.planifier(db, "non_invites", "adm", _now())
-    db["envois"].update_many({}, {"$set": {"statut": "en_cours"}})
+    db["envois"].update_many({}, {"$set": {"statut": "en_cours", "debut": _now() - timedelta(minutes=10)}})
     lances = []
     monkeypatch.setattr(mailer.fil, "demarrer", lambda d: lances.append(d))
     mailer.reprendre_au_demarrage(db)
@@ -293,3 +293,86 @@ def test_rapport_pcorg_inchange(monkeypatch):
     assert r == {"ok": True, "sent_count": 3, "smtp_host": "smtp.invalide.test", "from": "safe@lemans.org"}
     with pytest.raises(m.SmtpError):
         m.send_summary_email([], {})
+
+
+def test_en_cours_recent_non_remis_en_file(db, monkeypatch):
+    _cand(db, "a@x.fr")
+    mailer.planifier(db, "non_invites", "adm", _now())
+    lances = []
+    monkeypatch.setattr(mailer.fil, "demarrer", lambda d: lances.append(1))
+    db["envois"].update_many({}, {"$set": {"statut": "en_cours", "debut": _now() - timedelta(minutes=1)}})
+    mailer.reprendre_au_demarrage(db)
+    assert db["envois"].find_one()["statut"] == "en_cours" and lances == []
+    db["envois"].update_many({}, {"$set": {"debut": _now() - timedelta(minutes=6)}})
+    mailer.reprendre_au_demarrage(db)
+    assert db["envois"].find_one()["statut"] == "en_file" and lances == [1]
+
+
+def test_import_app_ne_demarre_pas_le_fil():
+    import subprocess
+    code = ("import app, formation.mailer as m; "
+            "assert m.fil._thread is None; print('ok')")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), timeout=120)
+    assert "ok" in r.stdout, r.stderr[-500:]
+
+
+def test_arret_persistant(db, client, monkeypatch):
+    lances = []
+    monkeypatch.setattr(mailer.fil, "demarrer", lambda d: lances.append(1))
+    _cand(db, "a@x.fr")
+    mailer.planifier(db, "non_invites", "adm", _now())
+    mailer.arreter(db, "adm")
+    assert store.reglages(db)["campagne_arretee"] is True
+    assert db["envois"].find_one()["statut"] == "en_file"
+    assert db["journal_admin"].find_one({"action": "campagne_arreter"})
+    mailer.reprendre_au_demarrage(db)
+    assert lances == []
+    fil = _fil()
+    fil.traiter_tout(db)
+    assert FauxSMTP.envoyes == []
+    r = _post(client, "/api/formation/admin/campagne/reprendre", {})
+    assert r.status_code == 200 and lances == [1]
+    assert store.reglages(db)["campagne_arretee"] is False
+    _fil().traiter_tout(db)
+    assert len(FauxSMTP.envoyes) == 1
+
+
+def test_lancer_leve_l_arret(db, monkeypatch):
+    monkeypatch.setattr(mailer.fil, "demarrer", lambda d: None)
+    _cand(db, "a@x.fr")
+    mailer.arreter(db, "adm")
+    mailer.lancer(db, "non_invites", 1, "adm", _now())
+    assert store.reglages(db)["campagne_arretee"] is False
+
+
+def test_planifier_confirmation_et_adresses_invalides(db):
+    _cand(db, "a@x.fr")
+    _cand(db, "pas-une-adresse")
+    with pytest.raises(ValueError) as e:
+        mailer.planifier(db, "non_invites", "adm", _now(), confirmation_n=5)
+    assert e.value.args == ("confirmation_differente", 2)
+    assert db["envois"].count_documents({}) == 0
+    assert mailer.planifier(db, "non_invites", "adm", _now(), confirmation_n=2) == {"planifies": 1, "invalides": 1}
+
+
+def test_controles_a_l_envoi(db):
+    a = _cand(db, "a@x.fr")
+    _cand(db, "b@x.fr")
+    mailer.planifier(db, "non_invites", "adm", _now())
+    db["candidats"].update_one({"email": "a@x.fr"}, {"$set": {"fictif": True}})
+    fil = _fil()
+    assert fil.traiter_un(db)
+    assert db["envois"].find_one({"email": "a@x.fr"})["statut"] == "annule"
+    db["reglages"].update_one({"_id": store.CAMPAGNE}, {"$set": {"reply_to": ""}})
+    assert fil.traiter_un(db)
+    assert FauxSMTP.envoyes == []
+    assert db["envois"].find_one({"email": "b@x.fr"})["statut"] == "en_file"
+    assert store.reglages(db)["campagne_arretee"] is True
+
+
+def test_erreur_mongo_ne_tue_pas_silencieusement(db, caplog):
+    fil = _fil()
+    fil.traiter_un = lambda d: (_ for _ in ()).throw(RuntimeError("mongo"))
+    fil.traiter_tout(db)
+    assert "erreur inattendue" in caplog.text

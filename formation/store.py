@@ -101,6 +101,7 @@ def _defauts():
         "debit_envoi_s": 2.0,
         "expediteur_nom": "PC Organisation - ACO",
         "gabarit": dict(GABARIT_DEFAUT),
+        "campagne_arretee": False,
     }
 
 

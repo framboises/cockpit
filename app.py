@@ -2915,11 +2915,6 @@ try:
     _formation_store.ensure_indexes(_formation_store.get_db())
 except Exception as _e:
     logger.warning("formation index init: %s", _e)
-try:
-    from formation import mailer as _formation_mailer
-    _formation_mailer.reprendre_au_demarrage(_formation_store.get_db())
-except Exception as _e:
-    logger.warning("formation reprise campagne: %s", _e)
 from bibler_postes import bibler_bp
 app.register_blueprint(bibler_bp)
 csrf.exempt(field_declaration_create)
@@ -10705,6 +10700,12 @@ if __name__ == "__main__":
             INTEG.start_worker()
         except Exception as e:
             logger.warning("Echec demarrage connecteur applications externes : %s", e)
+        # Formation : reprise de la campagne d'e-mails (en_cours orphelins, fil d'envoi)
+        try:
+            from formation import mailer as _formation_mailer, store as _formation_store2
+            _formation_mailer.reprendre_au_demarrage(_formation_store2.get_db())
+        except Exception as e:
+            logger.warning("Echec reprise campagne formation : %s", e)
         # Intrusions arrivees sans photo : capture du canal par Cockpit
         try:
             import detection as DET

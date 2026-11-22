@@ -9,7 +9,7 @@ import logging
 import os
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -95,12 +95,15 @@ def _smtp(message, destinataires):
 
 def envoyer_essai(db, adresse, auteur):
     adresse = (adresse or "").strip()
-    if not re.fullmatch(r"[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+", adresse):
+    if not _ADRESSE.fullmatch(adresse):
         raise ValueError("adresse_invalide")
     reg = store.reglages(db)
     objet, texte, html = rendre(reg["gabarit"], {"prenom": "Camille"}, reg)
     _smtp(_message("[ESSAI] " + objet, texte, html, adresse, reg), [adresse])
     store.journal(db, "campagne_essai", auteur, adresse=adresse)
+
+
+_ADRESSE = re.compile(r"[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+")
 
 
 def _candidats_cibles(db, cible):
@@ -130,21 +133,55 @@ def compter(db, cible):
     return len(_candidats_cibles(db, cible))
 
 
-def planifier(db, cible, auteur, now):
+def planifier(db, cible, auteur, now, confirmation_n=None):
+    """Retourne {planifies, invalides}. Leve ValueError reply_to_vide, ou
+    confirmation_differente (args : n recalcule) si confirmation_n ne correspond pas."""
     if not store.reglages(db).get("reply_to"):
         raise ValueError("reply_to_vide")
     typ = "invitation" if cible == "non_invites" else "relance"
-    n = 0
-    for c in _candidats_cibles(db, cible):
+    liste = _candidats_cibles(db, cible)
+    if confirmation_n is not None and (isinstance(confirmation_n, bool) or confirmation_n != len(liste)):
+        raise ValueError("confirmation_differente", len(liste))
+    n = invalides = 0
+    for c in liste:
+        if not _ADRESSE.fullmatch((c.get("email") or "").strip()):
+            invalides += 1
+            continue
         try:
             db["envois"].insert_one({
                 "campagne": store.CAMPAGNE, "candidat_id": str(c["_id"]), "type": typ,
-                "email": c["email"], "statut": "en_file", "cree_le": now, "auteur": auteur})
+                "email": c["email"].strip(), "statut": "en_file", "cree_le": now, "auteur": auteur})
             n += 1
         except DuplicateKeyError:
             pass
-    store.journal(db, "campagne_planifier", auteur, cible=cible, n=n)
-    return n
+    store.journal(db, "campagne_planifier", auteur, cible=cible, n=n, invalides=invalides)
+    return {"planifies": n, "invalides": invalides}
+
+
+def _fixer_arret(db, valeur, auteur, action):
+    db["reglages"].update_one({"_id": store.CAMPAGNE}, {"$set": {"campagne_arretee": valeur}}, upsert=True)
+    store.journal(db, action, auteur)
+
+
+def arreter(db, auteur):
+    """Arret persistant : survit a un redemarrage ; les en_file restent en file."""
+    _fixer_arret(db, True, auteur, "campagne_arreter")
+    fil.arreter()
+
+
+def reprendre(db, auteur):
+    _fixer_arret(db, False, auteur, "campagne_reprendre")
+    if db["envois"].count_documents({"campagne": store.CAMPAGNE, "statut": "en_file"}):
+        fil.demarrer(db)
+
+
+def lancer(db, cible, confirmation_n, auteur, now):
+    """Planifie (confirmation explicite obligatoire), leve l'arret et demarre le fil."""
+    res = planifier(db, cible, auteur, now, confirmation_n=confirmation_n)
+    if store.reglages(db).get("campagne_arretee"):
+        _fixer_arret(db, False, auteur, "campagne_reprendre")
+    fil.demarrer(db)
+    return res
 
 
 def renvoyer_echecs(db, auteur):
@@ -179,7 +216,16 @@ class FilEnvoi:
             cand = db["candidats"].find_one({"_id": oid}) if oid else None
             if cand is None:
                 raise ValueError("candidat_introuvable")
+            if cand.get("fictif"):
+                db["envois"].update_one({"_id": e["_id"]}, {"$set": {"statut": "annule"}})
+                return True
             reg = store.reglages(db)
+            if not reg.get("reply_to"):
+                logger.error("formation campagne arretee : reply_to vide")
+                db["envois"].update_one({"_id": e["_id"]}, {"$set": {"statut": "en_file"}})
+                _fixer_arret(db, True, "systeme", "campagne_arret_reply_to")
+                self._stop.set()
+                return True
             objet, texte, html = rendre(reg["gabarit"], cand, reg)
             adresse = e["email"]
             self._envoyer(_message(objet, texte, html, adresse, reg), [adresse])
@@ -195,11 +241,18 @@ class FilEnvoi:
     def traiter_tout(self, db):
         """Boucle jusqu'a epuisement ou arret ; pause debit_envoi_s entre deux messages."""
         while not self._stop.is_set():
-            if not self.traiter_un(db):
+            try:
+                reg = store.reglages(db)
+                if reg.get("campagne_arretee"):
+                    break
+                if not self.traiter_un(db):
+                    break
+                if self._stop.is_set():
+                    break
+                self._sleep(float(reg.get("debit_envoi_s") or 0))
+            except Exception:
+                logger.exception("formation envoi : erreur inattendue, fil arrete")
                 break
-            if self._stop.is_set():
-                break
-            self._sleep(float(store.reglages(db).get("debit_envoi_s") or 0))
 
     def demarrer(self, db):
         with self._verrou:
@@ -224,15 +277,22 @@ class FilEnvoi:
              for s in ("en_file", "en_cours", "envoye", "echec")}
         return {"en_file": n["en_file"] + n["en_cours"], "envoyes": n["envoye"],
                 "echecs": n["echec"],
+                "arretee": bool(store.reglages(db).get("campagne_arretee")),
                 "actif": self._thread is not None and self._thread.is_alive()}
 
 
 fil = FilEnvoi()
 
 
-def reprendre_au_demarrage(db):
-    """en_cours orphelins -> en_file ; le fil repart s'il reste des en_file."""
-    db["envois"].update_many({"campagne": store.CAMPAGNE, "statut": "en_cours"},
-                             {"$set": {"statut": "en_file"}})
+def reprendre_au_demarrage(db, now=None):
+    """en_cours orphelins (debut de plus de 5 min) -> en_file ; le fil repart s'il reste
+    des en_file, sauf campagne arretee."""
+    now = now or datetime.now(timezone.utc)
+    db["envois"].update_many(
+        {"campagne": store.CAMPAGNE, "statut": "en_cours",
+         "debut": {"$lt": now - timedelta(minutes=5)}},
+        {"$set": {"statut": "en_file"}})
+    if store.reglages(db).get("campagne_arretee"):
+        return
     if db["envois"].count_documents({"campagne": store.CAMPAGNE, "statut": "en_file"}):
         fil.demarrer(db)

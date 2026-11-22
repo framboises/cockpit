@@ -87,22 +87,29 @@ def api_campagne_lancer():
     data = _json()
     db = store.get_db()
     try:
-        n = mailer.compter(db, data.get("cible"))
-        if data.get("confirmation_n") != n or isinstance(data.get("confirmation_n"), bool):
-            return jsonify({"ok": False, "error": "confirmation_differente", "n": n}), 409
-        planifies = mailer.planifier(db, data.get("cible"), _auteur(), datetime.now(timezone.utc))
+        res = mailer.lancer(db, data.get("cible"), data.get("confirmation_n"), _auteur(),
+                            datetime.now(timezone.utc))
     except ValueError as exc:
+        if exc.args and exc.args[0] == "confirmation_differente":
+            return jsonify({"ok": False, "error": "confirmation_differente", "n": exc.args[1]}), 409
         return jsonify({"ok": False, "error": str(exc)}), 400
-    mailer.fil.demarrer(db)
-    return jsonify({"ok": True, "planifies": planifies, "etat": mailer.fil.etat()})
+    return jsonify({"ok": True, "planifies": res["planifies"], "invalides": res["invalides"],
+                    "etat": mailer.fil.etat()})
 
 
 @formation_admin_bp.post("/api/formation/admin/campagne/arreter")
 @_role_required("admin")
 def api_campagne_arreter():
     from formation import mailer, store
-    mailer.fil.arreter()
-    store.journal(store.get_db(), "campagne_arreter", _auteur())
+    mailer.arreter(store.get_db(), _auteur())
+    return jsonify({"ok": True, "etat": mailer.fil.etat()})
+
+
+@formation_admin_bp.post("/api/formation/admin/campagne/reprendre")
+@_role_required("admin")
+def api_campagne_reprendre():
+    from formation import mailer, store
+    mailer.reprendre(store.get_db(), _auteur())
     return jsonify({"ok": True, "etat": mailer.fil.etat()})
 
 
