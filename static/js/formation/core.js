@@ -199,8 +199,8 @@
 
   // ------------------------------------------------------------ actions au fil de l'eau
 
-  // Une action reemise apres un timeout a pu etre enregistree deux fois : la premiere fait foi cote
-  // serveur (drapeau `doublon` pour une prise radio ou une decision d'acces repetee, sans effet sur le score).
+  // Une action reemise apres un timeout a pu etre enregistree deux fois : elle garde son `aid`, et
+  // correction.journal ne compte que la premiere recue (drapeau `doublon`, sans effet sur le score).
   var MAX_ESSAIS = 5;
   var file = [], envoi = false, attenteVide = [];
   F.t0 = 0;
@@ -209,6 +209,12 @@
     return Math.round(performance.now() - F.t0);
   };
 
+  var nbActions = 0, prefixe = Math.random().toString(36).slice(2, 10);
+  function idAction() {
+    nbActions++;
+    return prefixe + "-" + nbActions;
+  }
+
   F.action = function (epreuve, donnees) {
     if (perdue) return;
     var corps = {};
@@ -216,6 +222,8 @@
       if (Object.prototype.hasOwnProperty.call(donnees, k)) corps[k] = donnees[k];
     }
     if (typeof corps.t_ms !== "number") corps.t_ms = F.maintenant();
+    // Identifiant d'action : une reemission apres timeout garde le meme, le serveur ne compte que la premiere.
+    corps.aid = idAction();
     file.push({epreuve: epreuve, corps: corps, essais: 0});
     pomper();
   };

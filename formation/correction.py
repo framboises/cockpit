@@ -36,7 +36,8 @@ Question sans reponse = 0 point ; reponse en double : la premiere fait foi
 Le journal vient du navigateur : `score` ne leve jamais d'exception. Action qui
 n'est pas un objet ou id qui n'est pas un texte connu : ignoree, drapeau
 `action_inconnue` ; `t_ms` absent, non numerique ou non fini : ignoree, drapeau
-`horodatage_incoherent`.
+`horodatage_incoherent`. Action reemise par le client (meme `aid`, identifiant
+d'action du navigateur) : seule la premiere recue compte, drapeau `doublon`.
 """
 import math
 
@@ -87,7 +88,8 @@ def coef_valide(coef):
 
 def journal(actions, types, drapeaux):
     """Journal du navigateur assaini : liste de (t_ms, action) des `types` voulus,
-    triee par le temps (tri stable). Une action qui n'est pas un objet leve
+    triee par le temps (tri stable), sans les reemissions (meme `aid` : la
+    premiere recue reste, drapeau `doublon`). Une action qui n'est pas un objet leve
     `action_inconnue`, un `t_ms` invalide `horodatage_incoherent` ; elles sont ignorees.
     Ne leve jamais d'exception."""
     if not isinstance(actions, (list, tuple)):
@@ -95,10 +97,18 @@ def journal(actions, types, drapeaux):
             _ajoute(drapeaux, "action_inconnue")
         return []
     out = []
+    aids = set()
     for a in actions:
         if not isinstance(a, dict):
             _ajoute(drapeaux, "action_inconnue")
             continue
+        aid = a.get("aid")
+        if isinstance(aid, str) and aid:
+            # reemission apres un timeout : la premiere recue fait foi (toutes epreuves)
+            if aid in aids:
+                _ajoute(drapeaux, "doublon")
+                continue
+            aids.add(aid)
         if a.get("type") not in types:
             continue
         t = temps_ms(a)

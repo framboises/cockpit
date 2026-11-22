@@ -144,3 +144,17 @@ def test_rejouer_coef_invalide():
     actions = [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": 3000}]
     for coef in (0, -2, float("nan"), float("inf"), None):
         assert patrouilles.rejouer(actions, coef)["traites"] == 1
+
+
+def test_reemission_meme_aid_comptee_une_fois():
+    # Reemission apres timeout : le mauvais type n'est compte qu'une fois
+    faux = {"type": "engager", "moyen": "T1", "incident": "I1", "t_ms": 3000, "aid": "k3x-1"}
+    r = patrouilles.rejouer([faux, dict(faux, recu_ms=18000)], 1.0)
+    assert r["erreurs"] == 1
+    assert "doublon" in r["drapeaux"]
+    # aid differents (engager puis refus du meme instant, ou deux essais) : rien n'est fusionne
+    r = patrouilles.rejouer([faux, dict(faux, aid="k3x-2")], 1.0)
+    assert r["erreurs"] == 2
+    # sans aid (journal ancien) : comportement inchange
+    sans = {k: v for k, v in faux.items() if k != "aid"}
+    assert patrouilles.rejouer([sans, sans], 1.0)["erreurs"] == 2

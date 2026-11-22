@@ -395,7 +395,10 @@
       if (!u || termine || (ev.pointerType === "mouse" && ev.button !== 0)) return;
       var src = ev.target.closest("[data-u]"), id = ev.pointerId, x0 = ev.clientX, y0 = ev.clientY;
       var fantome = null, cible = null;
-      try { src.setPointerCapture(id); } catch (x) { /* capture indisponible : sans importance */ }
+      // Capture sur le pion ; sinon, ecoute sur le document (le relacher hors du pion arrive quand meme).
+      var ecoute = src;
+      try { src.setPointerCapture(id); } catch (x) { ecoute = document; }
+      if (ecoute === src && src.hasPointerCapture && !src.hasPointerCapture(id)) ecoute = document;
       var sous = function (m) {
         var n = document.elementFromPoint(m.clientX, m.clientY);
         var inc = incDe(n);
@@ -409,6 +412,7 @@
       };
       var bouge = function (m) {
         if (m.pointerId !== id) return;
+        if (g.arrete) { fin(m); return; }
         if (!fantome) {
           if (Math.abs(m.clientX - x0) + Math.abs(m.clientY - y0) < 8) return;
           fantome = noeud("div", "tok fantome " + u.cls, u.id);
@@ -421,22 +425,22 @@
       };
       var fin = function (m) {
         if (m.pointerId !== id) return;
-        src.removeEventListener("pointermove", bouge);
-        src.removeEventListener("pointerup", fin);
-        src.removeEventListener("pointercancel", fin);
-        src.removeEventListener("lostpointercapture", fin);  // pion retire en plein glisser (fin d'epreuve)
+        ecoute.removeEventListener("pointermove", bouge);
+        ecoute.removeEventListener("pointerup", fin);
+        ecoute.removeEventListener("pointercancel", fin);
+        ecoute.removeEventListener("lostpointercapture", fin);  // pion retire en plein glisser (fin d'epreuve)
         if (!fantome) return;  // simple clic : la selection passe par l'evenement click
-        fantome.remove();
+        fantome.remove();  // toujours retire, quelle que soit l'issue
         apresGlisse = true;  // le click qui suit le relacher ne selectionne rien
         g.later(function () { apresGlisse = false; }, 0);
         var inc = m.type === "pointerup" && !termine && !g.arrete ? sous(m) : null;
         marquer(null);
         if (inc) { sel.inc = null; sel.unit = null; tenter(u, inc); }
       };
-      src.addEventListener("pointermove", bouge);
-      src.addEventListener("pointerup", fin);
-      src.addEventListener("pointercancel", fin);
-      src.addEventListener("lostpointercapture", fin);
+      ecoute.addEventListener("pointermove", bouge);
+      ecoute.addEventListener("pointerup", fin);
+      ecoute.addEventListener("pointercancel", fin);
+      ecoute.addEventListener("lostpointercapture", fin);
     });
 
     g.on(document, "keydown", function (ev) {
@@ -457,7 +461,6 @@
 
     // ---------------------------------------------------------- rendu au temps ecoule
 
-    var ordre = "";
     var maj = function () {
       if (g.arrete) return;
       var tj = tJeu(), visibles = [], resolus = 0;
@@ -504,13 +507,13 @@
         if (st !== "attente") visibles.push([actif ? 0 : 1, actif ? inc.D : -inc.D, k, inc]);
         if (st === "traite" || st === "manque") resolus++;
       });
-      // Liste triee par temps restant (actifs d'abord) ; noeuds deplaces seulement si l'ordre change.
+      // Liste triee par temps restant (actifs d'abord).
       visibles.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1] || a[2] - b[2]; });
-      var cleOrdre = visibles.map(function (x) { return x[3].id; }).join(",");
-      if (cleOrdre !== ordre) {
-        ordre = cleOrdre;
-        visibles.forEach(function (x) { ilist.appendChild(x[3].vue.it); });
-      }
+      // Seuls les noeuds hors de place bougent : l'element qui a le focus le garde s'il est deja bien place.
+      visibles.forEach(function (x, k) {
+        var n = x[3].vue.it, ici = ilist.children[k + 1];  // children[0] : « Aucun incident »
+        if (ici !== n) ilist.insertBefore(n, ici || null);
+      });
       cacher(vide, visibles.length > 0);
       e.units.forEach(function (u) {
         var ph = phase(u, tj);
@@ -571,9 +574,10 @@
     var bouton = el.querySelector("button"), zone = el.querySelector(".zone-jeu");
     var lancer = function () {
       if (groupe) groupe.stop();
-      groupe = F.groupe();
+      var g = groupe = F.groupe();
       bouton.textContent = "Recommencer l'entraînement";
-      partie(zone, contenu, coef, {t0: performance.now(), groupe: groupe, envoyer: null, fin: function () {
+      partie(zone, contenu, coef, {t0: performance.now(), groupe: g, envoyer: null, fin: function () {
+        g.stop();  // fin de l'entrainement : plus de minuteurs ni d'ecouteurs (clavier compris)
         var p = noeud("p", "enreg", "Entraînement terminé. Vous pouvez le recommencer ou commencer l'épreuve.");
         p.setAttribute("role", "status");
         zone.appendChild(p);

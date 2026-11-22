@@ -402,3 +402,14 @@ def test_coef_invalide_vaut_un():
     for coef in (0, -1, float("nan"), float("inf"), "x", None, 10 ** 400):
         assert correction.score("logique", actions, coef)["score"] == 100
         assert correction.score("radio", [_radio_prise("r01")], coef)["detail"]["pris_a_raison"] == 1
+
+
+def test_reemission_meme_aid_toutes_epreuves():
+    # Reemission apres timeout (meme aid) : la premiere recue fait foi, drapeau doublon
+    faux = {"type": "engager", "moyen": "T1", "incident": "I1", "t_ms": 3000, "aid": "p-1"}
+    r = correction.score("patrouilles", [faux, dict(faux)], 1.0)
+    assert r["detail"]["erreurs"] == 1 and "doublon" in r["drapeaux"]
+    drapeaux = []
+    j = correction.journal([{"type": "reponse", "t_ms": 5, "aid": "a"}, {"type": "reponse", "t_ms": 1, "aid": "a"},
+                            {"type": "reponse", "t_ms": 2, "aid": "b"}], ("reponse",), drapeaux)
+    assert [t for t, _ in j] == [2.0, 5.0] and drapeaux == ["doublon"]
