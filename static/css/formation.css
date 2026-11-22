@@ -159,16 +159,15 @@ h2:focus{outline:none}
 .accueil .rgpd{font-size:.86rem;color:var(--muted);border-top:1px solid var(--line);margin-top:22px;padding-top:14px}
 .accueil .rgpd h2{font-size:1rem;color:var(--fg);margin-bottom:6px}
 .etroit{display:none}
+.wrap > .etroit{margin:14px 0 0}
 
 @media (max-width:1080px){
   .layout{grid-template-columns:minmax(0,1fr)}
   .nav ol{flex-direction:row;overflow-x:auto;padding-bottom:4px}
   .nav li{flex:0 0 auto} .nav .s,.navlabel{display:none}
 }
-@media (max-width:899px){
-  .accueil .large{display:none}
-  .etroit{display:block}
-}
+/* Sous 900 px : conseil seulement, jamais de blocage (zoom 150-175 %, fenetre etroite). */
+@media (max-width:899px){ .etroit{display:block} }
 @media (max-width:760px){ .gate{grid-template-columns:minmax(0,1fr)} }
 @media (max-width:560px){ .choices,.mc{grid-template-columns:minmax(0,1fr)} .stage{padding:15px} .bub{max-width:92%} }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}

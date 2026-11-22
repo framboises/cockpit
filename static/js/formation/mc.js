@@ -65,6 +65,7 @@
           heure.value = v;
         };
         form.onsubmit = function (e) { e.preventDefault(); };
+        F.focus(form.elements.cat);
         bouton.onclick = function () {
           if (envoye) return;
           var d = {type: "reponse", question: m.id};

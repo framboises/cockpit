@@ -216,6 +216,21 @@ def test_post_sans_csrf_refuse(app, db):
     assert "formation_session" not in (r.headers.get("Set-Cookie") or "")
 
 
+def test_api_csrf_jeton_neuf_utilisable(app, db):
+    """GET /api/csrf sans session : jeton neuf, no-store, accepte par un POST."""
+    _candidat(db)
+    c = Client(app)
+    r = c.get("/api/csrf")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "no-store"
+    jeton = r.get_json()["csrf_token"]
+    assert isinstance(jeton, str) and jeton
+    c.jeton = "invalide"
+    assert c.connexion().status_code == 400
+    c.jeton = jeton
+    assert c.connexion().status_code == 200
+
+
 # ---------------------------------------------------------------- fenetre
 
 def test_etat_fenetre():

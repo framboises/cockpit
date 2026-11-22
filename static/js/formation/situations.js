@@ -37,6 +37,7 @@
           };
           zone.appendChild(b);
         });
+        F.focus(zone.firstChild);
       };
       dessiner();
     }

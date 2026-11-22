@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from bson import ObjectId
 from bson.errors import InvalidId
 from flask import Blueprint, jsonify, make_response, redirect, render_template, request, url_for
+from flask_wtf.csrf import generate_csrf
 
 from formation import acces, banque, store, tentative
 
@@ -242,6 +243,14 @@ def api_action(db, cand, sid, t, now, epreuve):
 def api_fin(db, cand, sid, t, now, epreuve):
     etat = tentative.fin_epreuve(db, cand, sid, epreuve, now)
     return jsonify({"ok": True, "etat": etat})
+
+
+@formation_bp.get("/api/csrf")
+def api_csrf():
+    """Nouveau jeton CSRF (sans session candidat) : le client le demande sur un
+    refus CSRF et rejoue sa requete une fois, plutot que de recharger la page
+    (un rechargement pendant une epreuve la clot)."""
+    return jsonify({"csrf_token": generate_csrf()})
 
 
 @formation_bp.get("/api/entrainement/<nom>")

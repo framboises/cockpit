@@ -32,6 +32,7 @@
           b.textContent = c.texte;
           b.onclick = function () {
             if (repondu) return;
+            if (performance.now() - F.t0 >= DUREE * coef) { repondu = true; fini(); return; }  // temps ecoule
             repondu = true;
             F.action("logique", {type: "reponse", question: q.id, choix: c.id});
             b.classList.add("choisi");
@@ -41,6 +42,7 @@
           };
           zone.appendChild(b);
         });
+        F.focus(zone.firstChild);
       };
       F.chrono(DUREE * coef, F.t0, g, fini);
       dessiner();

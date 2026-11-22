@@ -162,11 +162,32 @@
       if (r.status === 401 && r.data && r.data.error === "session") {
         sessionPerdue();
       } else if (r.status === 400 && (!r.data || r.data.code === "csrf" || r.data.error === "csrf")) {
-        jetonExpire();
+        // Jeton CSRF expire : nouveau jeton puis un seul rejeu ; rechargement seulement en dernier recours
+        // (un rechargement pendant une epreuve la clot).
+        if (opts.rejeu) { jetonExpire(); return r; }
+        return renouvelerJeton().then(function (ok) {
+          if (!ok) { jetonExpire(); return r; }
+          var o = {};
+          for (var k in opts) if (Object.prototype.hasOwnProperty.call(opts, k)) o[k] = opts[k];
+          o.rejeu = true;
+          return F.api(path, body, o);
+        });
       }
       return r;
     });
   };
+
+  function renouvelerJeton() {
+    return fetch(BASE + "/api/csrf", {credentials: "same-origin", cache: "no-store",
+                                     headers: {"Accept": "application/json"}}).then(function (res) {
+      return res.ok ? res.json() : null;
+    }).then(function (d) {
+      var m = document.querySelector("meta[name=\"csrf-token\"]");
+      if (!d || !d.csrf_token || !m) return false;
+      m.setAttribute("content", d.csrf_token);
+      return true;
+    }, function () { return false; });
+  }
 
   function aReessayer(status) {
     return status === 0 || status === 429 || status === 502 || status === 503 || status === 504;
@@ -178,6 +199,9 @@
 
   // ------------------------------------------------------------ actions au fil de l'eau
 
+  // Une action reemise apres un timeout a pu etre enregistree deux fois : la premiere fait foi cote
+  // serveur (drapeau `doublon` pour une prise radio ou une decision d'acces repetee, sans effet sur le score).
+  var MAX_ESSAIS = 5;
   var file = [], envoi = false, attenteVide = [];
   F.t0 = 0;
 
@@ -212,7 +236,10 @@
       if (perdue) return;
       if (aReessayer(r.status)) {
         it.essais++;
-        setTimeout(pomper, attente(it.essais - 1));
+        // Apres MAX_ESSAIS, l'action reste en tete de file sans nouvel essai automatique : la prochaine
+        // action relance l'envoi, et /fin part quand meme a l'expiration de vider().
+        if (it.essais < MAX_ESSAIS) setTimeout(pomper, attente(it.essais - 1));
+        else it.essais = 0;
         return;
       }
       file.shift();  // accepte, ou refuse pour de bon (epreuve close, corps invalide) : on passe
@@ -354,19 +381,29 @@
   F.entete = function (lead, chrono, eyebrow) {
     var tete = document.getElementById("f-tete");
     if (!tete) return;
+    var ancien = document.getElementById("f-timer");
+    var texteTimer = ancien ? ancien.textContent : "--:--";
+    var bas = ancien ? ancien.classList.contains("low") : false;
     var g = etape(courant);
     var k = EPREUVES.indexOf(courant);
     var eb = eyebrow != null ? eyebrow : g.h + (k >= 0 ? " · épreuve " + (k + 1) + " / " + EPREUVES.length : "");
     var html = "<div class=\"stage-head\"><div><div class=\"eyebrow\">" + F.esc(eb) + "</div>" +
       "<h2 tabindex=\"-1\">" + F.esc(g.t) + "</h2>" +
       (lead ? "<p class=\"lead\">" + F.esc(lead) + "</p>" : "") + "</div>" +
-      (chrono ? "<div class=\"timer\" id=\"f-timer\" role=\"timer\" aria-label=\"Temps restant\">--:--</div>" : "") +
+      (chrono ? "<div class=\"timer\" id=\"f-timer\" role=\"timer\" aria-label=\"Temps restant\">" + F.esc(texteTimer) + "</div>" : "") +
       "</div>";
     if (k >= 0) {
       html += "<p class=\"garde\">Ne rechargez pas la page et n'utilisez pas le bouton retour : " +
         "l'épreuve en cours serait perdue et comptée en l'état.</p>";
     }
     tete.innerHTML = html;
+    var t = document.getElementById("f-timer");
+    if (t && bas) t.classList.add("low");
+  };
+
+  // Focus sur le premier element utile apres un nouveau rendu (clavier, lecteur d'ecran).
+  F.focus = function (el) {
+    if (el && el.focus) el.focus({preventScroll: true});
   };
 
   function focaliserTitre() {

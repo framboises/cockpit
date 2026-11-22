@@ -70,6 +70,7 @@
           }
           F.groupe().later(function () { k++; suivant(); }, TRANSITION);
         };
+        F.focus(oui);
         oui.onclick = function () { decider(1); };
         non.onclick = function () { decider(0); };
         F.chrono(delai, montre, g);

@@ -59,6 +59,7 @@
             };
             opts.appendChild(b);
           });
+          F.focus(opts.firstChild);
         };
         g.later(etape, 500);
       };

@@ -48,18 +48,20 @@
       li.textContent = texte;
       journal.insertBefore(li, journal.firstChild);
     };
-    var courant = function () {
-      var t = ecoule() / coef;
-      for (var k = 0; k < h.length; k++) if (h[k].debut <= t && t < h[k].fin) return k;
+    // Message affiche a l'instant t (ms reelles) : meme regle que correction.py.
+    var courant = function (t) {
+      var j = t / coef;
+      for (var k = 0; k < h.length; k++) if (h[k].debut <= j && j < h[k].fin) return k;
       return -1;
     };
     var prendre = function () {
-      var k = courant();
+      var t = ecoule();  // un seul instant : choix du message et t_ms envoye (non arrondi)
+      var k = courant(t);
       if (k < 0 || pris[k]) return;
       pris[k] = true;
-      var m = messages[k], t = ecoule();
+      var m = messages[k];
       var dt = (t - h[k].debut * coef) / 1000;
-      if (opts.envoyer) opts.envoyer({type: "prise", msg: m.id, t_ms: Math.round(t)});
+      if (opts.envoyer) opts.envoyer({type: "prise", msg: m.id, t_ms: t});
       if (m.pour_moi) {
         noter("Pris (" + F.secondes(dt) + " s) · " + m.texte, "ok");
         F.son.bip(1400, 0.05);
@@ -71,8 +73,10 @@
     bouton.onclick = prendre;
     g.on(document, "keydown", function (e) {
       if (e.code !== "Space" && e.key !== " ") return;
+      // Focus sur un bouton ou un champ : la barre d'espace garde son effet normal
+      // (sur « Je prends », le clic natif prend le message).
       var tag = (e.target && e.target.tagName) || "";
-      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (/^(INPUT|SELECT|TEXTAREA|BUTTON|SUMMARY|A)$/.test(tag)) return;
       e.preventDefault();
       if (!e.repeat) prendre();
     });
