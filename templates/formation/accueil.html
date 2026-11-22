@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<meta name="referrer" content="no-referrer">
+<title>Test PC Organisation</title>
+</head>
+<body>
+<main id="formation-accueil" data-fenetre="{{ fenetre }}">
+  <h1>Test PC Organisation</h1>
+
+  {% if fenetre == "non_configure" %}
+  <p>Le test n'est pas encore disponible.</p>
+  {% else %}
+    {% if fenetre == "avant" %}
+    <p>Le test n'est pas encore ouvert. Il ouvrira le {{ ouverture }}.</p>
+    {% elif fenetre == "apres" %}
+    <p>Le test est terminé : il était ouvert jusqu'au {{ fermeture }}.</p>
+    {% endif %}
+
+    <p>Ce test ne peut être passé qu'une seule fois, sans possibilité de recommencer : toute épreuve
+    interrompue (fermeture, rechargement, coupure) est perdue et comptée en l'état.</p>
+
+    <form id="formation-connexion" autocomplete="on" novalidate>
+      <label>Adresse e-mail utilisée dans le questionnaire
+        <input type="email" name="email" required autocomplete="email"></label>
+      <label>4 derniers chiffres de votre téléphone mobile
+        <input type="text" name="tel4" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4"></label>
+      <button type="submit">{% if fenetre == "ouvert" %}Accéder au test{% else %}Me reconnecter{% endif %}</button>
+      <p id="formation-message" role="alert"></p>
+    </form>
+  {% endif %}
+
+  {% if contact_rgpd %}
+  <section id="formation-rgpd">
+    <h2>Vos données</h2>
+    <p>Vos réponses et les informations de votre candidature servent uniquement à la sélection des
+    opérateurs du PC Organisation. Elles seront supprimées le {{ conservation }}. Pour toute question
+    ou pour exercer vos droits : {{ contact_rgpd }}.</p>
+  </section>
+  {% endif %}
+</main>
+</body>
+</html>

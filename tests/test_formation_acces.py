@@ -1,0 +1,387 @@
+"""Acces public et API candidat du test PC Organisation (formation/acces.py,
+formation/routes_public.py), contre un MongoDB local jetable et une app Flask
+de test avec CSRFProtect actif, comme Cockpit. Test saute sans MongoDB local."""
+import os
+import re
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from flask import Flask
+from flask_wtf.csrf import CSRFProtect
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
+
+from formation import acces, store
+from formation.normalise import normaliser_email, normaliser_tel
+
+RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE = "/test-pc-organisation"
+GENERIQUE = ("Ces informations ne correspondent à aucune candidature. "
+             "Vérifiez l'adresse utilisée dans le questionnaire.")
+
+
+@pytest.fixture
+def db():
+    try:
+        client = MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=1500)
+        client.server_info()
+    except PyMongoError:
+        pytest.skip("MongoDB local indisponible")
+    name = "titan_test_formation_acces_%d" % os.getpid()
+    client.drop_database(name)
+    d = client[name]
+    store.ensure_indexes(d)
+    store.set_db_for_tests(d)
+    _fenetre(d, ouverte=True)
+    yield d
+    store.set_db_for_tests(None)
+    client.drop_database(name)
+
+
+def _fenetre(db, ouverte=True, reply_to="selection@lemans.org", contact="dpo@lemans.org"):
+    now = datetime.now(timezone.utc)
+    if ouverte:
+        ouv, fer = now - timedelta(hours=1), now + timedelta(hours=1)
+    else:
+        ouv, fer = now - timedelta(hours=3), now - timedelta(hours=2)
+    db["reglages"].update_one({"_id": store.CAMPAGNE}, {"$set": {
+        "ouverture": ouv, "fermeture": fer, "reply_to": reply_to, "contact_rgpd": contact}},
+        upsert=True)
+
+
+@pytest.fixture
+def app(db):
+    from formation import formation_bp
+    a = Flask("formation_test", template_folder=os.path.join(RACINE, "templates"),
+              static_folder=os.path.join(RACINE, "static"))
+    a.config.update(SECRET_KEY="test-secret-formation", WTF_CSRF_ENABLED=True, TESTING=True)
+    CSRFProtect(a)
+    a.register_blueprint(formation_bp)
+    return a
+
+
+def _candidat(db, email="f.arbia@gmail.com", tel="+33 6 12 34 31 79", amenagement=False):
+    tel = normaliser_tel(tel)
+    res = db["candidats"].insert_one({"campagne": store.CAMPAGNE, "email": normaliser_email(email),
+                                      "tel": tel, "tel4": tel[-4:], "amenagement": amenagement})
+    return db["candidats"].find_one({"_id": res.inserted_id})
+
+
+class Client:
+    """Client de test qui lit le jeton CSRF dans la page d'accueil."""
+
+    def __init__(self, app, ip="10.0.0.1"):
+        self.c = app.test_client()
+        self.ip = ip
+        page = self.c.get(BASE, environ_base={"REMOTE_ADDR": ip}).get_data(as_text=True)
+        m = re.search(r'<meta name="csrf-token" content="([^"]+)"', page)
+        assert m, page
+        self.jeton = m.group(1)
+
+    def get(self, chemin, **kw):
+        return self.c.get(BASE + chemin, environ_base={"REMOTE_ADDR": self.ip}, **kw)
+
+    def post(self, chemin, json=None, csrf=True, **kw):
+        h = {"X-CSRFToken": self.jeton} if csrf else {}
+        return self.c.post(BASE + chemin, json=json, headers=h,
+                           environ_base={"REMOTE_ADDR": self.ip}, **kw)
+
+    def connexion(self, email="f.arbia@gmail.com", tel4="3179"):
+        return self.post("/api/connexion", {"email": email, "tel4": tel4})
+
+
+def _demarre(app, db):
+    _candidat(db)
+    c = Client(app)
+    assert c.connexion().status_code == 200
+    r = c.post("/api/commencer", {"accepte": True})
+    assert r.status_code == 200, r.get_json()
+    return c
+
+
+# ---------------------------------------------------------------- identification
+
+def test_message_generique_identique(app, db):
+    _candidat(db)
+    c = Client(app)
+    r1 = c.connexion(email="inconnu@exemple.fr", tel4="3179")
+    r2 = c.connexion(email="f.arbia@gmail.com", tel4="0000")
+    assert r1.status_code == r2.status_code == 401
+    assert r1.get_data() == r2.get_data()
+    assert r1.get_json() == {"ok": False, "message": GENERIQUE}
+    assert "formation_session" not in (r1.headers.get("Set-Cookie") or "")
+
+
+def test_blocage_apres_5_echecs_email(app, db):
+    _candidat(db)
+    for i in range(5):
+        r = Client(app, ip="10.0.1.%d" % i).connexion(tel4="0000")
+        assert r.status_code == 401
+    r = Client(app, ip="10.0.2.1").connexion()  # bonne paire, autre IP
+    assert r.status_code == 429
+    assert r.get_json() == {"ok": False, "message": GENERIQUE + " Réessayez dans 15 minutes."}
+    assert "formation_session" not in (r.headers.get("Set-Cookie") or "")
+
+
+def test_blocage_apres_5_echecs_ip(app, db):
+    _candidat(db)
+    c = Client(app, ip="10.0.3.3")
+    for i in range(5):
+        assert c.connexion(email="x%d@exemple.fr" % i).status_code == 401
+    assert c.connexion().status_code == 429
+    assert Client(app, ip="10.0.3.4").connexion().status_code == 200
+
+
+def test_echecs_anciens_ne_bloquent_pas(db):
+    now = datetime.now(timezone.utc)
+    vieux = now - timedelta(minutes=16)
+    for _ in range(5):
+        acces.identifier(db, "a@b.fr", "0000", "10.9.9.9", vieux)
+    assert acces.est_bloque(db, "a@b.fr", "10.9.9.9", vieux)
+    assert not acces.est_bloque(db, "a@b.fr", "10.9.9.9", now)
+
+
+def test_connexion_email_majuscules_espaces(app, db):
+    _candidat(db, email="f.arbia@gmail.com", tel="+33 6 12 34 31 79")
+    r = Client(app).connexion(email=" F.Arbia@GMAIL.com ", tel4="3179")
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json() == {"ok": True, "etat": {"statut": "non_commence"}}
+
+
+def test_cookie_httponly_samesite(app, db):
+    _candidat(db)
+    r = Client(app).connexion()
+    cookie = r.headers["Set-Cookie"]
+    assert cookie.startswith("formation_session=")
+    assert "HttpOnly" in cookie
+    assert "SameSite=Lax" in cookie
+    assert "Path=/test-pc-organisation" in cookie
+    assert "Max-Age=3600" in cookie
+    assert "Secure" not in cookie  # dev
+
+
+def test_cookie_secure_hors_dev(app, db, monkeypatch):
+    _candidat(db)
+    monkeypatch.setenv("TITAN_ENV", "prod")
+    monkeypatch.setenv("FORMATION_JWT_SECRET", "x" * 40)
+    assert "Secure" in Client(app).connexion().headers["Set-Cookie"]
+
+
+def test_jeton(monkeypatch):
+    now = datetime.now(timezone.utc)
+    j = acces.emettre_jeton("abc", "sid1", now)
+    p = acces.lire_jeton(j)
+    assert p["sub"] == "abc" and p["sid"] == "sid1" and p["aud"] == "formation"
+    assert acces.lire_jeton(acces.emettre_jeton("abc", "s", now - timedelta(hours=2))) is None
+    assert acces.lire_jeton("pas.un.jeton") is None
+    assert acces.lire_jeton(None) is None
+    monkeypatch.setenv("FORMATION_JWT_SECRET", "y" * 40)
+    assert acces.lire_jeton(j) is None  # autre secret
+
+
+def test_jeton_prod_sans_secret_refuse(monkeypatch):
+    monkeypatch.setenv("TITAN_ENV", "prod")
+    monkeypatch.delenv("FORMATION_JWT_SECRET", raising=False)
+    with pytest.raises(RuntimeError):
+        acces.emettre_jeton("abc", "s", datetime.now(timezone.utc))
+
+
+def test_post_sans_csrf_refuse(app, db):
+    _candidat(db)
+    c = Client(app)
+    r = c.post("/api/connexion", {"email": "f.arbia@gmail.com", "tel4": "3179"}, csrf=False)
+    assert r.status_code == 400
+    assert "formation_session" not in (r.headers.get("Set-Cookie") or "")
+
+
+# ---------------------------------------------------------------- fenetre
+
+def test_etat_fenetre():
+    now = datetime(2026, 12, 1, 9, 0, tzinfo=timezone.utc)
+    r = {"reply_to": "a@b.fr", "contact_rgpd": "dpo@b.fr",
+         "ouverture": now - timedelta(hours=1), "fermeture": now + timedelta(hours=1)}
+    assert acces.etat_fenetre(r, now) == "ouvert"
+    assert acces.etat_fenetre(r, now - timedelta(hours=2)) == "avant"
+    assert acces.etat_fenetre(r, now + timedelta(hours=2)) == "apres"
+    assert acces.etat_fenetre(dict(r, reply_to=" "), now) == "non_configure"
+    assert acces.etat_fenetre(dict(r, contact_rgpd=""), now) == "non_configure"
+
+
+def test_hors_fenetre_refuse_commencer(app, db):
+    _candidat(db)
+    c = Client(app)
+    assert c.connexion().status_code == 200
+    _fenetre(db, ouverte=False)
+    r = c.post("/api/commencer", {"accepte": True})
+    assert r.status_code == 403
+    assert r.get_json() == {"ok": False, "fenetre": "apres"}
+    # sans tentative, la connexion elle-meme est refusee hors fenetre
+    r = Client(app, ip="10.0.0.2").connexion()
+    assert r.status_code == 403
+    assert r.get_json() == {"ok": False, "fenetre": "apres"}
+
+
+def test_commencer_exige_accepte(app, db):
+    _candidat(db)
+    c = Client(app)
+    c.connexion()
+    for corps in ({}, {"accepte": "true"}, {"accepte": 1}, [True]):
+        assert c.post("/api/commencer", corps).status_code == 400
+    assert db["tentatives"].count_documents({}) == 0
+
+
+def test_fenetre_fermee_tentative_en_cours_continue(app, db):
+    c = _demarre(app, db)
+    assert c.post("/api/epreuve/radio/debut").status_code == 200
+    _fenetre(db, ouverte=False)
+    assert c.post("/api/epreuve/radio/action", {"t_ms": 100, "type": "prise"}).status_code == 200
+    r = c.post("/api/epreuve/radio/fin")
+    assert r.status_code == 200
+    assert r.get_json()["etat"]["epreuve_courante"] == "appel"
+    # reconnexion apres la fermeture : admise, la tentative continue
+    c2 = Client(app, ip="10.0.0.9")
+    r = c2.connexion()
+    assert r.status_code == 200
+    assert r.get_json()["etat"]["statut"] == "en_cours"
+    assert c2.post("/api/epreuve/appel/debut").status_code == 200
+
+
+def test_tentative_terminee_connexion_hors_fenetre(app, db):
+    c = _demarre(app, db)
+    for e in store.EPREUVES:
+        assert c.post("/api/epreuve/%s/debut" % e).status_code == 200
+        assert c.post("/api/epreuve/%s/fin" % e).status_code == 200
+    _fenetre(db, ouverte=False)
+    r = Client(app, ip="10.0.0.8").connexion()
+    assert r.status_code == 200
+    assert r.get_json()["etat"]["statut"] == "terminee"
+
+
+def test_non_configure_tant_que_reply_to_vide(app, db):
+    _candidat(db)
+    _fenetre(db, ouverte=True, reply_to="")
+    c = Client(app)
+    page = c.get("").get_data(as_text=True)
+    assert 'data-fenetre="non_configure"' in page
+    r = c.connexion()
+    assert r.status_code == 403
+    assert r.get_json() == {"ok": False, "fenetre": "non_configure"}
+
+
+def test_accueil_mention_rgpd(app, db):
+    page = Client(app).get("").get_data(as_text=True)
+    assert 'data-fenetre="ouvert"' in page
+    assert "dpo@lemans.org" in page
+    assert "30/01/2027" in page
+
+
+# ---------------------------------------------------------------- API du test
+
+def test_enonce_api_sans_reponses(app, db):
+    c = _demarre(app, db)
+    for e in store.EPREUVES[:store.EPREUVES.index("logique")]:
+        assert c.post("/api/epreuve/%s/debut" % e).status_code == 200
+        assert c.post("/api/epreuve/%s/fin" % e).status_code == 200
+    r = c.post("/api/epreuve/logique/debut")
+    assert r.status_code == 200
+    enonce = r.get_json()["enonce"]
+    assert enonce["questions"]
+    for q in enonce["questions"]:
+        assert "a" not in q
+        for ch in q["choix"]:
+            assert "a" not in ch and "ok" not in ch
+
+
+def test_ordre_409(app, db):
+    c = _demarre(app, db)
+    r = c.post("/api/epreuve/appel/debut")
+    assert r.status_code == 409
+    assert r.get_json() == {"ok": False, "error": "ordre"}
+
+
+def test_action_trop_grande_413_et_non_objet_400(app, db):
+    c = _demarre(app, db)
+    c.post("/api/epreuve/radio/debut")
+    r = c.post("/api/epreuve/radio/action", {"t_ms": 1, "type": "x", "pad": "a" * 17000})
+    assert r.status_code == 413
+    assert c.post("/api/epreuve/radio/action", [1, 2]).status_code == 400
+    r = c.c.post(BASE + "/api/epreuve/radio/action", data="pas du json",
+                 headers={"X-CSRFToken": c.jeton, "Content-Type": "application/json"})
+    assert r.status_code == 400
+    t = db["tentatives"].find_one({})
+    assert t["epreuves"]["radio"]["actions"] == []
+
+
+def test_session_remplacee_401(app, db):
+    a = _demarre(app, db)
+    assert a.get("/api/etat").status_code == 200
+    b = Client(app, ip="10.0.0.5")
+    assert b.connexion().status_code == 200
+    for r in (a.get("/api/etat"), a.post("/api/epreuve/radio/debut")):
+        assert r.status_code == 401
+        assert r.get_json() == {"ok": False, "error": "session"}
+    assert b.get("/api/etat").status_code == 200
+
+
+def test_rechargement_page_test_nouvelle_session(app, db):
+    a = _demarre(app, db)
+    a.post("/api/epreuve/radio/debut")
+    vieux = a.c.get_cookie("formation_session", path=BASE).value
+    r = a.get("/test")
+    assert r.status_code == 200
+    assert a.c.get_cookie("formation_session", path=BASE).value != vieux
+    t = db["tentatives"].find_one({})
+    assert t["epreuves"]["radio"]["etat"] == "abandonnee" and t["reprises"] == 1
+    etat = a.get("/api/etat").get_json()["etat"]
+    assert etat["epreuve_courante"] == "appel"
+    # un autre onglet garde l'ancien jeton : 401
+    autre = app.test_client()
+    autre.set_cookie("formation_session", vieux, path=BASE)
+    r = autre.get(BASE + "/api/etat")
+    assert r.status_code == 401
+
+
+def test_etat_n_appelle_pas_connexion(app, db):
+    a = _demarre(app, db)
+    a.post("/api/epreuve/radio/debut")
+    a.get("/api/etat")
+    a.get("/api/etat")
+    t = db["tentatives"].find_one({})
+    assert t["epreuves"]["radio"]["etat"] == "en_cours" and t["reprises"] == 0
+
+
+def test_page_test_sans_session_redirige(app, db):
+    r = Client(app).get("/test")
+    assert r.status_code == 302
+    assert r.headers["Location"].endswith(BASE)
+
+
+def test_api_sans_session_401(app, db):
+    c = Client(app)
+    r = c.get("/api/etat")
+    assert r.status_code == 401
+    assert r.get_json() == {"ok": False, "error": "session"}
+
+
+def test_entrainement(app, db):
+    _candidat(db)
+    c = Client(app)
+    assert c.get("/api/entrainement/radio").status_code == 401
+    c.connexion()
+    r = c.get("/api/entrainement/radio")
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert r.get_json()["contenu"]
+    assert c.get("/api/entrainement/patrouilles").status_code == 200
+    assert c.get("/api/entrainement/logique").status_code == 404
+    assert db["tentatives"].count_documents({}) == 0
+
+
+def test_entetes_no_store(app, db):
+    _candidat(db)
+    c = Client(app)
+    reponses = [c.get(""), c.get("/api/etat"), c.connexion(tel4="0000"), c.get("/test")]
+    c.connexion()
+    reponses += [c.get("/api/etat"), c.get("/test")]
+    for r in reponses:
+        assert r.headers.get("Cache-Control") == "no-store", r.status_code
+        assert r.headers.get("Referrer-Policy") == "no-referrer"
