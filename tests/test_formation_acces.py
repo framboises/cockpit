@@ -167,6 +167,28 @@ def test_cookie_secure_hors_dev(app, db, monkeypatch):
     assert "Secure" in Client(app).connexion().headers["Set-Cookie"]
 
 
+def test_staging_sans_secret_503_sans_jeton(app, db, monkeypatch):
+    _candidat(db)
+    c = Client(app)
+    monkeypatch.setenv("TITAN_ENV", "staging")
+    monkeypatch.delenv("FORMATION_JWT_SECRET", raising=False)
+    r = c.connexion()
+    assert r.status_code == 503
+    assert r.get_json() == {"ok": False, "error": "reessayez"}
+    assert "formation_session" not in (r.headers.get("Set-Cookie") or "")
+    assert db["tentatives"].count_documents({}) == 0
+
+
+def test_staging_avec_secret_cookie_secure(app, db, monkeypatch):
+    _candidat(db)
+    c = Client(app)
+    monkeypatch.setenv("TITAN_ENV", "staging")
+    monkeypatch.setenv("FORMATION_JWT_SECRET", "z" * 40)
+    r = c.connexion()
+    assert r.status_code == 200
+    assert "Secure" in r.headers["Set-Cookie"]
+
+
 def test_jeton(monkeypatch):
     now = datetime.now(timezone.utc)
     j = acces.emettre_jeton("abc", "sid1", now)

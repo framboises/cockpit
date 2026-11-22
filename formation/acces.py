@@ -33,8 +33,11 @@ _SECRET_DEV = "dev-formation-secret-ne-jamais-utiliser-en-production"
 
 
 def est_dev():
-    """Dev sauf TITAN_ENV prod / production (meme regle qu'app.py et store)."""
-    return not store.est_prod()
+    """Refus par defaut : dev (secret de repli, cookie sans Secure) seulement si
+    TITAN_ENV vaut explicitement dev, development ou vide. Toute autre valeur
+    (staging, faute de frappe...) exige FORMATION_JWT_SECRET et pose Secure.
+    Le nom de la base reste regle par store.est_prod()."""
+    return os.getenv("TITAN_ENV", "dev").strip().lower() in ("dev", "development", "")
 
 
 def _secret():
