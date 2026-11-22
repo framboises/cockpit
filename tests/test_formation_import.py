@@ -49,7 +49,11 @@ def D(h, mn=0):
 def test_normaliser_tel():
     assert normaliser_tel("+33 6 17 96 31 79") == "0617963179"
     assert normaliser_tel("0617963179") == "0617963179"
-    assert normaliser_tel("617963179") is None
+    assert normaliser_tel("744813103") == "0744813103"
+    assert normaliser_tel("612345678") == "0612345678"
+    assert normaliser_tel("0695") is None
+    assert normaliser_tel("123456789") is None
+    assert normaliser_tel(612345678) == "0612345678"
     assert normaliser_tel(None) is None
 
 

@@ -22,6 +22,8 @@ def normaliser_tel(s):
         d = "0" + d
     elif d.startswith("33") and len(d) == 11:
         d = "0" + d[2:]
+    if len(d) == 9 and d[0] in "67":
+        d = "0" + d  # zero de tete perdu par une cellule numerique Excel
     if len(d) == 10 and d.startswith("0"):
         return d
     return None
