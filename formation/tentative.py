@@ -313,14 +313,22 @@ def reinitialiser(db, candidat_id, motif, auteur, now):
 
 def score_global(tentative, ponderations):
     """Moyenne ponderee des scores des epreuves terminees ou abandonnees, None si
-    aucune (ou poids total nul). Poids absent ou invalide : 0."""
+    aucune (ou poids total nul). Poids absent ou invalide : 0. Tentative close
+    (`terminee` ou `interrompue`) : les epreuves jamais jouees (`a_faire`)
+    comptent 0 avec leur poids, pour qu'un candidat interrompu ne passe pas
+    devant un candidat complet ; tentative en cours : epreuves jouees seules."""
+    close = tentative.get("statut") in ("terminee", "interrompue")
     total = poids = 0.0
     for e, ep in (tentative.get("epreuves") or {}).items():
-        if ep.get("etat") not in _FINIES or not isinstance(ep.get("score"), (int, float)):
+        if ep.get("etat") in _FINIES and isinstance(ep.get("score"), (int, float)):
+            note = ep["score"]
+        elif close and ep.get("etat") == "a_faire":
+            note = 0
+        else:
             continue
         w = (ponderations or {}).get(e, 0)
         if isinstance(w, bool) or not isinstance(w, (int, float)) or not (0 < w < math.inf):
             continue
-        total += ep["score"] * w
+        total += note * w
         poids += w
     return total / poids if poids else None

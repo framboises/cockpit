@@ -326,5 +326,5 @@ def duree_max_ms(epreuve, coef):
     if epreuve == "logique":
         return round(LOGIQUE_DUREE * coef) + 5000
     if epreuve in ("appel", "mc", "situations"):
-        return round(PLAFOND_QUESTIONS * coef)
+        return round(PLAFOND_QUESTIONS * coef) + 5000
     raise ValueError("epreuve inconnue : %s" % epreuve)

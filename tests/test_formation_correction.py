@@ -300,7 +300,7 @@ def test_durees():
     assert correction.duree_max_ms("patrouilles", 1.0) == 115000
     assert correction.duree_max_ms("acces", 1.0) == 65000
     assert correction.duree_max_ms("logique", 1.0) == 245000
-    assert correction.duree_max_ms("mc", 1.33) == round(600000 * 1.33)
+    assert correction.duree_max_ms("mc", 1.33) == round(600000 * 1.33) + 5000
     assert correction.duree_min_ms("logique", 1.0) is None
 
 

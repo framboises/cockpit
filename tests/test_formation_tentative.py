@@ -123,7 +123,7 @@ def test_second_onglet_ne_rejoue_pas(db):
     tentative.debut_epreuve(db, cand, "s1", "radio", T0)
     etat = tentative.connexion(db, cand, "s2", "10.0.0.1", T0 + timedelta(seconds=30))
     assert _etats(etat)["radio"] == "abandonnee"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="ordre"):
         tentative.debut_epreuve(db, cand, "s2", "radio", T0 + timedelta(seconds=31))
     with pytest.raises(PermissionError):
         tentative.debut_epreuve(db, cand, "s1", "radio", T0 + timedelta(seconds=31))
@@ -283,7 +283,7 @@ def test_expirer_onglet_laisse_ouvert(db):
 
 def test_reinitialiser_motif_obligatoire(db):
     cand = _demarre(db)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="motif"):
         tentative.reinitialiser(db, str(cand["_id"]), "   ", "doa@x.fr", T0)
     assert _t(db, cand)["statut"] == "en_cours"
     assert db["journal_admin"].count_documents({}) == 0
@@ -308,7 +308,7 @@ def test_reinitialiser_conserve_et_libere(db):
 
 
 def test_score_global_pondere():
-    t = {"epreuves": {
+    t = {"statut": "en_cours", "epreuves": {
         "radio": {"etat": "terminee", "score": 80},
         "appel": {"etat": "abandonnee", "score": 20},
         "mc": {"etat": "a_faire"},
@@ -318,6 +318,26 @@ def test_score_global_pondere():
     assert tentative.score_global(t, pond) == pytest.approx((80 * 3 + 20) / 4)
     assert tentative.score_global({"epreuves": {}}, pond) is None
     assert tentative.score_global(t, {"radio": 0, "appel": 0}) is None
+
+
+def test_score_global_interrompue_compte_zero():
+    epreuves = {
+        "radio": {"etat": "terminee", "score": 90},
+        "appel": {"etat": "abandonnee", "score": 30},
+        "mc": {"etat": "a_faire"},
+        "patrouilles": {"etat": "a_faire"},
+    }
+    pond = {"radio": 2, "appel": 1, "mc": 1, "patrouilles": 2}
+    attendu = (90 * 2 + 30) / 6
+    for statut in ("interrompue", "terminee"):
+        t = {"statut": statut, "epreuves": epreuves}
+        assert tentative.score_global(t, pond) == pytest.approx(attendu)
+    # en cours : epreuves jouees seules
+    assert tentative.score_global({"statut": "en_cours", "epreuves": epreuves}, pond) == \
+        pytest.approx((90 * 2 + 30) / 3)
+    # interrompu avant toute epreuve : 0
+    vide = {"statut": "interrompue", "epreuves": {"radio": {"etat": "a_faire"}}}
+    assert tentative.score_global(vide, {"radio": 1}) == 0
 
 
 def test_transition_concurrente_une_seule(db):
