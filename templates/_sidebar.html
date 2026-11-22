@@ -233,6 +233,10 @@
             <span class="material-symbols-outlined">edit_note</span>
             <span class="label">Wiki (admin)</span>
         </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('formation')) %}<a href="/admin/formation" class="{{ nav_class('/admin/formation') }}" title="Test en ligne PC Organisation" data-nav-item>
+            <span class="material-symbols-outlined">school</span>
+            <span class="label">Formation</span>
+        </a>{% endif %}
         {% if _adm or (admin_page_allowed is defined and admin_page_allowed('montre')) %}<a href="/watch-admin" class="{{ nav_class('/watch-admin') }}" data-nav-item>
             <span class="material-symbols-outlined">watch</span>
             <span class="label">Montre</span>

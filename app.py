@@ -121,6 +121,8 @@ if not DEV_MODE and not os.getenv('SECRET_KEY'):
     raise ValueError("SECRET_KEY must be set via environment variable in production!")
 if not DEV_MODE and not os.getenv('JWT_SECRET'):
     raise ValueError("JWT_SECRET must be set via environment variable in production!")
+if not DEV_MODE and len(os.getenv('FORMATION_JWT_SECRET', '')) < 32:
+    raise ValueError("FORMATION_JWT_SECRET must be set (32 characters min.) in production!")
 if not DEV_MODE and not os.getenv('SNAPSHOT_PUBLIC_SECRET'):
     logger.warning(
         "SNAPSHOT_PUBLIC_SECRET non configure en prod ! "
@@ -708,6 +710,8 @@ ADMIN_PAGE_REGISTRY = [
                "/api/whatsapp", ("GET", "/api/groups")]},
     {"id": "wiki_admin",     "label": "Wiki (admin)",    "icon": "edit_note",
      "paths": ["/admin/wiki", "/api/wiki/admin"]},
+    {"id": "formation",      "label": "Formation",       "icon": "school",
+     "paths": ["/admin/formation", "/api/formation/admin"]},
     {"id": "cameras",        "label": "Cameras",         "icon": "videocam",
      "paths": ["/cameras", "/api/cameras", "/api/camera-profiles"]},
     {"id": "detection",      "label": "IA (intrusions, trafic)", "icon": "psychology",
@@ -2902,6 +2906,9 @@ app.register_blueprint(DA.dispatch_bp)
 # (routes user, CSRF ACTIF).
 from declarations import declarations_bp, field_declaration_create, field_declaration_comment
 app.register_blueprint(declarations_bp)
+from formation import formation_bp, formation_admin_bp
+app.register_blueprint(formation_bp)
+app.register_blueprint(formation_admin_bp)
 from bibler_postes import bibler_bp
 app.register_blueprint(bibler_bp)
 csrf.exempt(field_declaration_create)
