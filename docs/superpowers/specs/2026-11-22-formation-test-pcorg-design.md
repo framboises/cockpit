@@ -250,3 +250,6 @@ present), format interne du journal d'actions, details du fil d'envoi.
   « Commencer » de l'epreuve).
 - **Adresse de reponse (reply-to) et adresse de contact RGPD** : reglages de la campagne, saisis par le DOA dans
   l'administration ; l'envoi de la campagne et l'ouverture du test sont refuses tant qu'elles sont vides.
+- **Indicatif radio (22/11)** : le candidat est **PC Org** (indicatif du PC Organisation), operateur Sud-Est sur le
+  canal Sud-Est. La maquette (« PC Est », « PC Orga », « PC Nord / Sud / Village ») est corrigee partout : les
+  messages qui ne sont pas pour lui sont des echanges entre equipes de terrain ou des messages emis par le PC Org.
