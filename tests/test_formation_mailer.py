@@ -376,3 +376,37 @@ def test_erreur_mongo_ne_tue_pas_silencieusement(db, caplog):
     fil.traiter_un = lambda d: (_ for _ in ()).throw(RuntimeError("mongo"))
     fil.traiter_tout(db)
     assert "erreur inattendue" in caplog.text
+
+
+def test_lancer_sans_confirmation_400(db, client, monkeypatch):
+    monkeypatch.setattr(mailer.fil, "demarrer", lambda d: None)
+    _cand(db, "a@x.fr")
+    base = "/api/formation/admin/campagne/lancer"
+    for corps in ({"cible": "non_invites"}, {"cible": "non_invites", "confirmation_n": None},
+                  {"cible": "non_invites", "confirmation_n": True},
+                  {"cible": "non_invites", "confirmation_n": "1"}):
+        r = _post(client, base, corps)
+        assert r.status_code == 400 and r.get_json()["error"] == "confirmation_requise"
+    assert db["envois"].count_documents({}) == 0
+
+
+def test_orphelin_recent_repris_par_la_boucle(db):
+    _cand(db, "a@x.fr")
+    mailer.planifier(db, "non_invites", "adm", _now())
+    db["envois"].update_many({}, {"$set": {"statut": "en_cours", "debut": _now() - timedelta(minutes=6)}})
+    _fil().traiter_tout(db)
+    assert len(FauxSMTP.envoyes) == 1
+    assert db["envois"].find_one()["statut"] == "envoye"
+
+
+def test_demarrer_attend_l_ancien_fil(db):
+    import threading
+    fil = mailer.FilEnvoi(sleep=lambda s: None)
+    fin = threading.Event()
+    fil._stop = threading.Event()
+    fil._thread = threading.Thread(target=fin.wait, daemon=True)
+    fil._thread.start()
+    fil._stop.set()
+    threading.Timer(0.2, fin.set).start()
+    assert fil.demarrer(db) is True
+    fil._thread.join(timeout=5)

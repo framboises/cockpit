@@ -171,6 +171,7 @@ def arreter(db, auteur):
 
 def reprendre(db, auteur):
     _fixer_arret(db, False, auteur, "campagne_reprendre")
+    remettre_orphelins(db)
     if db["envois"].count_documents({"campagne": store.CAMPAGNE, "statut": "en_file"}):
         fil.demarrer(db)
 
@@ -242,6 +243,7 @@ class FilEnvoi:
         """Boucle jusqu'a epuisement ou arret ; pause debit_envoi_s entre deux messages."""
         while not self._stop.is_set():
             try:
+                remettre_orphelins(db)
                 reg = store.reglages(db)
                 if reg.get("campagne_arretee"):
                     break
@@ -256,8 +258,13 @@ class FilEnvoi:
 
     def demarrer(self, db):
         with self._verrou:
-            if self._thread is not None and self._thread.is_alive():
-                return False
+            t = self._thread
+            if t is not None and t.is_alive():
+                if not self._stop.is_set():
+                    return False  # deja en marche
+                t.join(timeout=15)
+                if t.is_alive():
+                    return False
             self._db = db
             self._stop = threading.Event()
             self._thread = threading.Thread(
@@ -284,14 +291,18 @@ class FilEnvoi:
 fil = FilEnvoi()
 
 
-def reprendre_au_demarrage(db, now=None):
-    """en_cours orphelins (debut de plus de 5 min) -> en_file ; le fil repart s'il reste
-    des en_file, sauf campagne arretee."""
+def remettre_orphelins(db, now=None):
+    """en_cours dont le debut date de plus de 5 min (fil mort) -> en_file."""
     now = now or datetime.now(timezone.utc)
     db["envois"].update_many(
         {"campagne": store.CAMPAGNE, "statut": "en_cours",
          "debut": {"$lt": now - timedelta(minutes=5)}},
         {"$set": {"statut": "en_file"}})
+
+
+def reprendre_au_demarrage(db, now=None):
+    """Requeue les orphelins ; le fil repart s'il reste des en_file, sauf campagne arretee."""
+    remettre_orphelins(db, now)
     if store.reglages(db).get("campagne_arretee"):
         return
     if db["envois"].count_documents({"campagne": store.CAMPAGNE, "statut": "en_file"}):

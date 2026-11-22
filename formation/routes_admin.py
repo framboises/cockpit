@@ -86,6 +86,9 @@ def api_campagne_lancer():
     from formation import mailer, store
     data = _json()
     db = store.get_db()
+    cn = data.get("confirmation_n")
+    if not isinstance(cn, int) or isinstance(cn, bool):
+        return jsonify({"ok": False, "error": "confirmation_requise"}), 400
     try:
         res = mailer.lancer(db, data.get("cible"), data.get("confirmation_n"), _auteur(),
                             datetime.now(timezone.utc))
@@ -94,7 +97,7 @@ def api_campagne_lancer():
             return jsonify({"ok": False, "error": "confirmation_differente", "n": exc.args[1]}), 409
         return jsonify({"ok": False, "error": str(exc)}), 400
     return jsonify({"ok": True, "planifies": res["planifies"], "invalides": res["invalides"],
-                    "etat": mailer.fil.etat()})
+                    "actif": mailer.fil.etat()["actif"], "etat": mailer.fil.etat()})
 
 
 @formation_admin_bp.post("/api/formation/admin/campagne/arreter")
@@ -110,7 +113,8 @@ def api_campagne_arreter():
 def api_campagne_reprendre():
     from formation import mailer, store
     mailer.reprendre(store.get_db(), _auteur())
-    return jsonify({"ok": True, "etat": mailer.fil.etat()})
+    etat = mailer.fil.etat()
+    return jsonify({"ok": True, "actif": etat["actif"], "etat": etat})
 
 
 @formation_admin_bp.post("/api/formation/admin/campagne/renvoyer-echecs")
