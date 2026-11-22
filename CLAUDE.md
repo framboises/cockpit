@@ -71,6 +71,7 @@ Pas de tests automatisés ni de linter configurés.
 | `COCKPIT_INTEG_<ID>_ALLOWED_IPS` | IP sources admises (adresses ou CIDR, virgules) sur l'entrant et les photos signées d'une application liée, nom dérivé de son `secret_env` (ex. `COCKPIT_INTEG_FRIDAY_ALLOWED_IPS=192.168.254.53`) | — (**tout refusé** si vide) |
 | `COCKPIT_PUBLIC_URL` | Adresse de Cockpit vue des applications liées (liens signés des photos) | `PUBLIC_BASE_URL` |
 | `FORMATION_JWT_SECRET` | Clé HS256 du cookie de session du test en ligne PC Organisation (`formation/acces.py`), 32 caractères min. | — (refus de démarrage en prod si absent ou trop court ; secret de dev hors prod) |
+| `FORMATION_PUBLIC_URL` | Adresse publique de Cockpit pour le lien `{lien}` des e-mails du test PC Organisation (`formation/mailer.py`, suffixe `/test-pc-organisation`). Distincte de `COCKPIT_PUBLIC_URL` / `PUBLIC_BASE_URL` | `https://cockpit.lemans.org` |
 | `OLLAMA_URL` | URL Ollama (résumés périodiques Alfred) | `http://srv-safe-docker.aco.local:11434` |
 | `OLLAMA_MODEL` | Modèle Ollama des résumés | `alfred` |
 | `OLLAMA_TIMEOUT` | Timeout lecture d'un résumé (s) | `300` |
