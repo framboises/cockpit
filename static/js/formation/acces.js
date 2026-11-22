@@ -38,7 +38,7 @@
         if (k >= badges.length) { fini(); return; }
         var b = badges[k], fait = false, g = F.groupe();
         F.entete("Personne " + (k + 1) + " / " + badges.length + ". Il est " + (enonce.heure || "") + ".", true);
-        el.innerHTML = "<div class=\"gate\"><div class=\"badge\"><div class=\"band\"></div><div class=\"num\"></div>" +
+        el.innerHTML = "<div class=\"gate\"><div class=\"badge\" tabindex=\"-1\" aria-live=\"polite\"><div class=\"band\"></div><div class=\"num\"></div>" +
           "<div class=\"meta\">Valable jusqu'à <b style=\"color:var(--fg)\" class=\"until\"></b></div></div>" +
           "<div>" + texteRegle + "<div class=\"gatebtns\">" +
           "<button class=\"choice ok\" type=\"button\">Laisser entrer</button>" +
@@ -70,7 +70,8 @@
           }
           F.groupe().later(function () { k++; suivant(); }, TRANSITION);
         };
-        F.focus(oui);
+        // Focus sur le badge, jamais sur un bouton : un appui involontaire sur Espace / Entree ne decide rien.
+        F.focus(el.querySelector(".badge"));
         oui.onclick = function () { decider(1); };
         non.onclick = function () { decider(0); };
         F.chrono(delai, montre, g);
