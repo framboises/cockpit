@@ -2915,6 +2915,11 @@ try:
     _formation_store.ensure_indexes(_formation_store.get_db())
 except Exception as _e:
     logger.warning("formation index init: %s", _e)
+try:
+    from formation import mailer as _formation_mailer
+    _formation_mailer.reprendre_au_demarrage(_formation_store.get_db())
+except Exception as _e:
+    logger.warning("formation reprise campagne: %s", _e)
 from bibler_postes import bibler_bp
 app.register_blueprint(bibler_bp)
 csrf.exempt(field_declaration_create)

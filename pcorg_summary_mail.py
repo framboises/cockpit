@@ -810,6 +810,38 @@ class SmtpError(Exception):
     pass
 
 
+def smtp_envoyer(message, destinataires):
+    """Envoie un message MIME deja construit par le relais SMTP (variables SMTP_*).
+
+    Leve SmtpError pour SMTP non configure, liste vide ou echec d'envoi.
+    """
+    host = (os.getenv("SMTP_HOST", "192.168.254.2") or "").strip()
+    if not host:
+        raise SmtpError("SMTP non configure")
+    if not destinataires:
+        raise SmtpError("Aucun destinataire")
+
+    port = int(os.getenv("SMTP_PORT", "25"))
+    user = (os.getenv("SMTP_USER", "") or "").strip()
+    password = (os.getenv("SMTP_PASSWORD", "") or "").strip()
+    sender = (os.getenv("SMTP_FROM", "safe@lemans.org") or "").strip()
+    use_tls = os.getenv("SMTP_USE_TLS", "false").strip().lower() in {"1", "true", "yes", "on"}
+    timeout = int(os.getenv("SMTP_TIMEOUT", "10"))
+
+    try:
+        with smtplib.SMTP(host, port, timeout=timeout) as smtp:
+            smtp.ehlo()
+            if use_tls:
+                smtp.starttls()
+                smtp.ehlo()
+            if user and password:
+                smtp.login(user, password)
+            smtp.send_message(message, from_addr=sender, to_addrs=list(destinataires))
+    except (smtplib.SMTPException, OSError) as e:
+        logger.warning("SMTP echec : %s", e)
+        raise SmtpError("smtp_send_failed: " + str(e))
+
+
 def send_summary_email(to_emails, summary, cc_emails=None, bcc_emails=None):
     """Envoie le rapport HTML aux destinataires. Aligne sur le pattern Home.
 
@@ -822,14 +854,9 @@ def send_summary_email(to_emails, summary, cc_emails=None, bcc_emails=None):
     if not to_emails:
         raise SmtpError("Aucun destinataire")
 
-    port = int(os.getenv("SMTP_PORT", "25"))
-    user = (os.getenv("SMTP_USER", "") or "").strip()
-    password = (os.getenv("SMTP_PASSWORD", "") or "").strip()
     sender = (os.getenv("SMTP_FROM", "safe@lemans.org") or "").strip()
     sender_name = (os.getenv("SMTP_FROM_NAME", "TITAN ACO") or "").strip()
     reply_to = (os.getenv("SMTP_REPLY_TO", "") or "").strip()
-    use_tls = os.getenv("SMTP_USE_TLS", "false").strip().lower() in {"1", "true", "yes", "on"}
-    timeout = int(os.getenv("SMTP_TIMEOUT", "10"))
 
     subject = email_subject(summary)
     text_body = render_summary_text(summary)
@@ -857,18 +884,7 @@ def send_summary_email(to_emails, summary, cc_emails=None, bcc_emails=None):
     if bcc_emails:
         all_recipients += list(bcc_emails)
 
-    try:
-        with smtplib.SMTP(host, port, timeout=timeout) as smtp:
-            smtp.ehlo()
-            if use_tls:
-                smtp.starttls()
-                smtp.ehlo()
-            if user and password:
-                smtp.login(user, password)
-            smtp.send_message(message, from_addr=sender, to_addrs=all_recipients)
-    except (smtplib.SMTPException, OSError) as e:
-        logger.warning("SMTP echec : %s", e)
-        raise SmtpError("smtp_send_failed: " + str(e))
+    smtp_envoyer(message, all_recipients)
 
     return {
         "ok": True,

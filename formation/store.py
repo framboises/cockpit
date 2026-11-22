@@ -60,6 +60,31 @@ def ensure_indexes(db):
     db["essais_connexion"].create_index("t", expireAfterSeconds=900, name="ttl_essais")
 
 
+GABARIT_DEFAUT = {
+    "objet": "PC Organisation : votre test en ligne, à passer avant le {date_limite}",
+    "corps": """Bonjour {prenom},
+
+Merci pour votre candidature au PC Organisation. Avant les sélections sur le Circuit, nous vous proposons un test en ligne d'environ 20 minutes : une vacation de nuit fictive en sept épreuves courtes. Aucune connaissance du site n'est nécessaire, toutes les règles sont expliquées à l'écran.
+
+Le test : {lien}
+Pour vous identifier : l'adresse e-mail utilisée dans le questionnaire et les 4 derniers chiffres de votre téléphone mobile.
+À passer avant le {date_limite}.
+
+Important : vous ne pouvez passer ce test qu'une seule fois, sans possibilité de recommencer. Une épreuve interrompue (fenêtre fermée, page rechargée, coupure de connexion) est perdue.
+Avant de commencer :
+- installez-vous seul, au calme, sur un ordinateur (pas de téléphone) ;
+- utilisez une connexion stable, branchez votre ordinateur et coupez les notifications ;
+- prévoyez 25 minutes sans interruption ; le son est conseillé mais facultatif.
+
+Vous avez besoin d'un temps aménagé ? Répondez à ce message avant de commencer le test.
+
+L'équipe de sélection vous contactera ensuite par e-mail ; les convocations partent au plus tard le 4 décembre.
+
+Ludovic Arnault
+Directeur des opérations adjoint
+Automobile Club de l'Ouest""",
+}
+
 def _paris_utc(annee, mois, jour, h, mn):
     return datetime(annee, mois, jour, h, mn, tzinfo=_PARIS).astimezone(timezone.utc)
 
@@ -75,7 +100,7 @@ def _defauts():
         "conservation_jusqu_au": "2027-01-30",
         "debit_envoi_s": 2.0,
         "expediteur_nom": "PC Organisation - ACO",
-        "gabarit": {},  # rempli par la tache Mailer
+        "gabarit": dict(GABARIT_DEFAUT),
     }
 
 
@@ -91,6 +116,8 @@ def reglages(db):
     for k, v in doc.items():
         if k in out:
             out[k] = _aware(v)
+    if not (out["gabarit"] or {}).get("objet") or not (out["gabarit"] or {}).get("corps"):
+        out["gabarit"] = dict(GABARIT_DEFAUT)
     return out
 
 
