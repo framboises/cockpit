@@ -74,8 +74,8 @@ def _candidat_du_cookie(db):
 def _nouvelle_session(db, candidat, now):
     """Nouveau sid, qui devient la seule session active. Renvoie (etat, jeton)."""
     sid = secrets.token_urlsafe(18)
-    etat = tentative.connexion(db, candidat, sid, _ip(), now)
-    return etat, acces.emettre_jeton(str(candidat["_id"]), sid, now)
+    jeton = acces.emettre_jeton(str(candidat["_id"]), sid, now)  # avant : secret absent -> rien n'est clos
+    return tentative.connexion(db, candidat, sid, _ip(), now), jeton
 
 
 def _corps_json():
