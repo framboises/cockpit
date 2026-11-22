@@ -31,8 +31,9 @@ CIBLES = ("non_invites", "relance_non_commences")
 
 
 def _lien():
-    base = (os.getenv("COCKPIT_PUBLIC_URL") or os.getenv("PUBLIC_BASE_URL")
-            or "https://cockpit.lemans.org").strip().rstrip("/")
+    # Variable dediee : COCKPIT_PUBLIC_URL / PUBLIC_BASE_URL servent a d'autres usages
+    # (PUBLIC_BASE_URL vaut safe.lemans.org ailleurs).
+    base = (os.getenv("FORMATION_PUBLIC_URL") or "").strip().rstrip("/") or "https://cockpit.lemans.org"
     return base + "/test-pc-organisation"
 
 
@@ -134,10 +135,14 @@ def compter(db, cible):
 
 
 def planifier(db, cible, auteur, now, confirmation_n=None):
-    """Retourne {planifies, invalides}. Leve ValueError reply_to_vide, ou
-    confirmation_differente (args : n recalcule) si confirmation_n ne correspond pas."""
-    if not store.reglages(db).get("reply_to"):
-        raise ValueError("reply_to_vide")
+    """Retourne {planifies, invalides}. Leve ValueError reply_to_vide, contact_rgpd_vide
+    (spec 12), ou confirmation_differente (args : n recalcule) si confirmation_n ne
+    correspond pas."""
+    reg = store.reglages(db)
+    for k in ("reply_to", "contact_rgpd"):
+        v = reg.get(k)
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError(k + "_vide")
     typ = "invitation" if cible == "non_invites" else "relance"
     liste = _candidats_cibles(db, cible)
     if confirmation_n is not None and (isinstance(confirmation_n, bool) or confirmation_n != len(liste)):

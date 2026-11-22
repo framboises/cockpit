@@ -53,8 +53,7 @@ def faux_smtp(monkeypatch):
     monkeypatch.setattr(smtplib, "SMTP", FauxSMTP)
     monkeypatch.setenv("SMTP_HOST", "smtp.invalide.test")
     monkeypatch.setenv("SMTP_FROM", "safe@lemans.org")
-    monkeypatch.delenv("COCKPIT_PUBLIC_URL", raising=False)
-    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("FORMATION_PUBLIC_URL", raising=False)
 
 
 @pytest.fixture
@@ -70,7 +69,8 @@ def db():
     store.ensure_indexes(d)
     store.set_db_for_tests(d)
     d["reglages"].update_one({"_id": store.CAMPAGNE}, {"$set": {
-        "reply_to": "selection@lemans.org", "debit_envoi_s": 0}}, upsert=True)
+        "reply_to": "selection@lemans.org", "contact_rgpd": "dpo@lemans.org",
+        "debit_envoi_s": 0}}, upsert=True)
     yield d
     store.set_db_for_tests(None)
     client.drop_database(name)
@@ -107,9 +107,19 @@ def test_rendre_variables(db):
 
 
 def test_lien_depuis_env(db, monkeypatch):
-    monkeypatch.setenv("COCKPIT_PUBLIC_URL", "https://exemple.test/")
+    monkeypatch.setenv("FORMATION_PUBLIC_URL", "https://exemple.test/")
     reg = store.reglages(db)
     assert "https://exemple.test/test-pc-organisation" in mailer.rendre(reg["gabarit"], {"prenom": "A"}, reg)[1]
+
+
+def test_lien_ignore_les_autres_url_publiques(db, monkeypatch):
+    # COCKPIT_PUBLIC_URL / PUBLIC_BASE_URL servent a d'autres usages (safe.lemans.org...)
+    monkeypatch.setenv("COCKPIT_PUBLIC_URL", "https://autre.test")
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://safe.lemans.org")
+    reg = store.reglages(db)
+    texte = mailer.rendre(reg["gabarit"], {"prenom": "A"}, reg)[1]
+    assert "https://cockpit.lemans.org/test-pc-organisation" in texte
+    assert "autre.test" not in texte and "safe.lemans.org" not in texte
 
 
 def test_un_message_par_destinataire(db):
@@ -179,6 +189,18 @@ def test_reply_to_obligatoire(db):
     db["reglages"].update_one({"_id": store.CAMPAGNE}, {"$set": {"reply_to": ""}})
     with pytest.raises(ValueError):
         mailer.planifier(db, "non_invites", "adm", _now())
+    assert db["envois"].count_documents({}) == 0
+
+
+def test_contact_rgpd_obligatoire(db, client, monkeypatch):
+    monkeypatch.setattr(mailer.fil, "demarrer", lambda d: None)
+    _cand(db, "a@x.fr")
+    db["reglages"].update_one({"_id": store.CAMPAGNE}, {"$set": {"contact_rgpd": "  "}})
+    with pytest.raises(ValueError) as exc:
+        mailer.planifier(db, "non_invites", "adm", _now())
+    assert exc.value.args[0] == "contact_rgpd_vide"
+    r = _post(client, "/api/formation/admin/campagne/lancer", {"cible": "non_invites", "confirmation_n": 1})
+    assert r.status_code == 400 and r.get_json()["error"] == "contact_rgpd_vide"
     assert db["envois"].count_documents({}) == 0
 
 

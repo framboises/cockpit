@@ -16,6 +16,7 @@
   var ETATS_EP = {a_faire: "À faire", en_cours: "En cours", terminee: "Terminée", abandonnee: "Abandonnée"};
   var ERREURS = {
     reply_to_vide: "Renseignez le Reply-To dans les réglages avant d'envoyer.",
+    contact_rgpd_vide: "Renseignez le contact RGPD dans les réglages avant d'envoyer.",
     adresse_invalide: "Adresse e-mail invalide.",
     smtp: "Le relais SMTP a refusé l'envoi.",
     confirmation_requise: "Confirmation manquante.",
