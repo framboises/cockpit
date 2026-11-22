@@ -71,9 +71,18 @@ def temps_ms(action):
         return None
     try:
         v = float(v)
-    except ValueError:
+    except (ValueError, OverflowError, TypeError):
         return None
     return v if math.isfinite(v) else None
+
+
+def coef_valide(coef):
+    """Coefficient fini et strictement positif, sinon 1.0."""
+    try:
+        c = float(coef)
+    except (ValueError, OverflowError, TypeError):
+        return 1.0
+    return c if math.isfinite(c) and c > 0 and not isinstance(coef, bool) else 1.0
 
 
 def journal(actions, types, drapeaux):
@@ -292,7 +301,7 @@ def score(epreuve, actions, coef):
     if epreuve not in _CORRECTEURS:
         raise ValueError("epreuve inconnue : %s" % epreuve)
     drapeaux = []
-    pct, detail = _CORRECTEURS[epreuve](actions, float(coef), drapeaux)
+    pct, detail = _CORRECTEURS[epreuve](actions, coef_valide(coef), drapeaux)
     return {"score": _arrondi(pct), "detail": detail, "drapeaux": drapeaux}
 
 

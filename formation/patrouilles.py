@@ -88,10 +88,9 @@ def rejouer(actions, coef, incidents=None):
         if nom not in drapeaux:
             drapeaux.append(nom)
 
-    if not isinstance(coef, (int, float)) or not coef > 0:
-        coef = 1.0
+    from formation.correction import coef_valide, journal  # import tardif : correction importe ce module
 
-    from formation.correction import journal  # import tardif : correction importe ce module
+    coef = coef_valide(coef)
 
     for t_ms, a in journal(actions, ("engager",), drapeaux):
         t = t_ms / coef

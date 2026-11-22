@@ -132,8 +132,15 @@ def test_chemin_impossible():
 def test_rejouer_journal_hostile():
     actions = ["x", None, 3, {"type": "engager", "moyen": ["P1"], "incident": "I1", "t_ms": 3000},
                {"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": "abc"},
-               {"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": float("nan")}]
+               {"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": float("nan")},
+               {"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": 10 ** 400}]
     r = patrouilles.rejouer(actions, 1.0)
     assert r["traites"] == 0
     assert "action_inconnue" in r["drapeaux"] and "horodatage_incoherent" in r["drapeaux"]
     assert patrouilles.rejouer({"x": 1}, 1.0)["traites"] == 0
+
+
+def test_rejouer_coef_invalide():
+    actions = [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": 3000}]
+    for coef in (0, -2, float("nan"), float("inf"), None):
+        assert patrouilles.rejouer(actions, coef)["traites"] == 1

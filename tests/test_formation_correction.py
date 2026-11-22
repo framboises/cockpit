@@ -359,7 +359,7 @@ POUBELLE = [
     {"type": "engager", "moyen": "P1", "incident": {"id": "I1"}, "t_ms": 3000},
     {"type": "badge_affiche", "badge": ["b01"], "t_ms": 0},
 ]
-TEMPS_INVALIDES = [float("nan"), float("inf"), "abc", None, True, [1]]
+TEMPS_INVALIDES = [float("nan"), float("inf"), "abc", None, True, [1], 10 ** 400, "1e999"]
 
 
 def _actions_temps_invalides():
@@ -395,3 +395,10 @@ def test_journal_hostile_champs_mc():
 def test_journal_hostile_melange_garde_le_valide():
     actions = POUBELLE + _actions_temps_invalides() + _bonnes_logique()
     assert correction.score("logique", actions, 1.0)["score"] == 100
+
+
+def test_coef_invalide_vaut_un():
+    actions = _bonnes_logique()
+    for coef in (0, -1, float("nan"), float("inf"), "x", None, 10 ** 400):
+        assert correction.score("logique", actions, coef)["score"] == 100
+        assert correction.score("radio", [_radio_prise("r01")], coef)["detail"]["pris_a_raison"] == 1
