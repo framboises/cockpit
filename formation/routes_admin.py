@@ -198,25 +198,7 @@ def _corrige():
     """Reponses attendues de la banque, par epreuve : {id: {points|ok|ans|a}}.
     Reserve a l'administration (jamais envoye au candidat)."""
     from formation import banque
-    b = banque.charger()
-    out = {}
-
-    def walk(obj, acc):
-        if isinstance(obj, dict):
-            if isinstance(obj.get("id"), str):
-                sec = {k: obj[k] for k in banque._SECRETS if k in obj}
-                if sec:
-                    acc[obj["id"]] = sec
-            for v in obj.values():
-                walk(v, acc)
-        elif isinstance(obj, list):
-            for v in obj:
-                walk(v, acc)
-    for e in store.EPREUVES:
-        acc = {}
-        walk(b.get(e), acc)
-        out[e] = acc
-    return out
+    return {e: banque.secrets_par_id(e) for e in store.EPREUVES}
 
 
 def _tentative_admin(t, ponderations):

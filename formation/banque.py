@@ -37,6 +37,25 @@ def charger():
     return copy.deepcopy(_banque())
 
 
+def secrets_par_id(epreuve):
+    """Reponses attendues d'une epreuve : {id: {points|ok|ans|a}} (usage serveur, jamais envoye au candidat)."""
+    acc = {}
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            if isinstance(obj.get("id"), str):
+                sec = {k: obj[k] for k in _SECRETS if k in obj}
+                if sec:
+                    acc[obj["id"]] = sec
+            for v in obj.values():
+                walk(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                walk(v)
+    walk(_banque().get(epreuve))
+    return copy.deepcopy(acc)
+
+
 def _sans_secrets(obj):
     if isinstance(obj, dict):
         return {k: _sans_secrets(v) for k, v in obj.items() if k not in _SECRETS}

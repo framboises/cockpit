@@ -20,6 +20,7 @@
     smtp: "Le relais SMTP a refusé l'envoi.",
     confirmation_requise: "Confirmation manquante.",
     cible_inconnue: "Cible inconnue.",
+    session_expiree: "Session expirée, rechargez la page.",
     gabarit_invalide: "Objet et corps obligatoires.",
     motif_requis: "Le motif est obligatoire.",
     aucune_tentative: "Aucune tentative à réinitialiser.",
@@ -79,6 +80,10 @@
       opts.body = JSON.stringify(corps);
     }
     return fetch(API + chemin, opts).then(function (r) {
+      var json = (r.headers.get("Content-Type") || "").indexOf("application/json") >= 0;
+      if (r.redirected || (r.ok && !json)) {
+        return {ok: false, error: "session_expiree", _status: r.status};
+      }
       return r.json().catch(function () { return {ok: false, error: "http_" + r.status}; })
         .then(function (d) { d = d || {}; d._status = r.status; return d; });
     });
@@ -213,8 +218,10 @@
     var c = tri.cle, s = tri.sens;
     lignes.sort(function (a, b) {
       var x = valeurTri(a, c), y = valeurTri(b, c);
-      if (x === null || x === undefined || x === "") return 1;
-      if (y === null || y === undefined || y === "") return -1;
+      var vx = x === null || x === undefined || x === "", vy = y === null || y === undefined || y === "";
+      if (vx && vy) return 0;
+      if (vx) return 1;
+      if (vy) return -1;
       if (typeof x === "string" && typeof y === "string") return s * x.localeCompare(y, "fr");
       return s * (x < y ? -1 : x > y ? 1 : 0);
     });
@@ -586,6 +593,18 @@
   }
 
   var gabaritCharge = false;
+  var gabaritEnregistre = {objet: "", corps: ""};
+
+  function gabaritModifie() {
+    var g = gabaritSaisi();
+    return g.objet !== gabaritEnregistre.objet || g.corps !== gabaritEnregistre.corps;
+  }
+
+  function majBoutonEssai() {
+    var modifie = gabaritCharge && gabaritModifie();
+    $("fa-essai").disabled = modifie;
+    $("fa-essai").title = modifie ? "Enregistrez le gabarit : l'essai envoie le gabarit enregistré, pas le texte modifié." : "";
+  }
   function chargerGabarit() {
     if (gabaritCharge) return;
     api("GET", "/reglages").then(function (d) {
@@ -593,6 +612,8 @@
       gabaritCharge = true;
       $("fa-g-objet").value = d.gabarit.objet || "";
       $("fa-g-corps").value = d.gabarit.corps || "";
+      gabaritEnregistre = {objet: $("fa-g-objet").value, corps: $("fa-g-corps").value};
+      majBoutonEssai();
       apercu();
     });
   }
@@ -611,6 +632,8 @@
   function enregistrerGabarit() {
     api("PUT", "/gabarit", gabaritSaisi()).then(function (d) {
       if (!d.ok) { toast("error", message(d)); return; }
+      gabaritEnregistre = gabaritSaisi();
+      majBoutonEssai();
       toast("success", "Gabarit enregistré.");
       apercu();
     });
@@ -619,9 +642,10 @@
   function essai() {
     var a = $("fa-essai-adresse").value.trim();
     if (!a) { toast("warning", ERREURS.adresse_invalide); return; }
+    if (gabaritModifie()) { toast("warning", "Enregistrez le gabarit avant l'essai : il envoie le gabarit enregistré."); return; }
     $("fa-essai").disabled = true;
     api("POST", "/campagne/essai", {adresse: a}).then(function (d) {
-      $("fa-essai").disabled = false;
+      majBoutonEssai();
       if (!d.ok) { toast("error", message(d)); return; }
       toast("success", "Essai envoyé à " + a + " (gabarit enregistré).");
     });
@@ -796,6 +820,8 @@
     $("fa-g-apercu").addEventListener("click", apercu);
     $("fa-g-enregistrer").addEventListener("click", enregistrerGabarit);
     $("fa-essai").addEventListener("click", essai);
+    $("fa-g-objet").addEventListener("input", majBoutonEssai);
+    $("fa-g-corps").addEventListener("input", majBoutonEssai);
     $("fa-cible").addEventListener("change", function () { compte = null; $("fa-lancer").disabled = true;
       $("fa-compte-cible").textContent = "Comptez d'abord les destinataires."; });
     $("fa-compter").addEventListener("click", compter);
