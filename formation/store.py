@@ -129,8 +129,11 @@ def journal(db, action, auteur, **details):
 
 
 def maj_reglages(db, champs, auteur):
+    """Ecrit les champs connus ; le journal garde l'ancienne et la nouvelle valeur."""
     champs = {k: v for k, v in (champs or {}).items() if k in _defauts()}
     if champs:
+        avant = reglages(db)
         db["reglages"].update_one({"_id": CAMPAGNE}, {"$set": champs}, upsert=True)
-        journal(db, "reglages", auteur, champs=sorted(champs))
+        journal(db, "reglages", auteur, champs=sorted(champs),
+                avant={k: avant.get(k) for k in champs}, apres=dict(champs))
     return reglages(db)

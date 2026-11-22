@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <script src="{{ url_for('static', filename='js/session_portail.js') }}"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>COCKPIT - Formation (administration)</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/formation_admin.css') }}">
+</head>
+
+<body>
+<div class="app-layout">
+
+  {% set sidebar_active = '/admin/formation' %}
+  {% include '_sidebar.html' %}
+
+  <div class="app-main single-col-page">
+    <header class="app-header">
+      <span class="header-title" style="display:flex; align-items:center; gap:8px;">
+        <span class="material-symbols-outlined" style="font-size:22px;">school</span>
+        Formation - test PC Organisation
+      </span>
+      <div class="header-spacer"></div>
+      <a href="/test-pc-organisation" target="_blank" rel="noopener" class="fa-btn">
+        <span class="material-symbols-outlined">open_in_new</span> Page candidat
+      </a>
+    </header>
+
+    <div id="main-content">
+      <div class="fa-wrap">
+        <div id="fa-purge" class="fa-banner fa-warn" hidden></div>
+
+        <nav class="fa-tabs" role="tablist">
+          <button class="fa-tab is-active" data-tab="candidats" role="tab">
+            <span class="material-symbols-outlined">groups</span> Candidats</button>
+          <button class="fa-tab" data-tab="campagne" role="tab">
+            <span class="material-symbols-outlined">mail</span> Campagne</button>
+          <button class="fa-tab" data-tab="resultats" role="tab">
+            <span class="material-symbols-outlined">bar_chart</span> Résultats</button>
+          <button class="fa-tab" data-tab="reglages" role="tab">
+            <span class="material-symbols-outlined">tune</span> Réglages</button>
+        </nav>
+
+        <!-- Candidats -->
+        <section class="fa-panel" data-panel="candidats">
+          <div class="fa-card">
+            <div class="fa-card-h">
+              <h2>Import de l'export Forms</h2>
+              <form id="fa-import" class="fa-inline">
+                <input type="file" id="fa-import-fichier" accept=".xlsx" required>
+                <button type="submit" class="fa-btn fa-primary">
+                  <span class="material-symbols-outlined">upload</span> Importer</button>
+              </form>
+            </div>
+            <p class="fa-muted">Relançable : mise à jour par e-mail, ne touche jamais aux tentatives ni aux envois. L'aménagement n'est pas importé, il se pose ici à la main.</p>
+            <div id="fa-import-rapport"></div>
+          </div>
+
+          <div class="fa-card">
+            <div class="fa-toolbar">
+              <select id="fa-f-statut" aria-label="Statut">
+                <option value="">Tous les statuts</option>
+                <option value="non_commence">Non commencé</option>
+                <option value="en_cours">En cours</option>
+                <option value="terminee">Terminé</option>
+                <option value="interrompue">Interrompu</option>
+              </select>
+              <input type="search" id="fa-f-q" placeholder="Nom, prénom, e-mail, id Forms" autocomplete="off">
+              <label class="fa-check"><input type="checkbox" id="fa-f-fictifs"> Afficher les fictifs</label>
+              <span class="fa-spacer"></span>
+              <span id="fa-compte" class="fa-muted"></span>
+            </div>
+            <div class="fa-table-wrap">
+              <table class="fa-table" id="fa-table">
+                <thead><tr id="fa-thead"></tr></thead>
+                <tbody id="fa-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Campagne -->
+        <section class="fa-panel" data-panel="campagne" hidden>
+          <div class="fa-grid2">
+            <div class="fa-card">
+              <h2>Gabarit de l'e-mail</h2>
+              <p class="fa-muted">Variables : <code>{prenom}</code> <code>{lien}</code> <code>{date_limite}</code> <code>{contact}</code>. Texte brut ; la version HTML est produite automatiquement (paragraphes, liens).</p>
+              <label class="fa-field">Objet<input type="text" id="fa-g-objet" maxlength="200"></label>
+              <label class="fa-field">Corps<textarea id="fa-g-corps" rows="18"></textarea></label>
+              <div class="fa-inline">
+                <button class="fa-btn" id="fa-g-apercu"><span class="material-symbols-outlined">visibility</span> Aperçu</button>
+                <button class="fa-btn fa-primary" id="fa-g-enregistrer"><span class="material-symbols-outlined">save</span> Enregistrer</button>
+              </div>
+            </div>
+            <div class="fa-card">
+              <h2>Aperçu</h2>
+              <div id="fa-apercu-objet" class="fa-apercu-objet fa-muted">Cliquez sur « Aperçu ».</div>
+              <iframe id="fa-apercu" class="fa-apercu" sandbox="" title="Aperçu de l'e-mail"></iframe>
+            </div>
+          </div>
+
+          <div class="fa-grid2">
+            <div class="fa-card">
+              <h2>Envoi d'essai</h2>
+              <p class="fa-muted">Un message « [ESSAI] » à l'adresse saisie, prénom fictif « Camille ».</p>
+              <div class="fa-inline">
+                <input type="email" id="fa-essai-adresse" placeholder="adresse@exemple.fr">
+                <button class="fa-btn" id="fa-essai"><span class="material-symbols-outlined">send</span> Envoyer l'essai</button>
+              </div>
+            </div>
+            <div class="fa-card">
+              <h2>Envoi de la campagne</h2>
+              <div class="fa-inline">
+                <select id="fa-cible">
+                  <option value="non_invites">Candidats jamais invités</option>
+                  <option value="relance_non_commences">Relance : invités qui n'ont pas commencé</option>
+                </select>
+                <button class="fa-btn" id="fa-compter"><span class="material-symbols-outlined">calculate</span> Compter</button>
+                <button class="fa-btn fa-primary" id="fa-lancer" disabled><span class="material-symbols-outlined">forward_to_inbox</span> Lancer l'envoi</button>
+              </div>
+              <p id="fa-compte-cible" class="fa-muted">Comptez d'abord les destinataires. Les candidats fictifs ne reçoivent jamais rien.</p>
+            </div>
+          </div>
+
+          <div class="fa-card">
+            <div class="fa-card-h">
+              <h2>État des envois</h2>
+              <div class="fa-inline">
+                <button class="fa-btn" id="fa-arreter"><span class="material-symbols-outlined">stop_circle</span> Arrêter</button>
+                <button class="fa-btn" id="fa-reprendre"><span class="material-symbols-outlined">play_circle</span> Reprendre</button>
+                <button class="fa-btn" id="fa-renvoyer"><span class="material-symbols-outlined">restart_alt</span> Renvoyer les échecs</button>
+              </div>
+            </div>
+            <div class="fa-kpis" id="fa-etat"></div>
+          </div>
+        </section>
+
+        <!-- Resultats -->
+        <section class="fa-panel" data-panel="resultats" hidden>
+          <div class="fa-card">
+            <div class="fa-card-h">
+              <h2>Synthèse</h2>
+              <div class="fa-inline">
+                <a class="fa-btn" href="/api/formation/admin/export.csv"><span class="material-symbols-outlined">download</span> Export CSV</a>
+                <a class="fa-btn" href="/api/formation/admin/export.xlsx"><span class="material-symbols-outlined">download</span> Export XLSX</a>
+              </div>
+            </div>
+            <div class="fa-kpis" id="fa-kpis"></div>
+            <p class="fa-muted">Candidats fictifs exclus. Temps moyen : tentatives terminées, temps réel. Exports : identifiant Forms en première colonne pour la jointure.</p>
+          </div>
+          <div class="fa-card">
+            <h2>Distribution des scores par épreuve</h2>
+            <div class="fa-charts" id="fa-charts"></div>
+          </div>
+        </section>
+
+        <!-- Reglages -->
+        <section class="fa-panel" data-panel="reglages" hidden>
+          <form class="fa-card" id="fa-reglages">
+            <h2>Réglages de la campagne</h2>
+            <div class="fa-grid2">
+              <label class="fa-field">Ouverture (heure de Paris)<input type="datetime-local" name="ouverture" required></label>
+              <label class="fa-field">Fermeture (heure de Paris)<input type="datetime-local" name="fermeture" required></label>
+              <label class="fa-field">Coefficient d'aménagement (1 à 3)<input type="number" name="coef_amenagement" min="1" max="3" step="0.01" required></label>
+              <label class="fa-field">Délai entre deux e-mails (s, 0,5 minimum)<input type="number" name="debit_envoi_s" min="0.5" max="60" step="0.5" required></label>
+              <label class="fa-field">Reply-To (adresse de réponse, obligatoire pour envoyer)<input type="email" name="reply_to"></label>
+              <label class="fa-field">Contact RGPD<input type="email" name="contact_rgpd"></label>
+              <label class="fa-field">Nom de l'expéditeur<input type="text" name="expediteur_nom" maxlength="100"></label>
+            </div>
+            <h3>Pondérations du score global</h3>
+            <p class="fa-muted">Score global = moyenne pondérée des épreuves jouées ; une tentative close compte 0 aux épreuves non jouées.</p>
+            <div class="fa-ponds" id="fa-ponds"></div>
+            <p class="fa-muted" id="fa-conservation"></p>
+            <button type="submit" class="fa-btn fa-primary"><span class="material-symbols-outlined">save</span> Enregistrer</button>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail d'un candidat -->
+<aside id="fa-detail" class="fa-drawer" hidden aria-label="Détail du candidat">
+  <div class="fa-drawer-h">
+    <h2 id="fa-d-titre"></h2>
+    <button class="fa-icon-btn" id="fa-d-fermer" aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+  </div>
+  <div id="fa-d-corps" class="fa-drawer-b"></div>
+</aside>
+
+<!-- Fenetre modale generique -->
+<div id="fa-modal" class="fa-modal" hidden>
+  <div class="fa-modal-box" role="dialog" aria-modal="true" aria-labelledby="fa-m-titre">
+    <h2 id="fa-m-titre"></h2>
+    <div id="fa-m-corps"></div>
+    <div class="fa-inline fa-modal-actions">
+      <button class="fa-btn" id="fa-m-annuler">Annuler</button>
+      <button class="fa-btn fa-primary" id="fa-m-ok">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/formation/admin.js') }}"></script>
+<script>
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
+</body>
+</html>
