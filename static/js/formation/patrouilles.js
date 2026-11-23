@@ -20,6 +20,7 @@
   // ------------------------------------------------------------ 1. moteur pur
 
   var PAS_MS = 430, SUR_PLACE_MS = 4000;
+  var TYPE_RELAIS = {"Secours": "Sécurité"};  // comme patrouilles.TYPE_RELAIS
   var VOISINS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
   function cle(r, c) { return r + "," + c; }
@@ -62,18 +63,35 @@
     var e = {plan: lirePlan(p), units: [], incs: [], u: {}, i: {}, erreurs: 0};
     (p.UNITS || []).forEach(function (x) {
       var u = {id: x.id, name: x.name, cls: x.cls, type: x.type, pos: [x.pos[0], x.pos[1]],
-               libre_a: 0, trajet: null, depart: 0, arrivee: 0};
+               libre_a: 0, trajet: null, depart: 0, arrivee: 0,
+               indispo: (x.indispo || []).map(function (w) { return {de: w.de * 1000, a: w.a * 1000, motif: w.motif}; })};
       e.units.push(u);
       e.u[u.id] = u;
     });
     (incidents || []).forEach(function (x) {
       var t = x.t * 1000;
       var inc = {id: x.id, type: x.type, txt: x.txt, zone: x.zone, pos: [x.pos[0], x.pos[1]],
-                 T: t, D: t + x.dl * 1000, moyen: null, arrivee: null};
+                 T: t, D: t + x.dl * 1000, moyen: null, arrivee: null, plus_proche: null, relais: false};
       e.incs.push(inc);
       e.i[inc.id] = inc;
     });
     return e;
+  }
+
+  // Fenetre d'indisponibilite du scenario en cours (ou null), au temps de jeu t.
+  function indispo(u, t) {
+    for (var k = 0; k < u.indispo.length; k++) if (u.indispo[k].de <= t && t < u.indispo[k].a) return u.indispo[k];
+    return null;
+  }
+
+  // Comme patrouilles.libre : mission finie et hors fenetre d'indisponibilite.
+  function libre(u, t) { return t >= u.libre_a && !indispo(u, t); }
+
+  // Comme patrouilles.type_admis : un Secours sans Secours libre admet une Patrouille.
+  function typeAdmis(e, type, t) {
+    var relais = propre(TYPE_RELAIS, type) ? TYPE_RELAIS[type] : null;
+    if (relais && !e.units.some(function (v) { return v.type === type && libre(v, t); })) return relais;
+    return type;
   }
 
   // Un engagement a tMs (ms reelles depuis le debut) : memes controles, dans le meme
@@ -86,13 +104,22 @@
     if (t < inc.T) return "pas_ouvert";
     if (t >= inc.D) return "echu";
     if (inc.moyen !== null) return "attribue";
-    if (t < u.libre_a) return "occupe";
-    if (u.type !== inc.type) { e.erreurs++; return "mauvais_type"; }
+    if (!libre(u, t)) return "occupe";
+    var admis = typeAdmis(e, inc.type, t);
+    if (u.type !== admis) { e.erreurs++; return "mauvais_type"; }
     var trajet = chemin(e.plan, u.pos, inc.pos);
     if (!trajet) return "sans_chemin";
-    var arrivee = t + (trajet.length - 1) * PAS_MS;
+    var cases = trajet.length - 1, meilleur = cases;
+    e.units.forEach(function (v) {
+      if (v.type !== admis || !libre(v, t)) return;
+      var c = chemin(e.plan, v.pos, inc.pos);
+      if (c && c.length - 1 < meilleur) meilleur = c.length - 1;
+    });
+    var arrivee = t + cases * PAS_MS;
     inc.moyen = u.id;
     inc.arrivee = arrivee;
+    inc.plus_proche = cases <= meilleur;
+    inc.relais = admis !== inc.type;
     u.trajet = trajet;
     u.depart = t;
     u.arrivee = arrivee;
@@ -111,10 +138,11 @@
     return tj < inc.D ? "ouvert" : "manque";
   }
 
-  // route | site | dispo (dispo exactement quand engager ne repond plus "occupe").
+  // route | site | indispo | dispo (dispo exactement quand engager ne repond plus "occupe").
   function phase(u, tj) {
     if (u.trajet && tj < u.arrivee) return "route";
-    return tj < u.libre_a ? "site" : "dispo";
+    if (tj < u.libre_a) return "site";
+    return indispo(u, tj) ? "indispo" : "dispo";
   }
 
   // Index de la derniere case atteinte sur le trajet en cours.
@@ -135,14 +163,18 @@
   function bilan(e) {
     var detail = e.incs.map(function (inc) {
       var ok = inc.moyen !== null && inc.arrivee <= inc.D;
-      return {id: inc.id, statut: ok ? "traite" : "manque", moyen: inc.moyen, arrivee: inc.arrivee};
+      return {id: inc.id, statut: ok ? "traite" : "manque", moyen: inc.moyen, arrivee: inc.arrivee,
+              plus_proche: inc.moyen !== null ? inc.plus_proche : null, relais: !!inc.relais};
     });
     var traites = detail.filter(function (d) { return d.statut === "traite"; }).length;
-    return {traites: traites, manques: detail.length - traites, erreurs: e.erreurs, detail: detail};
+    var proches = detail.filter(function (d) { return d.statut === "traite" && d.plus_proche; }).length;
+    return {traites: traites, manques: detail.length - traites, erreurs: e.erreurs, plus_proches: proches,
+            detail: detail};
   }
 
   var Moteur = {PAS_MS: PAS_MS, SUR_PLACE_MS: SUR_PLACE_MS, lirePlan: lirePlan, chemin: chemin, creer: creer,
-                engager: engager, etatIncident: etatIncident, phase: phase, position: position, bilan: bilan};
+                engager: engager, etatIncident: etatIncident, phase: phase, position: position, bilan: bilan,
+                libre: libre, typeAdmis: typeAdmis};
 
   if (typeof module === "object" && module && module.exports) {
     module.exports = Moteur;
@@ -161,7 +193,7 @@
 
   function regles() {
     return "<div class=\"rules\"><h3>Règles</h3><ul>" +
-      "<li>Vous êtes PC Org : vous coordonnez les moyens sur le terrain. Un incident apparaît sur le plan avec " +
+      "<li>Vous êtes PC Org Sud-Est : vous coordonnez les moyens sur le terrain. Un incident apparaît sur le plan avec " +
       "un compte à rebours.</li>" +
       "<li>Pour envoyer un moyen : cliquez sur l'incident puis sur le moyen, ou sur le moyen puis sur " +
       "l'incident. Vous pouvez aussi faire glisser le moyen sur l'incident. Un second clic annule la " +
@@ -169,6 +201,9 @@
       "<li>Chaque moyen a sa spécialité : <b>Patrouille</b> sécurité, <b>Tango</b> technique, " +
       "<b>Secours</b> blessés et malaises, <b>Moto</b> circulation et parkings. Un moyen d'une autre " +
       "spécialité est refusé et compte comme une erreur.</li>" +
+      "<li>Envoyez toujours le moyen <b>le plus proche</b> parmi ceux qui sont disponibles : c'est noté.</li>" +
+      "<li>Un blessé ne reste jamais sans personne : si aucun <b>Secours</b> n'est disponible, envoyez " +
+      "une <b>Patrouille</b> en premier intervenant.</li>" +
       "<li>Les moyens avancent case par case. La <b>piste</b> ne se traverse qu'aux deux passerelles. Les " +
       "cases hachurées sont en travaux.</li>" +
       "<li>Un moyen engagé reste quelques secondes sur place avant d'être de nouveau disponible.</li>" +
@@ -332,7 +367,9 @@
           opts.envoyer({type: "refus", moyen: u.id, incident: inc.id, t_ms: tMs});
         }
         F.son.bip(200, 0.18, "sawtooth");
-        F.toast(u.name + " ne traite pas ce type d'incident (" + inc.type + ").");
+        var relais = propre(TYPE_RELAIS, inc.type) && TYPE_RELAIS[inc.type] === u.type;
+        F.toast(relais ? "Un Secours est disponible : envoyez-le sur " + inc.id + "." :
+                u.name + " ne traite pas ce type d'incident (" + inc.type + ").");
         refusVisuel(u);
         sel.unit = null;
         sel.inc = inc;  // l'incident reste choisi : il reste a envoyer le bon moyen
@@ -517,7 +554,15 @@
       cacher(vide, visibles.length > 0);
       e.units.forEach(function (u) {
         var ph = phase(u, tj);
-        texte(u.vue.st, ph === "dispo" ? "Disponible" : ph === "route" ? "En route" : "Sur place");
+        var w = indispo(u, tj);
+        if (w && u.vue.fenetre !== w) {
+          u.vue.fenetre = w;  // annonce une fois par fenetre (meme en route : il ne sera plus libre)
+          F.son.bip(520, 0.2);
+          F.toast(u.name + " : " + (w.motif || "indisponible") + ".");
+          annoncer(u.name + " indisponible : " + (w.motif || "") + ".");
+        }
+        texte(u.vue.st, ph === "dispo" ? "Disponible" : ph === "route" ? "En route" :
+              ph === "indispo" ? "En intervention" : "Sur place");
         classe(u.vue.pion, "busy", ph !== "dispo");
         classe(u.vue.it, "busy", ph !== "dispo");
         if (ph !== "dispo" && sel.unit === u) { sel.unit = null; majSelection(); }

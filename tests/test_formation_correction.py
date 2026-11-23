@@ -75,9 +75,11 @@ def test_radio_une_seule_prise_par_message():
 def test_radio_indicatif_pc_org():
     b = banque.charger()
     for m in b["radio"] + b["entrainement"]["radio"]:
-        pour_moi = m["texte"].startswith(("PC Org de ", "PRIORITÉ, PRIORITÉ. PC Org de "))
+        pour_moi = m["texte"].startswith(("PC Org Sud-Est de ", "PRIORITÉ, PRIORITÉ. PC Org Sud-Est de "))
         assert pour_moi is m["pour_moi"], m["id"]
     txt = json.dumps(b, ensure_ascii=False)
+    # indicatif complet partout (decision du 23/11) : jamais « PC Org » seul
+    assert txt.count("PC Org") == txt.count("PC Org Sud-Est")
     for ancien in ("PC Est", "PC Orga", "PC Nord", "PC Sud", "PC Village"):
         assert ancien not in txt, ancien
 
@@ -94,26 +96,85 @@ def test_radio_affichages_cadence():
 def _meilleurs_choix_appel():
     out = []
     for appel in banque.charger()["appel"]:
-        for etape in appel["etapes"]:
-            best = max(etape["choix"], key=lambda c: c["points"])
+        for etape, best in correction.appel_ideal(appel):
             out.append({"type": "reponse", "question": etape["id"], "choix": best["id"], "t_ms": 1000})
     return out
 
 
+def _tous_les_chemins(appel):
+    """Tous les parcours possibles d'un appel : liste de [(etape, choix)]."""
+    etapes = {e["id"]: e for e in appel["etapes"]}
+    out = []
+
+    def descendre(e, acc, vues):
+        assert e["id"] not in vues, "boucle sur " + e["id"]
+        for ch in e["choix"]:
+            suite = ch.get("suite")
+            if suite:
+                assert suite in etapes, (e["id"], suite)
+                descendre(etapes[suite], acc + [(e, ch)], vues | {e["id"]})
+            else:
+                out.append(acc + [(e, ch)])
+    descendre(appel["etapes"][0], [], frozenset())
+    return out
+
+
 def test_appel_parfait():
-    assert correction.score("appel", _meilleurs_choix_appel(), 1.0)["score"] == 100
+    r = correction.score("appel", _meilleurs_choix_appel(), 1.0)
+    assert r["score"] == 100 and r["drapeaux"] == []
+    assert r["detail"]["max"] == 12  # 3 etapes ideales par appel, comme avant l'arbre
+
+
+def test_appel_arbre_coherent():
+    for appel in banque.charger()["appel"]:
+        ids = [c["id"] for e in appel["etapes"] for c in e["choix"]] + [e["id"] for e in appel["etapes"]]
+        assert len(ids) == len(set(ids))
+        chemins = _tous_les_chemins(appel)
+        ideal = [(e["id"], c["id"]) for e, c in correction.appel_ideal(appel)]
+        maxi = sum(c["points"] for _, c in correction.appel_ideal(appel))
+        assert maxi == 2 * len(ideal)
+        atteintes = set()
+        for ch in chemins:
+            atteintes.update(e["id"] for e, _ in ch)
+            pts = sum(c["points"] for _, c in ch)
+            if [(e["id"], c["id"]) for e, c in ch] != ideal:
+                assert pts < maxi, ch  # aucun detour ne vaut le chemin ideal
+        # toutes les etapes sont atteignables
+        assert atteintes == {e["id"] for e in appel["etapes"]}
 
 
 def test_appel_mixte():
     actions = [
-        {"type": "reponse", "question": "a1s1", "choix": "a1s1c2", "t_ms": 1},  # 1
-        {"type": "reponse", "question": "a1s2", "choix": "a1s2c1", "t_ms": 2},  # 2
-        {"type": "reponse", "question": "a1s3", "choix": "a1s3c3", "t_ms": 3},  # 0
-        {"type": "reponse", "question": "a2s1", "choix": "a2s1c1", "t_ms": 4},  # 2
-        {"type": "reponse", "question": "a2s1", "choix": "a2s1c3", "t_ms": 5},  # doublon, ignore
+        {"type": "reponse", "question": "a1s1", "choix": "a1s1c2", "t_ms": 1},  # 1 (nom d'abord)
+        {"type": "reponse", "question": "a1r1", "choix": "a1r1c1", "t_ms": 2},  # 0,5 (rattrapage)
+        {"type": "reponse", "question": "a1s2", "choix": "a1s2c1", "t_ms": 3},  # 2
+        {"type": "reponse", "question": "a1s3", "choix": "a1s3c3", "t_ms": 4},  # 0 (patrouille)
+        {"type": "reponse", "question": "a1r6", "choix": "a1r6c1", "t_ms": 5},  # 0,5
+        {"type": "reponse", "question": "a2s1", "choix": "a2s1c1", "t_ms": 6},  # 2
+        {"type": "reponse", "question": "a2s1", "choix": "a2s1c3", "t_ms": 7},  # doublon, ignore
     ]
     r = correction.score("appel", actions, 1.0)
-    assert r["score"] == 42  # 5 / 12 * 100 = 41.67
+    assert r["score"] == 50  # 6 / 12
+    assert r["detail"]["chemins"] == {"a1": ["a1s1", "a1r1", "a1s2", "a1s3", "a1r6"], "a2": ["a2s1"]}
+
+
+def test_appel_reponse_hors_chemin_ignoree():
+    # a1s1c1 mene a a1s2 : une reponse a a1r1 (branche non suivie) ne compte pas
+    actions = [{"type": "reponse", "question": "a1s1", "choix": "a1s1c1", "t_ms": 1},
+               {"type": "reponse", "question": "a1r1", "choix": "a1r1c1", "t_ms": 2}]
+    r = correction.score("appel", actions, 1.0)
+    assert r["detail"]["points"] == 2 and r["detail"]["chemins"]["a1"] == ["a1s1"]
+    assert "action_inconnue" in r["drapeaux"]
+
+
+def test_appel_fin_anticipee():
+    # « je vous rappelle dans cinq minutes » clot l'appel : 2 + 2 + 0 sur 6
+    actions = [{"type": "reponse", "question": q, "choix": c, "t_ms": k}
+               for k, (q, c) in enumerate((("a1s1", "a1s1c1"), ("a1s2", "a1s2c1"), ("a1s3", "a1s3c4")))]
+    r = correction.score("appel", actions, 1.0)
+    assert r["detail"]["points"] == 4 and r["drapeaux"] == []
+    fin = next(c for e in banque.charger()["appel"][0]["etapes"] for c in e["choix"] if c["id"] == "a1s3c4")
+    assert "suite" not in fin and fin["reaction"]
 
 
 # ---------------------------------------------------------------- main courante
@@ -140,8 +201,10 @@ def test_mc_mixte():
 
 # Journal glouton de la maquette (voir test_rejeu_glouton) : chaque incident est
 # engage a son ouverture, tous les moyens du bon type sont alors libres.
-GLOUTON = [("I1", "P1", 2000), ("I2", "T1", 10000), ("I3", "S1", 20000), ("I4", "M1", 30000),
-           ("I5", "P1", 40000), ("I6", "S1", 50000), ("I7", "T1", 60000), ("I8", "P1", 68000)]
+# Journal ideal : le moyen admissible le plus proche a l'ouverture de chaque incident ;
+# I6 (enfant blesse) pendant l'indisponibilite de Secours 1 : Patrouille 1 en relais.
+GLOUTON = [("I1", "P2", 2000), ("I2", "T1", 10000), ("I3", "S1", 20000), ("I4", "M1", 30000),
+           ("I5", "P2", 40000), ("I6", "P1", 50000), ("I7", "T1", 60000), ("I8", "P2", 68000)]
 
 
 def _glouton():

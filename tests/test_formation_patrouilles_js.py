@@ -96,6 +96,12 @@ def _cas():
     cas.append({"coef": 1.0, "actions": [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": t}]})
     cas.append({"coef": 1.0, "actions": [{"type": "engager", "moyen": "P2", "incident": "I1", "t_ms": 32000}]})
     cas.append({"coef": 1.33, "actions": [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": 32000 * 1.33 - 1}]})
+    # Relais : patrouille sur l'enfant blesse pendant l'indisponibilite de Secours 1, et juste avant
+    for coef in (1.0, 1.33):
+        for t in (43999, 44000, 51000):
+            cas.append({"coef": coef, "actions": [
+                {"type": "engager", "moyen": "P2", "incident": "I6", "t_ms": t * coef},
+                {"type": "engager", "moyen": "S1", "incident": "I6", "t_ms": (t + 10) * coef}]})
     return cas
 
 
@@ -103,13 +109,16 @@ def test_moteur_js_identique_au_rejeu():
     cas = _cas()
     resultats = _node(_plan(), cas)
     assert len(resultats) == len(cas)
-    vus = {"traite": 0, "erreur": 0, "ignore": 0}
+    vus = {"traite": 0, "erreur": 0, "ignore": 0, "relais": 0, "pas_le_plus_proche": 0}
     for c, js in zip(cas, resultats):
         py = patrouilles.rejouer(c["actions"], c["coef"], incidents=c.get("incidents"))
-        for k in ("traites", "manques", "erreurs", "ignores"):
+        for k in ("traites", "manques", "erreurs", "ignores", "plus_proches"):
             assert js[k] == py[k], (k, c)
         for dj, dp in zip(js["detail"], py["detail_incidents"]):
             assert dj["id"] == dp["id"] and dj["statut"] == dp["statut"] and dj["moyen"] == dp["moyen"], c
+            assert dj["plus_proche"] == dp["plus_proche"] and dj["relais"] == dp["relais"], c
+            vus["relais"] += 1 if dp["relais"] and dp["statut"] == "traite" else 0
+            vus["pas_le_plus_proche"] += 1 if dp["plus_proche"] is False else 0
             if dp["arrivee_ms"] is not None:
                 assert abs(dj["arrivee"] - dp["arrivee_ms"]) <= 0.5
         vus["traite"] += py["traites"]

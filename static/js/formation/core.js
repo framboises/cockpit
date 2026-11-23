@@ -339,6 +339,16 @@
   ];
   var EPREUVES = ["radio", "appel", "mc", "patrouilles", "acces", "logique", "situations"];
 
+  // Rappel permanent (texte fixe, aucune donnee) : qui est qui sur le canal Sud-Est.
+  var QUI_FAIT_QUOI = "<details class=\"qfq\" open><summary>Qui fait quoi</summary><ul>" +
+    "<li><b>Vous</b> : PC Org Sud-Est, l'opérateur du PC Organisation sur le canal Sud-Est.</li>" +
+    "<li><b>Patrouille</b> 1, 2, 3… : sécurité (bagarre, intrusion, personne agressive).</li>" +
+    "<li><b>Tango</b> 1, 2… : technique (barrière, éclairage, électricité).</li>" +
+    "<li><b>Secours</b> 1, 2… : blessés, malaises.</li>" +
+    "<li><b>Moto</b> 1, 2… : circulation, parkings.</li>" +
+    "<li><b>Placiers du Houx</b>, <b>Accueil porte 9</b>, <b>Sécurité camping</b>, <b>Accueil tribune</b> : " +
+    "équipes de terrain du secteur Sud-Est. Elles aussi vous appellent.</li></ul></details>";
+
   var stage = null, etat = null, courant = null, avisMontre = false;
 
   function etape(id) {
@@ -383,7 +393,8 @@
     var horloge = document.getElementById("f-horloge");
     if (horloge && g.h) horloge.textContent = g.h;
     dessinerNav();
-    stage.innerHTML = "<div id=\"f-tete\"></div><div id=\"f-corps\"></div>";
+    var aide = id === "brief" || EPREUVES.indexOf(id) >= 0 ? QUI_FAIT_QUOI : "";
+    stage.innerHTML = "<div id=\"f-tete\"></div>" + aide + "<div id=\"f-corps\"></div>";
     window.scrollTo(0, 0);
     return document.getElementById("f-corps");
   }
@@ -545,11 +556,10 @@
     corps.innerHTML =
       "<div class=\"rules\"><h3>Votre poste cette nuit</h3><ul>" +
       "<li>Vous êtes l'opérateur Sud-Est du PC Organisation, sur le canal Sud-Est. Votre indicatif radio : " +
-      "<b>PC Org</b>. Vous parlez par radio aux équipes de terrain.</li>" +
-      "<li>Un message radio commence toujours par le destinataire, puis l'émetteur : « PC Org de Patrouille 2 » " +
-      "veut dire que Patrouille 2 appelle le PC Org.</li>" +
-      "<li>Les moyens : <b>Patrouilles</b> (sécurité), <b>Tango</b> (technique), <b>Secours</b> (blessés, " +
-      "malaises), <b>Moto</b> (circulation, parkings).</li>" +
+      "<b>PC Org Sud-Est</b>. Vous parlez par radio aux équipes de terrain.</li>" +
+      "<li>Un message radio commence toujours par le destinataire, puis l'émetteur : « PC Org Sud-Est de " +
+      "Patrouille 2 » veut dire que Patrouille 2 vous appelle.</li>" +
+      "<li>Qui fait quoi : rappelé en haut de chaque épreuve, inutile de l'apprendre par cœur.</li>" +
       "<li>Une personne qui ne répond plus est toujours une urgence vitale.</li></ul></div>" +
       "<div class=\"rules\"><h3>Avant de commencer</h3><ul>" +
       "<li>Toutes les règles sont rappelées à chaque épreuve : aucune connaissance du site ni expérience " +

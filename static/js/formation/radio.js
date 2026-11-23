@@ -21,10 +21,10 @@
   function regles(coef) {
     return "<div class=\"rules\"><h3>Règles</h3><ul>" +
       "<li>Vous êtes l'opérateur Sud-Est du PC Organisation, sur le canal Sud-Est. Votre indicatif radio : " +
-      "<b>PC Org</b>.</li>" +
-      "<li>Un message radio commence toujours par le destinataire, puis l'émetteur : « PC Org de Patrouille 2 » " +
-      "veut dire que Patrouille 2 appelle le PC Org. Prenez uniquement les messages qui commencent par " +
-      "« PC Org de… ».</li>" +
+      "<b>PC Org Sud-Est</b>.</li>" +
+      "<li>Un message radio commence toujours par le destinataire, puis l'émetteur : « PC Org Sud-Est de " +
+      "Patrouille 2 » veut dire que Patrouille 2 vous appelle. Prenez uniquement les messages qui commencent " +
+      "par « PC Org Sud-Est de… », quelle que soit l'équipe qui appelle.</li>" +
       "<li>Pour prendre un message : bouton <b>Je prends</b> ou barre d'espace.</li>" +
       "<li>Un message qui ne vous est pas adressé : ne faites rien. C'est le silence radio.</li>" +
       "<li>Un message <b>PRIORITÉ</b> pour vous doit être pris en moins de " + F.secondes(SEUIL_PRIO / 1000 * coef) +
@@ -34,7 +34,7 @@
   // Deroule le canal dans `el`. opts : {t0, groupe, envoyer(action)|null, fin()}
   function canal(el, messages, coef, opts) {
     var g = opts.groupe, t0 = opts.t0, h = horaires(messages), pris = {};
-    el.innerHTML = "<div class=\"radio\"><div class=\"radio-top\"><span>CANAL SUD-EST · PC ORG</span>" +
+    el.innerHTML = "<div class=\"radio\"><div class=\"radio-top\"><span>CANAL SUD-EST · VOUS : PC ORG SUD-EST</span>" +
       "<div class=\"wave\" aria-hidden=\"true\">" + new Array(15).join("<i></i>") + "</div></div>" +
       "<div class=\"live\" aria-live=\"polite\">Écoute du canal…</div>" +
       "<button class=\"take\" type=\"button\">Je prends</button><ul class=\"log\"></ul></div>";
@@ -150,7 +150,7 @@
       entrainement(el.lastChild, coef);
     },
     jouer: function (el, enonce, coef, fini) {
-      F.entete("Vous êtes PC Org, sur le canal Sud-Est.", true);
+      F.entete("Vous êtes PC Org Sud-Est. Prenez les messages qui commencent par « PC Org Sud-Est de… ».", true);
       var g = F.groupe();
       var total = canal(el, enonce.messages, coef, {
         t0: F.t0, groupe: g, fin: fini,

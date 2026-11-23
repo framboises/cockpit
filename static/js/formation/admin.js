@@ -416,7 +416,8 @@
     function choix(ch) {
       return el("ul", null, (ch || []).map(function (x) {
         var k = c[x.id] || {};
-        return el("li", null, [x.texte, k.points !== undefined ? el("span", {"class": "fa-tag", text: k.points + " pt"}) : null]);
+        return el("li", null, [x.texte, k.points !== undefined ? el("span", {"class": "fa-tag", text: k.points + " pt"}) : null,
+          ep === "appel" ? el("span", {"class": "fa-muted", text: x.suite ? " → " + x.suite : " → fin de l'appel"}) : null]);
       }));
     }
     if (ep === "radio") {

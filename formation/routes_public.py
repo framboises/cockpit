@@ -172,6 +172,23 @@ def page_test():
 
 # ---------------------------------------------------------------- API
 
+def _rejouer_si_illimite(db, cand, now):
+    """Candidat fictif avec `essais_illimites` (recette par l'equipe) : a la
+    connexion, une tentative close (terminee / interrompue) est reinitialisee,
+    journalisee, et le candidat repart de zero. Jamais pour un vrai candidat."""
+    if not (cand.get("fictif") is True and cand.get("essais_illimites") is True):
+        return False
+    cid = str(cand["_id"])
+    t = tentative.active(db, cid)
+    if t is None or t.get("statut") not in ("terminee", "interrompue"):
+        return False
+    try:
+        tentative.reinitialiser(db, cid, "essais illimites (candidat fictif)", "systeme", now)
+    except ValueError:
+        pass  # deja reinitialisee par une connexion concurrente
+    return True
+
+
 @formation_bp.post("/api/connexion")
 def api_connexion():
     d = _corps_json()
@@ -185,11 +202,16 @@ def api_connexion():
         return _err(429, message=acces.MESSAGE_BLOQUE)
     if cand is None:
         return _err(401, message=acces.MESSAGE_GENERIQUE)
+    _rejouer_si_illimite(db, cand, now)
     fenetre = acces.etat_fenetre(store.reglages(db), now)
     if fenetre != "ouvert" and tentative.active(db, str(cand["_id"])) is None:
         return _err(403, fenetre=fenetre)
     try:
         etat, jeton = _nouvelle_session(db, cand, now)
+        # la connexion peut clore une tentative en cours (plus d'une heure) : un fictif
+        # en essais illimites repart alors de zero tout de suite, pas a la connexion suivante
+        if _rejouer_si_illimite(db, cand, now):
+            etat, jeton = _nouvelle_session(db, cand, now)
     except RuntimeError:
         return _err(503, error="reessayez")
     reponse = jsonify({"ok": True, "etat": etat})

@@ -21,6 +21,7 @@ Cas d'usage : environ 555 candidats operateurs du PC Organisation passent **une 
 - **Chaque chargement de `/test` tourne la session** (nouveau `sid`, cookie reemis, ancien onglet en 401 `session`) : un second onglet ou un rechargement clot l'epreuve en cours. `/api/etat` ne tourne jamais la session. **Prechargement / prerendu** (`Sec-Purpose`, `Purpose`) ignores : 204, aucune rotation.
 - Fenetre fermee : seul un nouveau depart est refuse, une tentative en cours continue (dans l'heure).
 - Reinitialisation (DOA, motif obligatoire, journalisee) : l'ancienne tentative passe `reinitialisee`, le candidat repart de zero.
+- Exception de recette : un candidat `fictif` avec `essais_illimites: true` voit sa tentative close (`terminee` / `interrompue`) reinitialisee a chaque connexion (`routes_public._rejouer_si_illimite`, motif « essais illimites (candidat fictif) », auteur `systeme`). Jamais sur un vrai candidat. En prod depuis le 23/11 : ludo.arnault@gmail.com (4 chiffres 3641).
 - Chaque transition est un `find_one_and_update` conditionne par l'etat lu : deux requetes concurrentes ne font pas deux transitions.
 
 ### Contrat d'API
@@ -34,9 +35,10 @@ Admin (`/api/formation/admin/...`, admin) : `etat`, `candidats`, `tentative/<id>
 Le serveur rejoue le journal du navigateur ; il ne lit jamais un score envoye. Temps de jeu = `t_ms / coef` partout (coef 1,33 avec amenagement : cadence radio, seuil PRIORITE 2 s, echeances des incidents, 5 s par badge, 4 min de logique). Question sans reponse = 0 ; reponse en double : la premiere fait foi (drapeau `doublon`) ; action reemise (meme `aid`) : seule la premiere compte. Drapeaux (`horodatage_incoherent`, `action_inconnue`, `doublon`) a lire dans le detail d'une tentative, jamais d'elimination.
 
 - radio : `(pris a raison - pris a tort) / nb pour moi * 100 + 5 par PRIORITE prise en <= 2 s`, prise valable seulement pendant l'affichage du message.
-- 38 17 et mises en situation : points 2/1/0, `points / (2 * nb) * 100`. Main courante : 1 point par champ juste sur 4. Logique : bonnes / nb, au-dela de 4 min ignore.
+- 38 17 : **conversation en arbre** (23/11). Chaque choix porte `suite` (etape suivante) ou clot l'appel sur la `reaction` de l'appelant (fin d'appel affichee ensuite) ; une mauvaise reponse n'enchaine jamais comme si elle etait bonne. Etapes principales `aNsK` en 2/1/0, etapes de detour `aNrK` a 0,5 au mieux, une etape qui remplace la decision finale (`a1r4`, `a2r3`) garde le bareme 2/1/0. Score = points du chemin suivi (`correction.appel_chemin`) / (2 x etapes du chemin ideal) ; une reponse hors du chemin suivi est ignoree (`action_inconnue`). `test_appel_arbre_coherent` enumere tous les chemins : aucun detour n'egale le chemin ideal, aucune boucle, toute etape atteignable. A rejouer apres toute modification de la banque.
+- Mises en situation : points 2/1/0, `points / (2 * nb) * 100`. Main courante : 1 point par champ juste sur 4. Logique : bonnes / nb, au-dela de 4 min ignore.
 - acces : decision par badge, fausse si apres 5 s (x coef) depuis la reference (decision du badge precedent) ; bonnes / 10.
-- patrouilles : **rejeu deterministe en Python** (`patrouilles.py`, meme plus court chemin que le client, 0,43 s par case, 4 s sur place) ; `(traites - 0,5 * erreurs) / nb * 100`. **Test de parite** `tests/test_formation_patrouilles_js.py` : le moteur JS (`static/js/formation/patrouilles.js`) et le rejeu rendent les memes resultats sur les memes journaux. Toute modification de l'un exige de rejouer ce test.
+- patrouilles : **rejeu deterministe en Python** (`patrouilles.py`, meme plus court chemin que le client, 0,43 s par case, 4 s sur place) ; `(points - 0,5 * erreurs) / nb * 100`, un incident traite valant 1 par le moyen admissible **le plus proche** (plus court chemin parmi les moyens libres du bon type a l'instant de l'envoi), `POINTS_PAS_LE_PLUS_PROCHE` (0,5) sinon. Fenetres `indispo` d'un moyen dans la banque (Secours 1 « appele sur une autre intervention » de 44 a 100 s, annonce sur le plan) : moyen non engageable. **Relais** (`TYPE_RELAIS`) : un incident Secours sans aucun Secours libre admet une Patrouille (I6, enfant blesse du Village, teste si le candidat reagit) ; Secours libre, la patrouille reste une erreur. **Test de parite** `tests/test_formation_patrouilles_js.py` : le moteur JS (`static/js/formation/patrouilles.js`) et le rejeu rendent les memes resultats sur les memes journaux. Toute modification de l'un exige de rejouer ce test.
 - Score global (`tentative.score_global`) = moyenne ponderee des epreuves terminees ou abandonnees (ponderations des reglages, 1 partout). Tentative close (`terminee` ou `interrompue`) : les epreuves jamais jouees comptent **0** avec leur poids (un candidat interrompu ne passe pas devant un candidat complet) ; tentative en cours : epreuves jouees seules.
 
 ### Campagne d'e-mails (`mailer.py`)
@@ -72,7 +74,9 @@ Recette : `python scripts/formation_fictifs.py creer` (5 fictifs `candidat1@test
 
 ### Indicatif radio
 
-Decision du DOA (22/11) : le candidat est **PC Org**, operateur Sud-Est du PC Organisation sur le **canal Sud-Est** (bandeau « CANAL SUD-EST · PC ORG »). Jamais « PC Est », « PC Orga », « PC Nord / Sud / Village ». Un message radio commence par le destinataire puis l'emetteur : seuls ceux qui commencent par « PC Org de... » sont pour lui ; les echanges entre equipes de terrain et les messages emis par le PC Org ne le sont pas.
+Decision du 23/11 (remplace celle du 22/11, « PC Org » seul) : le candidat est **PC Org Sud-Est**, operateur Sud-Est du PC Organisation sur le **canal Sud-Est** (bandeau « CANAL SUD-EST · VOUS : PC ORG SUD-EST »). Motif : les candidats ne savaient pas que Placiers du Houx ou Accueil porte 9 appartiennent au Sud-Est. Jamais « PC Org » seul (`test_radio_indicatif_pc_org`), ni « PC Est », « PC Orga », « PC Nord / Sud / Village ». Un message radio commence par le destinataire puis l'emetteur : seuls ceux qui commencent par « PC Org Sud-Est de... » sont pour lui ; les echanges entre equipes de terrain et les messages emis par le PC Org Sud-Est ne le sont pas.
+
+Rappel **Qui fait quoi** (`QUI_FAIT_QUOI` de `core.js`) en haut de la prise de poste et de chaque epreuve : Patrouille, Tango, Secours, Moto et les equipes de terrain du secteur. Un nouvel indicatif dans la banque doit y figurer.
 
 ### Pieges
 

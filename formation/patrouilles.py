@@ -18,13 +18,19 @@ au temps ecoule et non par accumulation de setInterval) :
     attribue -> ignore, drapeau ;
   * moyen inconnu -> ignore, drapeau ;
   * aucun chemin -> ignore, drapeau `chemin_impossible` ;
-  * moyen encore occupe (t < libre_a) -> ignore, drapeau `moyen_occupe` ;
+  * moyen encore occupe (t < libre_a) ou indisponible (fenetre `indispo` du
+    scenario, en secondes, `de <= t/1000 < a`) -> ignore, drapeau `moyen_occupe` ;
   * type du moyen different du type de l'incident -> une erreur, rien d'autre
-    (l'incident reste ouvert, le moyen ne bouge pas) ;
+    (l'incident reste ouvert, le moyen ne bouge pas). Exception : incident
+    `Secours` sans aucun moyen Secours libre a t -> une Patrouille (Securite)
+    est acceptee en premier intervenant (`relais`) ;
   * sinon l'incident est attribue : `arrivee = t + (cases du chemin) * PAS_MS`,
     traite si `arrivee <= D_i`, le moyen est sur place (`pos = incident`) et
-    libre a `arrivee + SUR_PLACE_MS`.
+    libre a `arrivee + SUR_PLACE_MS`. `plus_proche` : aucun moyen admissible
+    (meme regle de type, libre a t) n'avait un chemin plus court.
 - Incident jamais traite (pas attribue, ou attribue mais arrive trop tard) : manque.
+- Points : 1 par incident traite par le moyen le plus proche, POINTS_PAS_LE_PLUS_PROCHE
+  sinon (correction.py : (points - 0.5 * erreurs) / nb * 100).
 """
 from collections import deque
 from functools import lru_cache
@@ -33,6 +39,8 @@ from formation import banque
 
 PAS_MS = 430
 SUR_PLACE_MS = 4000
+POINTS_PAS_LE_PLUS_PROCHE = 0.5
+TYPE_RELAIS = {"Secours": "Sécurité"}  # incident sans moyen libre de son type -> type admis en relais
 
 _VOISINS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
@@ -73,14 +81,33 @@ def chemin(a, b):
     return None
 
 
+def libre(u, t):
+    """Moyen libre au temps de jeu `t` (ms) : fin de sa mission et hors fenetre `indispo`."""
+    if t < u["libre_a"]:
+        return False
+    return not any(de <= t < a for de, a in u["indispo"])
+
+
+def type_admis(units, type_incident, t):
+    """Type de moyen attendu sur l'incident a `t` : le sien, ou le type de relais
+    (Patrouille sur un Secours) si aucun moyen de son type n'est libre."""
+    relais = TYPE_RELAIS.get(type_incident)
+    if relais and not any(v["type"] == type_incident and libre(v, t) for v in units.values()):
+        return relais
+    return type_incident
+
+
 def rejouer(actions, coef, incidents=None):
     """Rejoue le journal des engagements. `incidents` remplace ceux de la banque
     (entrainement). Retourne {traites, manques, erreurs, ignores,
     detail_incidents, drapeaux}."""
     p = banque._banque()["patrouilles"]
     incs = {i["id"]: i for i in (incidents if incidents is not None else p["INCIDENTS"])}
-    units = {u["id"]: {"type": u["type"], "pos": tuple(u["pos"]), "libre_a": 0.0} for u in p["UNITS"]}
-    etat = {iid: {"id": iid, "statut": "manque", "moyen": None, "arrivee_ms": None} for iid in incs}
+    units = {u["id"]: {"type": u["type"], "pos": tuple(u["pos"]), "libre_a": 0.0,
+                       "indispo": [(w["de"] * 1000, w["a"] * 1000) for w in u.get("indispo") or []]}
+             for u in p["UNITS"]}
+    etat = {iid: {"id": iid, "statut": "manque", "moyen": None, "arrivee_ms": None,
+                  "plus_proche": None, "relais": False} for iid in incs}
     erreurs = ignores = 0
     drapeaux = []
 
@@ -116,11 +143,12 @@ def rejouer(actions, coef, incidents=None):
             ignores += 1
             drapeau("incident_deja_attribue")
             continue
-        if t < u["libre_a"]:
+        if not libre(u, t):
             ignores += 1
             drapeau("moyen_occupe")
             continue
-        if u["type"] != inc["type"]:
+        admis = type_admis(units, inc["type"], t)
+        if u["type"] != admis:
             erreurs += 1
             continue
         trajet = chemin(u["pos"], inc["pos"])
@@ -128,9 +156,15 @@ def rejouer(actions, coef, incidents=None):
             ignores += 1
             drapeau("chemin_impossible")
             continue
-        arrivee = t + (len(trajet) - 1) * PAS_MS
+        cases = len(trajet) - 1
+        meilleur = min((len(c) - 1 for c in (chemin(v["pos"], inc["pos"]) for v in units.values()
+                                             if v["type"] == admis and libre(v, t)) if c is not None),
+                       default=cases)
+        arrivee = t + cases * PAS_MS
         e["moyen"] = uid
         e["arrivee_ms"] = round(arrivee)
+        e["plus_proche"] = cases <= meilleur
+        e["relais"] = admis != inc["type"]
         if arrivee <= ech:
             e["statut"] = "traite"
         u["pos"] = tuple(inc["pos"])
@@ -138,7 +172,10 @@ def rejouer(actions, coef, incidents=None):
 
     detail = [etat[iid] for iid in incs]
     traites = sum(1 for d in detail if d["statut"] == "traite")
+    plus_proches = sum(1 for d in detail if d["statut"] == "traite" and d["plus_proche"])
     return {
+        "points": plus_proches + (traites - plus_proches) * POINTS_PAS_LE_PLUS_PROCHE,
+        "plus_proches": plus_proches,
         "traites": traites,
         "manques": len(detail) - traites,
         "erreurs": erreurs,

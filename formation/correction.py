@@ -16,10 +16,13 @@ Math.round :
   cadence) ; sinon ignoree, drapeau `horodatage_incoherent`. Une prise par
   message. `(pris_a_raison - pris_a_tort) / nb_pour_moi * 100 + 5 * priorites_rapides`,
   priorite rapide si `t - affichage <= RADIO_SEUIL_PRIO`.
-- appel : `{question: etape, choix}` ; points / (2 * nb_etapes) * 100.
+- appel : `{question: etape, choix}`, conversation en arbre (`suite` du choix,
+  `reaction` de l'appelant en fin d'appel) ; points du chemin suivi / (2 * etapes
+  du chemin ideal) * 100. Etapes de detour : 0,5 au mieux.
 - mc : `{question: fiche, cat, zone, heure, moyen}` ; 1 point par champ egal
   (apres strip) / (4 * nb_fiches) * 100.
-- patrouilles : rejeu `patrouilles.rejouer` ; (traites - 0.5 * erreurs) / nb * 100.
+- patrouilles : rejeu `patrouilles.rejouer` ; (points - 0.5 * erreurs) / nb * 100, un
+  incident traite valant 1 par le moyen le plus proche, 0.5 par un autre.
 - acces : `{type: "decision", badge, decision: 1|0}` ; `badge_affiche` est
   purement informatif (le client pourrait le renvoyer pour remettre a zero ses
   5 s). Les badges passent dans l'ordre fixe de la banque : la reference du
@@ -205,10 +208,54 @@ def _points_choix(questions, actions, coef, drapeaux):
     return pts, repondues
 
 
+def appel_chemin(appel, choisir):
+    """Parcours d'un appel en arbre : part de la premiere etape, suit `suite` du
+    choix rendu par `choisir(etape)` (dict de choix ou None = arret). Rend la
+    liste des (etape, choix). Une etape deja vue arrete le parcours (boucle)."""
+    etapes = {e["id"]: e for e in appel["etapes"]}
+    cur, vues, out = appel["etapes"][0] if appel["etapes"] else None, set(), []
+    while cur is not None and cur["id"] not in vues:
+        vues.add(cur["id"])
+        ch = choisir(cur)
+        if ch is None:
+            break
+        out.append((cur, ch))
+        cur = etapes.get(ch.get("suite")) if ch.get("suite") else None
+    return out
+
+
+def appel_ideal(appel):
+    """Chemin des meilleurs choix (le plus de points, premier en cas d'egalite)."""
+    return appel_chemin(appel, lambda e: max(e["choix"], key=lambda c: c["points"]))
+
+
 def _appel(actions, coef, drapeaux):
-    etapes = {e["id"]: e["choix"] for ap in banque._banque()["appel"] for e in ap["etapes"]}
-    pts, rep = _points_choix(etapes, actions, coef, drapeaux)
-    return pts / (2 * len(etapes)) * 100, {"points": pts, "max": 2 * len(etapes), "repondues": rep}
+    """Appels en arbre : seules comptent les reponses du chemin suivi (une etape
+    hors du chemin : drapeau `action_inconnue`). Points du chemin / 2 points par
+    etape du chemin ideal ; un detour ne rapporte jamais autant que le chemin ideal."""
+    vues, _ = _premieres_reponses(actions, coef, drapeaux)
+    pts, rep, maxi, chemins, suivies = 0, 0, 0, {}, set()
+    for ap in banque._banque()["appel"]:
+        maxi += 2 * len(appel_ideal(ap))
+
+        def choisir(e):
+            a = vues.get(e["id"])
+            if a is None:
+                return None
+            ch = next((c for c in e["choix"] if c["id"] == _id(a, "choix")), None)
+            if ch is None:
+                _ajoute(drapeaux, "action_inconnue")
+            return ch
+
+        parcours = appel_chemin(ap, choisir)
+        for e, ch in parcours:
+            suivies.add(e["id"])
+            pts += ch["points"]
+            rep += 1
+        chemins[ap["id"]] = [e["id"] for e, _ in parcours]
+    if any(q not in suivies for q in vues):
+        _ajoute(drapeaux, "action_inconnue")
+    return pts / maxi * 100, {"points": pts, "max": maxi, "repondues": rep, "chemins": chemins}
 
 
 def _situations(actions, coef, drapeaux):
@@ -240,10 +287,11 @@ def _mc(actions, coef, drapeaux):
 def _patrouilles(actions, coef, drapeaux):
     r = patrouilles.rejouer(actions, coef)
     nb = len(r["detail_incidents"])
-    detail = {k: r[k] for k in ("traites", "manques", "erreurs", "ignores", "detail_incidents")}
+    detail = {k: r[k] for k in ("points", "plus_proches", "traites", "manques", "erreurs", "ignores",
+                                "detail_incidents")}
     for d in r["drapeaux"]:
         _ajoute(drapeaux, d)
-    return (r["traites"] - 0.5 * r["erreurs"]) / nb * 100, detail
+    return (r["points"] - 0.5 * r["erreurs"]) / nb * 100, detail
 
 
 def _acces(actions, coef, drapeaux):

@@ -296,6 +296,40 @@ def test_fenetre_fermee_tentative_en_cours_continue(app, db):
     assert c2.post("/api/epreuve/appel/debut").status_code == 200
 
 
+def _illimite(db):
+    db["candidats"].update_many({}, {"$set": {"fictif": True, "essais_illimites": True}})
+
+
+def test_fictif_illimite_repart_apres_tentative_terminee(app, db):
+    c = _demarre(app, db)
+    _illimite(db)
+    for e in store.EPREUVES:
+        assert c.post("/api/epreuve/%s/debut" % e).status_code == 200
+        assert c.post("/api/epreuve/%s/fin" % e).status_code == 200
+    r = Client(app, ip="10.0.0.7").connexion()
+    assert r.status_code == 200 and r.get_json()["etat"]["statut"] == "non_commence"
+    assert [t["statut"] for t in db["tentatives"].find()] == ["reinitialisee"]
+
+
+def test_fictif_illimite_repart_apres_plus_d_une_heure(app, db):
+    # la connexion clot elle-meme la tentative (plus d'une heure) : remise a zero dans la foulee
+    _demarre(app, db)
+    _illimite(db)
+    db["tentatives"].update_many({}, {"$set": {"debut": datetime.now(timezone.utc) - timedelta(hours=2)}})
+    r = Client(app, ip="10.0.0.6").connexion()
+    assert r.status_code == 200 and r.get_json()["etat"]["statut"] == "non_commence"
+    assert [t["statut"] for t in db["tentatives"].find()] == ["reinitialisee"]
+
+
+def test_vrai_candidat_jamais_illimite(app, db):
+    _demarre(app, db)
+    db["candidats"].update_many({}, {"$set": {"essais_illimites": True}})  # sans fictif : ignore
+    db["tentatives"].update_many({}, {"$set": {"debut": datetime.now(timezone.utc) - timedelta(hours=2)}})
+    r = Client(app, ip="10.0.0.5").connexion()
+    assert r.get_json()["etat"]["statut"] == "interrompue"
+    assert [t["statut"] for t in db["tentatives"].find()] == ["interrompue"]
+
+
 def test_tentative_terminee_connexion_hors_fenetre(app, db):
     c = _demarre(app, db)
     for e in store.EPREUVES:

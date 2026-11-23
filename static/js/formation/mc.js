@@ -35,7 +35,7 @@
         if (k >= fiches.length) { fini(); return; }
         var m = fiches[k], envoye = false, averti = false;
         F.entete("Message " + (k + 1) + " / " + fiches.length + ".");
-        el.innerHTML = "<div class=\"msg\"><span class=\"from\">" + esc(m.de) + " → PC Org</span>" +
+        el.innerHTML = "<div class=\"msg\"><span class=\"from\">" + esc(m.de) + " → PC Org Sud-Est</span>" +
           "<span class=\"ty typing\"></span></div>" +
           "<form class=\"mc\" autocomplete=\"off\" novalidate>" +
           "<label>Catégorie<select name=\"cat\">" + options(noms) + "</select></label>" +

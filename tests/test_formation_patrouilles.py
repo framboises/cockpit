@@ -10,15 +10,23 @@ def _units():
     return banque.charger()["patrouilles"]["UNITS"]
 
 
+def _indispo(uid, t):
+    u = next(x for x in _units() if x["id"] == uid)
+    return any(w["de"] * 1000 <= t < w["a"] * 1000 for w in u.get("indispo") or [])
+
+
 def journal_glouton():
     """A l'ouverture de chaque incident, engager le premier moyen du bon type
-    (ordre de UNITS) des qu'il est libre, selon le modele du rejeu."""
+    (ordre de UNITS) des qu'il est libre, selon le modele du rejeu ; une Patrouille
+    sur un Secours quand aucun Secours n'est disponible."""
     pos = {u["id"]: tuple(u["pos"]) for u in _units()}
     libre = {u["id"]: 0 for u in _units()}
     actions = []
     for inc in _incidents():
         t_ouv, ech = inc["t"] * 1000, (inc["t"] + inc["dl"]) * 1000
-        cands = [u["id"] for u in _units() if u["type"] == inc["type"]]
+        cands = [u["id"] for u in _units() if u["type"] == inc["type"] and not _indispo(u["id"], t_ouv)]
+        if not cands and inc["type"] == "Secours":
+            cands = [u["id"] for u in _units() if u["type"] == "Sécurité"]
         uid = min(cands, key=lambda u: (max(libre[u], t_ouv), cands.index(u)))
         t = max(libre[uid], t_ouv)
         if t >= ech:
@@ -50,16 +58,53 @@ def test_rejeu_glouton():
     # Calcul a la main sur la maquette : chaque moyen du bon type est libre a
     # l'ouverture de chaque incident ; trajets les plus longs I4 (M1, 9 cases,
     # 3,87 s) et I6 (S1, 10 cases, 4,3 s), tous bien avant l'echeance.
+    # I6 (enfant blesse) : Secours 1 est en intervention hors plan de 44 a 100 s,
+    # la patrouille part en premier intervenant.
     assert [(a["incident"], a["moyen"], a["t_ms"]) for a in actions] == [
         ("I1", "P1", 2000), ("I2", "T1", 10000), ("I3", "S1", 20000), ("I4", "M1", 30000),
-        ("I5", "P1", 40000), ("I6", "S1", 50000), ("I7", "T1", 60000), ("I8", "P1", 68000)]
+        ("I5", "P1", 40000), ("I6", "P1", 50000), ("I7", "T1", 60000), ("I8", "P1", 68000)]
     r = patrouilles.rejouer(actions, 1.0)
     assert r["traites"] == 8
     assert r["manques"] == 0
     assert r["erreurs"] == 0
     assert r["ignores"] == 0
-    i4 = next(d for d in r["detail_incidents"] if d["id"] == "I4")
-    assert i4["arrivee_ms"] == 30000 + 9 * 430
+    d = {x["id"]: x for x in r["detail_incidents"]}
+    assert d["I4"]["arrivee_ms"] == 30000 + 9 * 430
+    assert d["I6"]["relais"] is True and d["I3"]["relais"] is False
+    # P1 n'est pas le plus proche de la rixe I1 (P2 : 5 cases contre 8)
+    assert d["I1"]["plus_proche"] is False
+    assert r["points"] == r["plus_proches"] + 0.5 * (8 - r["plus_proches"])
+
+
+def test_plus_proche_note():
+    p2 = [{"type": "engager", "moyen": "P2", "incident": "I1", "t_ms": 3000}]
+    p1 = [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": 3000}]
+    r2, r1 = patrouilles.rejouer(p2, 1.0), patrouilles.rejouer(p1, 1.0)
+    assert r2["traites"] == r1["traites"] == 1
+    assert r2["plus_proches"] == 1 and r2["points"] == 1
+    assert r1["plus_proches"] == 0 and r1["points"] == patrouilles.POINTS_PAS_LE_PLUS_PROCHE
+    # un moyen occupe ne compte pas : P2 parti sur I1, P1 est le plus proche disponible de I5
+    a = p2 + [{"type": "engager", "moyen": "P1", "incident": "I5", "t_ms": 41000}]
+    i5 = next(x for x in patrouilles.rejouer(a, 1.0)["detail_incidents"] if x["id"] == "I5")
+    assert i5["plus_proche"] is False  # P2 est revenu disponible a (1, 9), plus pres que P1 a (1, 1)
+
+
+def test_relais_patrouille_sur_secours():
+    i3 = {"type": "engager", "moyen": "P2", "incident": "I3", "t_ms": 21000}
+    # Secours 1 disponible : la patrouille sur un secours reste une erreur
+    r = patrouilles.rejouer([i3], 1.0)
+    assert r["erreurs"] == 1 and r["traites"] == 0
+    # Secours 1 indisponible (44-100 s) : la patrouille est admise sur I6
+    r = patrouilles.rejouer([{"type": "engager", "moyen": "P1", "incident": "I6", "t_ms": 51000}], 1.0)
+    assert r["erreurs"] == 0 and r["traites"] == 1
+    i6 = next(x for x in r["detail_incidents"] if x["id"] == "I6")
+    assert i6["relais"] is True and i6["plus_proche"] is True
+    # et Secours 1 ne peut pas etre engage pendant sa fenetre
+    r = patrouilles.rejouer([{"type": "engager", "moyen": "S1", "incident": "I6", "t_ms": 51000}], 1.0)
+    assert r["ignores"] == 1 and "moyen_occupe" in r["drapeaux"]
+    # Tango sur le secours, meme sans Secours libre : erreur
+    r = patrouilles.rejouer([{"type": "engager", "moyen": "T1", "incident": "I6", "t_ms": 51000}], 1.0)
+    assert r["erreurs"] == 1
 
 
 def test_mauvais_type_compte_erreur():

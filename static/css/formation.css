@@ -73,6 +73,11 @@ h2:focus{outline:none}
 .rules li{margin:2px 0}
 .rules p{margin:4px 0}
 .rules summary{cursor:pointer;color:var(--silver)}
+.qfq{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:8px 14px;margin:0 0 12px;font-size:.85rem}
+.qfq summary{cursor:pointer;font-size:.75rem;letter-spacing:.09em;text-transform:uppercase;color:var(--silver);font-weight:600}
+.qfq ul{margin:6px 0 0;padding-left:18px;columns:2 22rem;column-gap:24px}
+.qfq li{margin:2px 0;break-inside:avoid}
+.fin-appel{text-align:center;color:var(--muted);font-size:.8rem;margin:10px 0 0;letter-spacing:.04em}
 .btn{background:var(--accent-ink);border:0;border-radius:8px;padding:10px 18px;font-weight:600;color:#fff}
 .btn:hover:not(:disabled){background:var(--accent)}
 .btn:disabled{opacity:.45}

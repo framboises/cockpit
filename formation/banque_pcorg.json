@@ -1,10 +1,10 @@
 {
- "version": 1,
+ "version": 2,
  "source": "maquette test_pcorg.html (PC ORG REBOOT, 2026)",
  "radio": [
   {
    "id": "r01",
-   "texte": "PC Org de Patrouille 2 : en position porte 9, rien à signaler.",
+   "texte": "PC Org Sud-Est de Patrouille 2 : en position porte 9, rien à signaler.",
    "pour_moi": true,
    "priorite": false
   },
@@ -16,13 +16,13 @@
   },
   {
    "id": "r03",
-   "texte": "PC Org de Placier Houx : un véhicule bloque l'allée H, je demande une dépanneuse.",
+   "texte": "PC Org Sud-Est de Placiers du Houx : un véhicule bloque l'allée H, je demande une dépanneuse.",
    "pour_moi": true,
    "priorite": false
   },
   {
    "id": "r04",
-   "texte": "Patrouille 2 de PC Org : bien reçu, restez en position.",
+   "texte": "Patrouille 2 de PC Org Sud-Est : bien reçu, restez en position.",
    "pour_moi": false,
    "priorite": false
   },
@@ -34,7 +34,7 @@
   },
   {
    "id": "r06",
-   "texte": "PC Org de Accueil porte 9 : un groupe demande où partent les navettes.",
+   "texte": "PC Org Sud-Est de Accueil porte 9 : un groupe demande où partent les navettes.",
    "pour_moi": true,
    "priorite": false
   },
@@ -46,7 +46,7 @@
   },
   {
    "id": "r08",
-   "texte": "PRIORITÉ, PRIORITÉ. PC Org de Placier Houx : un barbecue a mis le feu à une tente, emplacement H40 !",
+   "texte": "PRIORITÉ, PRIORITÉ. PC Org Sud-Est de Placiers du Houx : un barbecue a mis le feu à une tente, emplacement H40 !",
    "pour_moi": true,
    "priorite": true
   },
@@ -58,19 +58,19 @@
   },
   {
    "id": "r10",
-   "texte": "Tango 1 de PC Org : intervention allée 12 annulée.",
+   "texte": "Tango 1 de PC Org Sud-Est : intervention allée 12 annulée.",
    "pour_moi": false,
    "priorite": false
   },
   {
    "id": "r11",
-   "texte": "PC Org de Tango 2 : panne d'éclairage rue des Sapins, je prends en charge.",
+   "texte": "PC Org Sud-Est de Tango 2 : panne d'éclairage rue des Sapins, je prends en charge.",
    "pour_moi": true,
    "priorite": false
   },
   {
    "id": "r12",
-   "texte": "PC Org de Patrouille 2 : personne en état d'ivresse au camping H, je reste avec elle.",
+   "texte": "PC Org Sud-Est de Patrouille 2 : personne en état d'ivresse au camping H, je reste avec elle.",
    "pour_moi": true,
    "priorite": false
   },
@@ -82,7 +82,7 @@
   },
   {
    "id": "r14",
-   "texte": "PC Org de Sécurité Camping : bagarre entre deux groupes, emplacement H12, je demande du renfort.",
+   "texte": "PC Org Sud-Est de Sécurité Camping : bagarre entre deux groupes, emplacement H12, je demande du renfort.",
    "pour_moi": true,
    "priorite": false
   }
@@ -99,17 +99,20 @@
       {
        "id": "a1s1c1",
        "texte": "Où êtes-vous exactement ?",
-       "points": 2
+       "points": 2,
+       "suite": "a1s2"
       },
       {
        "id": "a1s1c2",
        "texte": "Comment vous appelez-vous ?",
-       "points": 1
+       "points": 1,
+       "suite": "a1r1"
       },
       {
        "id": "a1s1c3",
        "texte": "Il a bu, à votre avis ?",
-       "points": 0
+       "points": 0,
+       "suite": "a1r2"
       }
      ]
     },
@@ -120,17 +123,20 @@
       {
        "id": "a1s2c1",
        "texte": "Est-ce qu'il vous répond quand vous lui parlez ?",
-       "points": 2
+       "points": 2,
+       "suite": "a1s3"
       },
       {
        "id": "a1s2c2",
        "texte": "Est-ce qu'il saigne ?",
-       "points": 1
+       "points": 1,
+       "suite": "a1r4"
       },
       {
        "id": "a1s2c3",
        "texte": "Depuis combien de temps êtes-vous là ?",
-       "points": 0
+       "points": 0,
+       "suite": "a1r5"
       }
      ]
     },
@@ -141,22 +147,146 @@
       {
        "id": "a1s3c1",
        "texte": "J'engage Secours 1 en priorité absolue et je reste en ligne avec vous.",
-       "points": 2
+       "points": 2,
+       "reaction": "D'accord, je reste à côté de lui… Ça y est, je vois les secouristes arriver !"
       },
       {
        "id": "a1s3c2",
        "texte": "J'engage Secours 1 et je raccroche pour libérer la ligne.",
-       "points": 1
+       "points": 1,
+       "reaction": "D'accord… Allô ? Il a raccroché… Je fais quoi, moi, en attendant ?"
       },
       {
        "id": "a1s3c3",
        "texte": "J'envoie une patrouille voir ce qui se passe.",
-       "points": 0
+       "points": 0,
+       "suite": "a1r6"
       },
       {
        "id": "a1s3c4",
        "texte": "Je note et je vous rappelle dans cinq minutes.",
-       "points": 0
+       "points": 0,
+       "reaction": "Cinq minutes ?! Mais il respire mal ! Allô ? Allô ?"
+      }
+     ]
+    },
+    {
+     "id": "a1r1",
+     "appelant": "Kévin… Mais on s'en fiche, il bouge plus, faut venir vite !",
+     "choix": [
+      {
+       "id": "a1r1c1",
+       "texte": "Vous avez raison. Où êtes-vous exactement ?",
+       "points": 0.5,
+       "suite": "a1s2"
+      },
+      {
+       "id": "a1r1c2",
+       "texte": "Calmez-vous, sinon je ne peux rien faire pour vous.",
+       "points": 0,
+       "suite": "a1r3"
+      }
+     ]
+    },
+    {
+     "id": "a1r2",
+     "appelant": "J'en sais rien, moi ! Il est par terre, il bouge plus, vous envoyez quelqu'un ou pas ?",
+     "choix": [
+      {
+       "id": "a1r2c1",
+       "texte": "Pardon. Dites-moi où vous êtes exactement.",
+       "points": 0.5,
+       "suite": "a1s2"
+      },
+      {
+       "id": "a1r2c2",
+       "texte": "S'il a bu, il va se réveiller. Rappelez si ça ne s'arrange pas.",
+       "points": 0,
+       "reaction": "Mais… vous rigolez ? Allô ? Allô ?"
+      }
+     ]
+    },
+    {
+     "id": "a1r3",
+     "appelant": "Je suis calme ! Je suis devant la tribune T23, en bas des escaliers, et il bouge plus !",
+     "choix": [
+      {
+       "id": "a1r3c1",
+       "texte": "Est-ce qu'il vous répond quand vous lui parlez ?",
+       "points": 0.5,
+       "suite": "a1s3"
+      },
+      {
+       "id": "a1r3c2",
+       "texte": "Est-ce qu'il saigne ?",
+       "points": 0,
+       "suite": "a1r4"
+      }
+     ]
+    },
+    {
+     "id": "a1r4",
+     "appelant": "Je vois pas de sang… Mais il me répond pas quand je lui parle, et il respire bizarrement !",
+     "choix": [
+      {
+       "id": "a1r4c1",
+       "texte": "J'engage Secours 1 en priorité absolue et je reste en ligne avec vous.",
+       "points": 2,
+       "reaction": "D'accord, je reste à côté de lui… Ça y est, je vois les secouristes arriver !"
+      },
+      {
+       "id": "a1r4c2",
+       "texte": "J'engage Secours 1 et je raccroche pour libérer la ligne.",
+       "points": 1,
+       "reaction": "D'accord… Allô ? Il a raccroché… Je fais quoi, moi, en attendant ?"
+      },
+      {
+       "id": "a1r4c3",
+       "texte": "J'envoie une patrouille voir ce qui se passe.",
+       "points": 0,
+       "suite": "a1r6"
+      },
+      {
+       "id": "a1r4c4",
+       "texte": "Je note et je vous rappelle dans cinq minutes.",
+       "points": 0,
+       "reaction": "Cinq minutes ?! Mais il respire mal ! Allô ? Allô ?"
+      }
+     ]
+    },
+    {
+     "id": "a1r5",
+     "appelant": "Mais j'en sais rien, cinq minutes ? Qu'est-ce que ça change, il bouge plus !",
+     "choix": [
+      {
+       "id": "a1r5c1",
+       "texte": "Est-ce qu'il vous répond quand vous lui parlez ?",
+       "points": 0.5,
+       "suite": "a1s3"
+      },
+      {
+       "id": "a1r5c2",
+       "texte": "D'accord, restez près de lui, j'envoie une patrouille.",
+       "points": 0,
+       "reaction": "Une patrouille ? Mais il lui faut un médecin ! Dépêchez-vous !"
+      }
+     ]
+    },
+    {
+     "id": "a1r6",
+     "appelant": "Une patrouille ?! Mais il respire mal, il lui faut des secours, vite !",
+     "choix": [
+      {
+       "id": "a1r6c1",
+       "texte": "Vous avez raison : j'engage Secours 1 en priorité absolue et je reste en ligne avec vous.",
+       "points": 0.5,
+       "reaction": "Merci… je reste avec lui, ils arrivent."
+      },
+      {
+       "id": "a1r6c2",
+       "texte": "La patrouille va évaluer la situation, patientez.",
+       "points": 0,
+       "reaction": "Mais c'est pas possible… Il respire de plus en plus mal !"
       }
      ]
     }
@@ -173,17 +303,20 @@
       {
        "id": "a2s1c1",
        "texte": "Où êtes-vous en ce moment ?",
-       "points": 2
+       "points": 2,
+       "suite": "a2s2"
       },
       {
        "id": "a2s1c2",
        "texte": "Comment est-elle habillée ?",
-       "points": 1
+       "points": 1,
+       "suite": "a2r1"
       },
       {
        "id": "a2s1c3",
        "texte": "Vous l'avez bien cherchée ?",
-       "points": 0
+       "points": 0,
+       "suite": "a2r2"
       }
      ]
     },
@@ -194,17 +327,20 @@
       {
        "id": "a2s2c1",
        "texte": "Quel âge a-t-elle, et comment est-elle habillée ?",
-       "points": 2
+       "points": 2,
+       "suite": "a2s3"
       },
       {
        "id": "a2s2c2",
        "texte": "Quel est votre numéro de téléphone ?",
-       "points": 1
+       "points": 1,
+       "suite": "a2r5"
       },
       {
        "id": "a2s2c3",
        "texte": "C'est déjà arrivé ?",
-       "points": 0
+       "points": 0,
+       "suite": "a2r6"
       }
      ]
     },
@@ -215,22 +351,146 @@
       {
        "id": "a2s3c1",
        "texte": "Je préviens toutes les équipes avec son signalement, et je vous demande de rester devant la grande roue.",
-       "points": 2
+       "points": 2,
+       "reaction": "D'accord, je bouge pas d'ici. Merci, merci…"
       },
       {
        "id": "a2s3c2",
        "texte": "Allez au point info et attendez là-bas.",
-       "points": 1
+       "points": 1,
+       "reaction": "Le point info… Il est où ? Bon, j'y vais…"
       },
       {
        "id": "a2s3c3",
        "texte": "Ne vous inquiétez pas, elle va revenir.",
-       "points": 0
+       "points": 0,
+       "reaction": "Vous rigolez ? Elle a six ans ! Allô ?"
       },
       {
        "id": "a2s3c4",
        "texte": "Rappelez dans dix minutes si elle n'est pas revenue.",
-       "points": 0
+       "points": 0,
+       "reaction": "Dans dix minutes ?! Mais il peut lui arriver n'importe quoi !"
+      }
+     ]
+    },
+    {
+     "id": "a2r1",
+     "appelant": "Une robe jaune… Elle a six ans, les cheveux bouclés. Je vous en supplie, aidez-moi !",
+     "choix": [
+      {
+       "id": "a2r1c1",
+       "texte": "Où êtes-vous en ce moment ?",
+       "points": 0.5,
+       "suite": "a2r3"
+      },
+      {
+       "id": "a2r1c2",
+       "texte": "Je préviens toutes les équipes avec son signalement.",
+       "points": 0,
+       "suite": "a2r4"
+      }
+     ]
+    },
+    {
+     "id": "a2r2",
+     "appelant": "Évidemment que je l'ai cherchée ! Ça fait dix minutes que je tourne partout !",
+     "choix": [
+      {
+       "id": "a2r2c1",
+       "texte": "Pardon, je vais vous aider. Où êtes-vous en ce moment ?",
+       "points": 0.5,
+       "suite": "a2s2"
+      },
+      {
+       "id": "a2r2c2",
+       "texte": "Elle a dû aller voir un manège, attendez un peu.",
+       "points": 0,
+       "reaction": "Attendre ?! C'est ma fille ! Allô ?"
+      }
+     ]
+    },
+    {
+     "id": "a2r3",
+     "appelant": "Au village, devant la grande roue.",
+     "choix": [
+      {
+       "id": "a2r3c1",
+       "texte": "Je préviens toutes les équipes avec son signalement, et je vous demande de rester devant la grande roue.",
+       "points": 2,
+       "reaction": "D'accord, je bouge pas d'ici. Merci, merci…"
+      },
+      {
+       "id": "a2r3c2",
+       "texte": "Allez au point info et attendez là-bas.",
+       "points": 1,
+       "reaction": "Le point info… Il est où ? Bon, j'y vais…"
+      },
+      {
+       "id": "a2r3c3",
+       "texte": "Ne vous inquiétez pas, elle va revenir.",
+       "points": 0,
+       "reaction": "Vous rigolez ? Elle a six ans ! Allô ?"
+      },
+      {
+       "id": "a2r3c4",
+       "texte": "Rappelez dans dix minutes si elle n'est pas revenue.",
+       "points": 0,
+       "reaction": "Dans dix minutes ?! Mais il peut lui arriver n'importe quoi !"
+      }
+     ]
+    },
+    {
+     "id": "a2r4",
+     "appelant": "Merci… Et moi, je fais quoi ? Je la cherche ou je reste ici ?",
+     "choix": [
+      {
+       "id": "a2r4c1",
+       "texte": "Où êtes-vous exactement ? Restez-y, c'est là qu'on vous la ramènera.",
+       "points": 0.5,
+       "reaction": "Au village, devant la grande roue. D'accord, je bouge pas."
+      },
+      {
+       "id": "a2r4c2",
+       "texte": "Cherchez-la de votre côté, on se rappelle.",
+       "points": 0,
+       "reaction": "Mais… vous ne savez même pas où je suis !"
+      }
+     ]
+    },
+    {
+     "id": "a2r5",
+     "appelant": "06 12 34 56 78… Mais ma fille, vous faites quoi pour ma fille ?",
+     "choix": [
+      {
+       "id": "a2r5c1",
+       "texte": "Quel âge a-t-elle, et comment est-elle habillée ?",
+       "points": 0.5,
+       "suite": "a2s3"
+      },
+      {
+       "id": "a2r5c2",
+       "texte": "Je vous rappelle dès qu'on a du nouveau.",
+       "points": 0,
+       "reaction": "Vous me rappelez ? Mais personne ne sait à quoi elle ressemble !"
+      }
+     ]
+    },
+    {
+     "id": "a2r6",
+     "appelant": "Non, jamais ! Pourquoi vous me demandez ça ? Elle a six ans !",
+     "choix": [
+      {
+       "id": "a2r6c1",
+       "texte": "Comment est-elle habillée, et à quoi ressemble-t-elle ?",
+       "points": 0.5,
+       "suite": "a2s3"
+      },
+      {
+       "id": "a2r6c2",
+       "texte": "Alors elle va sûrement revenir, ne vous inquiétez pas.",
+       "points": 0,
+       "reaction": "Mais elle a six ans ! Je vous en prie, faites quelque chose !"
       }
      ]
     }
@@ -285,7 +545,7 @@
    {
     "id": "m1",
     "de": "Tango 1",
-    "texte": "PC Org de Tango 1, 22 h 41 : la barrière de l'allée 12 au Grand Paddock est réparée, je quitte les lieux.",
+    "texte": "PC Org Sud-Est de Tango 1, 22 h 41 : la barrière de l'allée 12 au Grand Paddock est réparée, je quitte les lieux.",
     "ans": {
      "cat": "Technique",
      "zone": "Grand Paddock",
@@ -296,7 +556,7 @@
    {
     "id": "m2",
     "de": "Moto 1",
-    "texte": "PC Org de Moto 1, 22 h 53 : un véhicule est garé sur l'accès pompiers du Parking Sud, propriétaire introuvable, je demande l'enlèvement.",
+    "texte": "PC Org Sud-Est de Moto 1, 22 h 53 : un véhicule est garé sur l'accès pompiers du Parking Sud, propriétaire introuvable, je demande l'enlèvement.",
     "ans": {
      "cat": "Fourrière",
      "zone": "Parking Sud",
@@ -307,7 +567,7 @@
    {
     "id": "m3",
     "de": "Patrouille 2",
-    "texte": "PC Org de Patrouille 2, 23 h 02 : deux personnes en altercation devant la buvette de Maison Blanche, situation calmée, pas de blessé.",
+    "texte": "PC Org Sud-Est de Patrouille 2, 23 h 02 : deux personnes en altercation devant la buvette de Maison Blanche, situation calmée, pas de blessé.",
     "ans": {
      "cat": "Sécurité",
      "zone": "Maison Blanche",
@@ -439,6 +699,13 @@
     "pos": [
      5,
      3
+    ],
+    "indispo": [
+     {
+      "de": 44,
+      "a": 100,
+      "motif": "appelé sur une autre intervention, hors du plan"
+     }
     ]
    },
    {
@@ -841,13 +1108,13 @@
   "radio": [
    {
     "id": "e01",
-    "texte": "PC Org de Patrouille 4 : arrivée au parking P2, rien à signaler.",
+    "texte": "PC Org Sud-Est de Patrouille 4 : arrivée au parking P2, rien à signaler.",
     "pour_moi": true,
     "priorite": false
    },
    {
     "id": "e02",
-    "texte": "Tango 3 de PC Org : bien reçu, terminé.",
+    "texte": "Tango 3 de PC Org Sud-Est : bien reçu, terminé.",
     "pour_moi": false,
     "priorite": false
    }
