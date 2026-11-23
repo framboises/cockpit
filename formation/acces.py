@@ -80,14 +80,25 @@ def essayer(db, email, tel4, ip, now):
     ("bloque", None). L'essai est enregistre comme echec AVANT le comptage
     (e-mail et IP) : des requetes simultanees se voient entre elles et ne
     passent pas toutes sous le seuil. Plus de 5 essais sur 15 min (celui-ci
-    compris) : bloque, l'essai reste compte. Paire correcte : l'essai est
-    retire (un succes n'est pas un echec)."""
-    docs = [{"campagne": store.CAMPAGNE, "cle": c, "t": now} for c in _cles(email, ip)]
+    compris) : bloque, l'essai reste compte. Exception pour l'e-mail : la bonne
+    paire passe depuis une IP sans autre essai dans la fenetre (anti-blocage
+    cible par un tiers). Paire correcte : l'essai est retire (un succes n'est
+    pas un echec)."""
+    cle_email, cle_ip = _cles(email, ip)
+    docs = [{"campagne": store.CAMPAGNE, "cle": c, "t": now} for c in (cle_email, cle_ip)]
     ids = db["essais_connexion"].insert_many(docs).inserted_ids
     depuis = now - FENETRE_ECHECS
-    if any(_compte(db, d["cle"], depuis) > SEUIL_ECHECS for d in docs):
+    n_ip = _compte(db, cle_ip, depuis)
+    if n_ip > SEUIL_ECHECS:
         return "bloque", None
+    email_bloque = _compte(db, cle_email, depuis) > SEUIL_ECHECS
     cand = _paire(db, email, tel4)
+    # E-mail bloque : seule la bonne paire, depuis une IP sans autre essai dans
+    # la fenetre (n_ip == 1 : celui-ci), passe. Un tiers qui connait l'e-mail ne
+    # peut donc pas empecher le candidat d'entrer, et chaque IP neuve n'offre
+    # qu'un seul essai de plus sur un e-mail bloque.
+    if email_bloque and (cand is None or n_ip > 1):
+        return "bloque", None
     if cand is None:
         return "refuse", None
     db["essais_connexion"].delete_many({"_id": {"$in": ids}})

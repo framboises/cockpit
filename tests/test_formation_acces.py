@@ -117,10 +117,23 @@ def test_blocage_apres_5_echecs_email(app, db):
     for i in range(5):
         r = Client(app, ip="10.0.1.%d" % i).connexion(tel4="0000")
         assert r.status_code == 401
-    r = Client(app, ip="10.0.2.1").connexion()  # bonne paire, autre IP
+    r = Client(app, ip="10.0.2.1").connexion(tel4="1111")  # mauvaise paire, IP neuve
     assert r.status_code == 429
     assert r.get_json() == {"ok": False, "message": GENERIQUE + " Réessayez dans 15 minutes."}
     assert "formation_session" not in (r.headers.get("Set-Cookie") or "")
+    # une IP qui a deja echoue reste bloquee, meme avec la bonne paire
+    assert Client(app, ip="10.0.1.0").connexion().status_code == 429
+
+
+def test_email_bloque_par_un_tiers_candidat_passe_depuis_son_ip(app, db):
+    """Un tiers qui connait l'e-mail ne peut pas empecher le candidat d'entrer :
+    la bonne paire passe depuis une IP sans echec dans la fenetre."""
+    _candidat(db)
+    for i in range(8):
+        Client(app, ip="10.0.4.%d" % i).connexion(tel4="0000")
+    r = Client(app, ip="10.0.5.1").connexion()
+    assert r.status_code == 200
+    assert "formation_session" in (r.headers.get("Set-Cookie") or "")
 
 
 def test_blocage_apres_5_echecs_ip(app, db):
@@ -428,6 +441,20 @@ def test_rechargement_page_test_nouvelle_session(app, db):
     assert r.status_code == 401
 
 
+def test_page_test_venue_d_un_autre_site_ne_change_pas_la_session(app, db):
+    """Un lien d'un site tiers vers /test ne clot pas l'epreuve en cours."""
+    a = _demarre(app, db)
+    a.post("/api/epreuve/radio/debut")
+    vieux = a.c.get_cookie("formation_session", path=BASE).value
+    r = a.get("/test", headers={"Sec-Fetch-Site": "cross-site"})
+    assert r.status_code == 302 and r.headers["Location"].endswith(BASE)
+    assert a.c.get_cookie("formation_session", path=BASE).value == vieux
+    t = db["tentatives"].find_one({})
+    assert t["epreuves"]["radio"]["etat"] == "en_cours" and t.get("reprises", 0) == 0
+    # navigation normale (meme site, ou adresse tapee) : comportement inchange
+    assert a.get("/test", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
+
+
 def test_etat_n_appelle_pas_connexion(app, db):
     a = _demarre(app, db)
     a.post("/api/epreuve/radio/debut")
@@ -466,15 +493,19 @@ def test_valueerror_inattendue_409_requete(app, db, monkeypatch):
 
 
 def test_essais_simultanes_comptes_avant_verification(db):
-    """L'essai est enregistre avant le comptage : un 6e essai est bloque meme
-    avec la bonne paire, et un succes ne laisse pas d'echec derriere lui."""
+    """L'essai est enregistre avant le comptage : un 6e essai depuis la meme IP
+    est bloque meme avec la bonne paire, une mauvaise paire depuis une IP neuve
+    aussi ; la bonne paire depuis une IP neuve passe. Un succes ne laisse pas
+    d'echec derriere lui."""
     _candidat(db)
     now = datetime.now(timezone.utc)
     assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.7.7.7", now)[0] == "ok"
     assert db["essais_connexion"].count_documents({}) == 0
     for _ in range(5):
         assert acces.essayer(db, "f.arbia@gmail.com", "0000", "10.7.7.7", now)[0] == "refuse"
-    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.7.7.8", now) == ("bloque", None)
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.7.7.7", now) == ("bloque", None)
+    assert acces.essayer(db, "f.arbia@gmail.com", "0000", "10.7.7.8", now) == ("bloque", None)
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.7.7.9", now)[0] == "ok"
 
 
 def test_page_test_sans_session_redirige(app, db):

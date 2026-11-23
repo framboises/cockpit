@@ -158,6 +158,9 @@ def page_test():
     sess = _candidat_du_cookie(db)
     if sess is None:
         return redirect(url_for("formation.accueil"))
+    if (request.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site":
+        # un lien pose sur un autre site ne doit jamais clore l'epreuve en cours
+        return redirect(url_for("formation.accueil"))
     try:
         etat, jeton = _nouvelle_session(db, sess[0], _now())
     except RuntimeError:
