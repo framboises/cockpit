@@ -160,3 +160,17 @@ def test_suivi_operateur_tous_les_groupes_visibles(db):
     ids = M.lire_groupes("med,sur,dep,fou", M.SUIVI_MAX_GROUPES)
     assert len(M.etat_mur(db, ids, now=MAINTENANT, maxi=M.SUIVI_MAX_GROUPES)["groupes"]) == 4
     assert len(M.etat_mur(db, M.lire_groupes("med,sur,dep,fou"), now=MAINTENANT)["groupes"]) == 3
+
+
+def test_tablette_muette_plus_de_24h_masquee():
+    """08/11/2026 : une tablette suit la regle des balises (stale = hors ligne
+    depuis plus de 24 h ou jamais vue : plus de pin sur la carte)."""
+    import anoloc
+    now = datetime.now(timezone.utc)
+    base = {"_id": "t1", "name": "Tab", "last_position": {"lat": 47.9, "lng": 0.2}}
+    assert M.tablette(dict(base, last_seen=now - timedelta(seconds=30)), now)["stale"] is False
+    assert M.tablette(dict(base, last_seen=now - timedelta(hours=3)), now)["stale"] is False
+    assert M.tablette(dict(base, last_seen=now - timedelta(hours=25)), now)["stale"] is True
+    assert M.tablette(dict(base), now)["stale"] is True
+    assert anoloc._tablet_to_device(dict(base, last_seen=now - timedelta(hours=25)))["stale"] is True
+    assert anoloc._tablet_to_device(dict(base, last_seen=now - timedelta(minutes=10)))["stale"] is False

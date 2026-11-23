@@ -202,7 +202,7 @@ def rebuild_portes_doc(units, event, year, race_iso=None):
 
 
 def rebuild_frequentation_doc(units, event, year, race_iso=None,
-                              ignored_doors=None):
+                              ignored_doors=None, presence_reset_hour=None):
     """Document `frequentation` reconstruit depuis les unites `complet`.
 
     `entree`/`sortie` sont CUMULES et `present = entree - sortie`, comme
@@ -227,7 +227,11 @@ def rebuild_frequentation_doc(units, event, year, race_iso=None,
 
     data = []
     cum_e = cum_s = 0
-    for hour in sorted(hourly):
+    hours = sorted(hourly)
+    reset_hour = scan_import.normalize_reset_hour(presence_reset_hour)
+    presents = scan_import.running_presence(
+        [(h, hourly[h]['e'], hourly[h]['s']) for h in hours], reset_hour)
+    for hour, present in zip(hours, presents):
         cum_e += hourly[hour]['e']
         cum_s += hourly[hour]['s']
         data.append({
@@ -235,7 +239,7 @@ def rebuild_frequentation_doc(units, event, year, race_iso=None,
             'date': hour.isoformat(),
             'entree': cum_e,
             'sortie': cum_s,
-            'present': cum_e - cum_s,
+            'present': present,
         })
 
     return {
@@ -244,6 +248,7 @@ def rebuild_frequentation_doc(units, event, year, race_iso=None,
         'excluded_autre': excluded_autre,
         'doors_without_direction': doors_without_direction,
         'ignored_doors': sorted(ignored_doors or []),
+        'presence_reset_hour': reset_hour,
     }
 
 
@@ -367,7 +372,8 @@ def _rewrite_documents(db, event, year, doc, units, touched, now_ignored,
         new_complet,
         rebuild_portes_doc(units, event, year, race),
         rebuild_frequentation_doc(units, event, year, race,
-                                  ignored_doors=ignored_doors),
+                                  ignored_doors=ignored_doors,
+                                  presence_reset_hour=doc.get('presence_reset_hour')),
     ]
 
     run_id = uuid.uuid4().hex

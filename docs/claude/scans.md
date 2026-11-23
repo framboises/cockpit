@@ -10,7 +10,8 @@ Elle remplace un enchaînement manuel de 5 scripts (`import_zone_scans.py`, `imp
 
 | Module | Rôle |
 |--------|------|
-| `scan_import.py` | Parseur xlsx, résolveur de features, constructeurs des 3 documents, archivage |
+| `scan_formats.py` | Lecture en flux (xlsx / csv), détection du format et des colonnes, parseur des journaux (une ligne par scan) |
+| `scan_import.py` | Parseur de la matrice Sirius, résolveur de features, constructeurs des 3 documents, archivage |
 | `scan_report_build.py` | Adaptateur `complet` → contrat du gabarit HTML, génération du fichier |
 | `scan_staffing.py` | Effectifs Accueil/Sécurité dérivés du calendrier, sans aucune saisie |
 | `scan_analysis.py` | KPI agrégés, prompts, appel Claude, persistance |
@@ -20,7 +21,72 @@ Elle remplace un enchaînement manuel de 5 scripts (`import_zone_scans.py`, `imp
 
 Tous les modules reçoivent `db` en argument (`from app import db` donne `titan_dev` en dev, `titan` en prod, cf. `app.py:115`). **Ne jamais coder le nom de base en dur.**
 
-### Format Excel attendu
+### Formats acceptés
+
+`scan_formats.analyze_file` lit les 300 premières lignes, reconnaît la famille du fichier, puis le lit en entier. `.xlsx`, `.xlsm`, `.csv`, `.txt`, **200 Mo maximum**.
+
+| Format | Reconnu par | Parseur |
+|---|---|---|
+| `matrice` | ligne 2 = `Entrée`/`Sortie`/`Autre`, ligne 1 = datetimes | `scan_import.parse_scan_xlsx` (openpyxl), inchangé |
+| `journal` | tout le reste : une ligne par scan | `scan_formats.parse_journal`, agrégé au vol en créneaux de 15 min |
+
+Les deux rendent **le même contrat** (`units`, `slots`, `device_hours`...) : rattachement, documents, rapport et mapping sont communs.
+
+#### Journal de scans
+
+Premier cas : export Weezevent du GP Explorer 2025 (`Export_Scan_O417820_...xlsx`, 63 Mo, **746 516 lignes x 49 colonnes**, 87 points de contrôle). Les colonnes sont reconnues par **en-tête (synonymes) ET contenu**, et restent modifiables dans la modale (« Relire le fichier avec ces réglages », sans renvoyer le fichier) :
+
+| Rôle | Weezevent | Remarque |
+|---|---|---|
+| `horodatage` | `Date et heure de scan` | sinon `date` + `heure` séparées. Pénalité sur `Création` (synchro du terminal), `Achat`, `Validité`... |
+| `point` | `Nom Opérateur` | **l'unité de scan**, seul rôle obligatoire avec la date |
+| `sens` | `Type scan` | valeurs `ENTREE/SORTIE/IN/OUT/ENTRY/EXIT...`, correspondance éditable valeur par valeur (`x` = exclure) |
+| `terminal` | `Terminal` (`SUNMI ...`) | `SUNMI`/`ZEBRA`/`HONEYWELL` classés `pda` |
+| `code` | `Code-barre` | active la déduplication |
+| `resultat` | (absente) | filtre les refus (`REFUS`, `DEJA`, `INVALID`... écartés), éditable |
+| `famille` | `Événement` | famille de titre : **Personnes** (présents), **Hors présents** (véhicules), **Exclure**. Voir ci-dessous |
+| `zone` | **jamais auto** | seulement `Zone de contrôle` : rend la sémantique Sirius (ENCEINTE GENERALE = portes) |
+
+⚠️ **La colonne `Zone` de Weezevent est la zone du DROIT d'accès du billet, pas le lieu du scan.** Regrouper dessus mélangerait des portes sans rapport ; le rôle `zone` n'est donc jamais proposé sur un simple « Zone ».
+
+- **Noms** : `[GPE25]`, `[GPE]`, `[GP25]` retirés (option), majuscules, accents conservés. Le `+` est écrit `PLUS` : `normalize_label` efface la ponctuation, et `Zone concert VIP+` fusionnait avec `Zone concert VIP`.
+- **Doublons stricts** (même billet, terminal, seconde, sens, point) : 495 sur le fichier GPE 2025 (resynchronisations de terminaux). Empreinte entière en mémoire, pas le tuple. Désactivée par défaut sans colonne code-barre.
+- **Dates** `jj/mm` sauf preuve du contraire dans l'échantillon ; une date avec décalage (`Z`, `+02:00`) est ramenée en naïf Paris.
+
+#### Familles de titre : le pic ne compte que les personnes
+
+Les portes d'enceinte voient spectateurs **et** accrédités (GPE 2025 : billetterie 76 %, staff `[WETIX]` 10 %, invitations 4,6 %, soirée vendredi 4,3 %, `IMPORT [ACO]` 3,7 %, membres ACO 1,3 %). Les accrédités sont des personnes et restent dans les présents ; **un titre véhicule non** (un scan ne dit pas combien de personnes sont à bord).
+
+Par famille (`famille_map`, clé = libellé normalisé) : `p` personnes, `h` hors présents, `x` exclure. Proposition `family_default` : `VEH`, `PARKING`, `CONTREMARQUE`, `2 ROUES`... → `h`. ⚠️ **`IMPORT [ACO]` (listes `VEH1`, contremarques) ne se devine pas au libellé** : à régler une fois, le choix est mémorisé dans `complet.title_families` et repris aux imports suivants de l'événement (`_last_title_families`).
+
+Un titre `h` est compté à part (`he/hs/ha`) puis replié par `_fold` selon l'unité : **porte d'enceinte → « sans direction »** (dans `scan_count`, ni entrée ni présent) ; **zone (parking) → entrée / sortie normales**, le véhicule étant la mesure d'un parking. GPE 2025 : 23 773 passages hors présents ; pic du dimanche 90 326 → **89 769**, entrées de l'enceinte 286 318 → 275 577. `complet.import_stats` et `title_families_counts` tracent ce qui a été retenu.
+
+#### Porte d'enceinte ou zone : c'est la catégorie qui décide
+
+Dans un journal, rien de structurel ne dit qu'un point est une porte d'enceinte. `resolve_journal` propose `porte` pour un nom connu des documents `portes`, du GeoJSON `portes`, ou commençant par `PORTE` ; ensuite **la catégorie « Porte d'enceinte » fait entrer l'unité dans la série de l'enceinte générale**, toute autre catégorie en fait une zone. Le `kind` (donc la clé `(kind, name)`) suit la catégorie jusqu'à l'écriture ; l'UI garde une clé stable (`unit.key`). Les choix mémorisés sont retrouvés sous l'autre nature (`resolve_features(any_kind=True)`, `_load_overrides_by_name`).
+
+⚠️ L'éditeur de mapping après import ne fait **pas** cette bascule (il reconstruit depuis `complet`, kind figé) : pour changer la nature d'une unité d'un journal, réimporter.
+
+⚠️ **Aucun tripode dans un journal tout en terminaux portatifs** : `has_tripodes = False` coupe le signal `pda_renfort`, sinon toutes les portes équipées de tripodes passeraient « en débordement ».
+
+#### Volume
+
+- openpyxl : ~60 s pour lire 746 000 lignes x 49 colonnes. `scan_formats._iter_xlsx` parcourt le XML de la feuille en flux (`defusedxml.ElementTree.iterparse` : le XML vient d'un fichier téléversé, DTD et entités refusées ; styles date et chaînes partagées gérés) : **~35 à 50 s** selon la charge, une ligne en mémoire à la fois. lxml est plus lent ici (~50 s).
+- **Nom d'événement** : importer sous le `nom` de la collection `evenement` (`GP EXPLORER`). Les éditions anciennes stockées sous le `short` (`GPE` 2022/2023) sont retrouvées par `scan_frequentation.event_aliases`, qui lit `evenement.short`.
+- `complet` produit pour GPE 2025 : 87 unités, 618 créneaux, **0,8 Mo**.
+- ⚠️ **IIS plafonne le corps des requêtes à 30 Mo par défaut** (404.13 en HTML, avant Waitress) : `web.config` porte `maxAllowedContentLength = 209715200`, à garder aligné sur `MAX_UPLOAD_BYTES`. Et **ARR coupe à 2 min** : l'analyse est donc un job de fond (voir « Import en deux temps »).
+
+### Remise à zéro nocturne des présents
+
+`complet.presence_reset_hour` (0-23, ou `None` = solde continu, comportement historique). **Choisie à l'import** (case « Remettre les présents à zéro chaque nuit à H h », préremplie avec le réglage de la dernière édition de l'événement), **jamais déduite** : un 24 h dort dans l'enceinte.
+
+Au premier créneau de chaque journée d'exploitation (qui commence à H), le solde repart de 0. Une seule règle, `scan_import.running_presence`, appliquée partout où un présent est calculé : `present` des unités de `complet`, `frequentation` (import et reconstruction du mapping), `scan_frequentation.enclosure_series`, `serialize_zone` du rapport et `aggregatePortesEnceinte()` du gabarit (`DATA.presence_reset_hour`). `entree` / `sortie` de `frequentation` restent des cumuls sur toute la période.
+
+Pourquoi (GP EXPLORER 2025, évacuations massives vendredi et samedi soir, portes ouvertes sans scan) : 50 % de sorties scannées le vendredi, 86 % le samedi, **14 % le dimanche**. Sans remise à zéro, ~26 700 « présents » du vendredi et ~18 000 du samedi (presque tous des billets d'un seul jour) s'ajoutaient au dimanche : pic à **135 149**, contre **90 326** avec remise à 5 h (samedi 115 877 → 88 580). Appliqué au document en base le 20/11/2026 (archives `remise_a_zero_nocturne`).
+
+⚠️ `KARTING PIETON - DEPORT` (classée porte d'enceinte) est un pré-contrôle du dimanche matin : 7 254 billets, dont 106 seulement rescannés à la porte Karting. Pas de double compte.
+
+### Matrice Sirius
 
 Export Sirius hiérarchique (cf. `uploads/zone-complet-24HM-2024.xlsx`). Un modèle est téléchargeable depuis la page (`/scan-report/template.xlsx`), généré à la volée avec une feuille « Notice » et une feuille « Unités connues » alimentée depuis la base.
 
@@ -172,7 +238,8 @@ Toutes sur `scan_report_bp`, donc **admin-only** via `before_request` → `_chec
 | `GET /scan-report/features?collection=` | Inventaire d'une collection géo (mapping manuel) |
 | `GET /scan-report/mapping` | Mapping courant d'un couple, depuis `complet` |
 | `POST /scan-report/mapping` | Applique des corrections et reconstruit les trois documents |
-| `POST /scan-report/import/analyze` | multipart xlsx → aperçu + mapping, **sans rien écrire** |
+| `POST /scan-report/import/analyze` | multipart → `{token, job_id}` ; l'aperçu arrive dans le `result` du job, **sans rien écrire** |
+| `POST /scan-report/import/reanalyze` | relit le fichier en attente avec `{mapping, options}` corrigés → `{job_id}` |
 | `POST /scan-report/import/commit` | Écrit les 3 documents, archive l'existant |
 | `DELETE /scan-report/import/<token>` | Abandon, purge le fichier en attente |
 | `POST /scan-report/generate` | Régénère le rapport (job asynchrone) |
@@ -184,7 +251,7 @@ Erreurs au format `{"ok": false, "error": "<code>"}` (convention `field.py:594`)
 
 ### Import en deux temps
 
-`analyze` parse et garde le classeur en mémoire (`_STAGING`, TTL 30 min, 3 entrées max) ; `commit` rejoue avec le mapping corrigé. Le fichier source est conservé sous `uploads/scan_imports/<token>.xlsx` pour la traçabilité, et balayé sur la **date du fichier** — ce nettoyage survit donc à un redémarrage, contrairement au registre mémoire.
+`analyze` écrit le fichier sur disque (en flux, jamais `upload.read()`), puis un thread l'analyse (`_run_import_analysis`) ; le front suit le job sur `/scan-report/generate/status` et reçoit l'aperçu dans `result`. En cas de colonnes introuvables, le job finit en `error` (`colonne_point_absente`, `colonne_date_absente`) **avec** `result.format.columns` : la modale affiche le choix des colonnes sans redemander le fichier. Le résultat parsé reste en mémoire (`_STAGING`, TTL 30 min, 3 entrées max ; pour un journal, les points agrégés, pas les lignes) ; `commit` rejoue avec le mapping corrigé. Le fichier source est conservé sous `uploads/scan_imports/<token>.xlsx` pour la traçabilité, et balayé sur la **date du fichier** — ce nettoyage survit donc à un redémarrage, contrairement au registre mémoire.
 
 ⚠️ `_STAGING` et le registre de jobs supposent **un seul process**. Vrai sous waitress (même hypothèse que `analyse_ops.py:49`). Avec gunicorn multi-workers, il faudrait basculer le staging dans une collection Mongo à index TTL.
 
@@ -356,7 +423,11 @@ Les jours à zéro en début de période (24H MOTOS 2023 J-5, LMC 2022 J-4) sont
 
 #### Éditions exclues
 
-`EXCLUDED_EDITIONS = {('GPE', 2022), ('GPE', 2023)}` : GPE 2023 a une date de course fausse (2023-09-09 pour des données d'octobre — l'alignement serait décalé de 28 jours) et GPE 2022 a un cumul d'entrées qui finit à 0. `SBK` et `SUPERBIKE` 2024 sont les mêmes 80 enregistrements sous deux noms, dédoublonnés via `event_aliases`.
+`EXCLUDED_EDITIONS` est **vide depuis le 20/11/2026**, et testé sur tous les noms de l'événement (`evenement.short` compris : sans ça, GPE 2022/2023 revenaient sous GP EXPLORER). Les deux éditions écartées jusque-là ont été **réparées en base** (originaux dans `historique_controle_archive`, `archived_reason: 'reparation_donnees'`, champ `repaired` sur le document) :
+- GPE 2022 : 4 enregistrements finaux à 0 retirés (décrochage de collecte), course `2022-10-08T17:00:00` ;
+- GPE 2023 : `frequentation` datée du 07 au 10 **octobre** recalée en **septembre** (la course et les `portes` étaient bien en septembre), trou à 0 de la nuit du 8 au 9 retiré, course `2023-09-09T18:00:00`. ⚠️ Ses `portes` restent suspectes (1,35 M de scans pour 9 portes, des cumuls probablement) : non modifiées.
+
+GP EXPLORER 2025 (course principale le dimanche, événement sur deux jours) est recalé sur le **samedi** par `_normalize_race_dates` (jour dominant de 2022/2023) : J0 = samedi 4/10, le dimanche apparaît en J+1. `SBK` et `SUPERBIKE` 2024 sont les mêmes 80 enregistrements sous deux noms, dédoublonnés via `event_aliases`.
 
 #### Analyse rédigée embarquée
 

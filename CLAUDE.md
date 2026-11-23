@@ -160,7 +160,7 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/crise.md` : Exercices de crise : auth PIN animateur, sessions JWT, anti-bruteforce
 - `docs/claude/routing.md` : Routing Valhalla : 4 modes (normal, piste, god, god + piste) et leurs recettes, regles saison / epreuve du service valhalla-admin, page /admin/itineraire (chargement des scenarios), acces piste par groupe de balises
 - `docs/claude/affluence.md` : Affluence previsionnelle : panier ticketing, ventes_prev vs ventes_prev_final, projections
-- `docs/claude/scans.md` : Chaine scans : import Excel, historique_controle, rapport HTML, vue Frequentation, analyse Claude
+- `docs/claude/scans.md` : Chaine scans : import matrice Sirius OU journal une ligne par scan (Weezevent, csv ; colonnes detectees et corrigeables, analyse en job de fond, 200 Mo + limite IIS du web.config), historique_controle, rapport HTML, vue Frequentation, analyse Claude
 - `docs/claude/presents.md` : Presents sur site (presents_etat.py) : remises a zero, pics, serie N-1
 - `docs/claude/montre.md` : Montre Garmin (cote serveur et pieges Connect IQ) : trafic_etat, meteo_etat, payload, guidage
 - `docs/claude/main-courante.md` : Main courante pcorg : pcorg_history, fusion SQL/Cockpit, droits, CSRF d'onglet ancien, aide a la saisie (pcorg_assist)

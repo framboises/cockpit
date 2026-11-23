@@ -464,10 +464,23 @@
     return list.filter(function (f) { return f.category === state.cat; });
   }
 
+  // Une unite peut porter plusieurs categories ("*" = toutes) : elle compte
+  // dans chacune (dispatch_auto._pub_unit, `categories`).
+  function unitCovers(u, cat) {
+    var cats = Array.isArray(u.categories) && u.categories.length ? u.categories : (u.category ? [u.category] : []);
+    return cats.indexOf("*") !== -1 || cats.indexOf(cat) !== -1;
+  }
+
+  function unitCatsText(u) {
+    var cats = Array.isArray(u.categories) && u.categories.length ? u.categories : (u.category ? [u.category] : []);
+    if (cats.indexOf("*") !== -1) return "Toutes categories";
+    return cats.map(shortCat).join(", ");
+  }
+
   function visibleUnits() {
     var list = (state.data && state.data.units) || [];
     if (!state.cat) return list;
-    return list.filter(function (u) { return u.category === state.cat; });
+    return list.filter(function (u) { return unitCovers(u, state.cat); });
   }
 
   function visibleClosed() {
@@ -1049,7 +1062,7 @@
       row.appendChild(top);
 
       var meta = el("div", "ds-unit-meta");
-      if (multi) meta.appendChild(el("span", "", shortCat(u.category)));
+      if (multi) meta.appendChild(el("span", "", unitCatsText(u)));
       if (u.status_since) meta.appendChild(el("span", "", "depuis " + sinceText(u.status_since)));
       if (u.pos_age_s == null) meta.appendChild(el("span", "", "sans position"));
       else if (u.pos_age_s > 300) meta.appendChild(el("span", "is-warn", "position il y a " + fmtDuration(u.pos_age_s * 1000)));
@@ -1121,7 +1134,7 @@
   }
 
   function candidateList(f) {
-    var units = ((state.data && state.data.units) || []).filter(function (u) { return u.category === f.category; });
+    var units = ((state.data && state.data.units) || []).filter(function (u) { return unitCovers(u, f.category); });
     return units.map(function (u) {
       var dist = null;
       if (f.lat != null && f.lng != null && u.lat != null && u.lng != null) {

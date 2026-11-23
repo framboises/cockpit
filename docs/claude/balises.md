@@ -6,7 +6,9 @@ sources de balises qui y entrent de la meme facon.
 
 ## Pivot : les groupes (`anoloc_config.global`)
 
-- `beacon_groups[]` : `id`, `label`, `icon`, `color`, `pco_category`, `declarant`,
+- `beacon_groups[]` : `id`, `label`, `icon`, `color`, `pco_categories` (liste, `["*"]` =
+  toutes ; ancien `pco_category` = premiere, tenu a jour par `/anoloc/config` ; lire par
+  `field.group_categories`, voir `field.md`), `declarant`,
   `enabled`, `anoloc_device_ids` (nom historique : TOUTES les balises, Anoloc et
   Teltonika), `device_labels` (libelles : rapprochement main courante par nom,
   collisions de noms Field).
@@ -15,6 +17,11 @@ sources de balises qui y entrent de la meme facon.
   propre interrupteur (`live-control.collecting`).
 - Ids : Anoloc = id Anoloc ; Teltonika = `tlt:<imei>` ; tablette = `field:<id>`
   (jamais dans les groupes, rattachee par `field_devices.beacon_group_id`).
+- Carte : hors ligne depuis plus de 24 h (`MAP_HIDE_AFTER_S`, `balises_core._is_stale`) ou
+  jamais vue = `stale`, plus de pin (accueil `anoloc.js`, mur, suivi operateur ; listee dans le
+  panneau). **Tablettes comprises depuis le 08/11/2026** (`anoloc._tablet_to_device`,
+  `balises_mur.tablette` : derniere activite `last_seen`) ; avant, une tablette restait affichee
+  indefiniment a sa derniere position.
 - Libelle d'une Teltonika : celui du parc (`balises_devices.label`), recopie dans
   `device_labels` a chaque enregistrement de groupe ou de balise.
 - ⚠️ Fenetre de groupe : les balises Anoloc deja dans le groupe restent affichees

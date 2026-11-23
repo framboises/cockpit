@@ -134,6 +134,71 @@ class TestCandidats:
         assert names == ["LoinFrais", "PresMaisVieux"]
 
 
+class TestPlusieursCategories:
+    """08/11/2026 : une unite a plusieurs categories (ou "*") est candidate,
+    engageable et en libre-service sur chacune."""
+
+    def _multi(self, db, name, cats, meters=10, metiers=None):
+        d = _dev(db, name, meters, category=None, metiers=metiers)
+        db["field_devices"].update_one({"_id": d["_id"]}, {"$set": {"categories": cats}})
+        return db["field_devices"].find_one({"_id": d["_id"]})
+
+    def _names(self, db, fid="f1"):
+        return [c["device"]["name"] for c in DA.find_candidates(db, db["pcorg"].find_one({"_id": fid}), now=NOW)]
+
+    def test_candidate_sur_chaque_categorie(self, db):
+        self._multi(db, "TechSecu", ["PCO.Technique", "PCO.Securite"], 10)
+        self._multi(db, "Tout", ["*"], 20)
+        self._multi(db, "Flux", ["PCO.Flux"], 5)
+        _fiche(db, "f1", category="PCO.Technique")
+        _fiche(db, "f2", category="PCO.Securite", metier=None)
+        _fiche(db, "f3", category="PCO.Fourriere", metier=None)
+        assert self._names(db, "f1") == ["TechSecu", "Tout"]
+        assert self._names(db, "f2") == ["TechSecu", "Tout"]
+        assert self._names(db, "f3") == ["Tout"]
+
+    def test_groupe_a_plusieurs_categories(self, db):
+        db["anoloc_config"].update_one({"_id": "global"}, {"$set": {"beacon_groups": [
+            {"id": "grp-m", "pco_categories": ["PCO.Securite", "PCO.Technique"]}]}})
+        d = _dev(db, "DuGroupe", 10, category=None)
+        db["field_devices"].update_one({"_id": d["_id"]}, {"$set": {"beacon_group_id": "grp-m"}})
+        _fiche(db, "f1", category="PCO.Securite", metier=None)
+        assert self._names(db) == ["DuGroupe"]
+
+    def test_metiers_par_categorie(self, db):
+        db["pcorg_config"].insert_one({"_id": "pcorg_lists", "sous_classifications": {
+            "PCO.Technique": [{"label": "Electricite"}, {"label": "Sanitaire"}],
+            "PCO.Securite": [{"label": "Rixe"}, {"label": "Vol"}]}})
+        # Electricien Technique, engage aussi en Securite sans metier coche
+        self._multi(db, "ElecSecu", ["PCO.Technique", "PCO.Securite"], metiers=["Electricite"])
+        _fiche(db, "f1", category="PCO.Technique", metier="Sanitaire")
+        _fiche(db, "f2", category="PCO.Securite", metier="Rixe")
+        _fiche(db, "f3", category="PCO.Technique", metier="Electricite")
+        assert self._names(db, "f1") == []              # metier Technique non coche
+        assert self._names(db, "f2") == ["ElecSecu"]    # Securite : tous metiers
+        assert self._names(db, "f3") == ["ElecSecu"]
+        # Une seule categorie : regle historique (seuls ses metiers)
+        _dev(db, "ElecSeul", 30, metiers=["Electricite"])
+        assert self._names(db, "f1") == []
+
+    def test_engagement_et_libre_service(self, db):
+        u = self._multi(db, "TechSecu", ["PCO.Technique", "PCO.Securite"])
+        _fiche(db, "f1", category="PCO.Securite", metier=None)
+        _fiche(db, "f2", category="PCO.Flux", metier=None)
+        _fiche(db, "f3", category="PCO.Technique", metier=None)
+        dispo = sorted(m["id"] for m in DA.available_for_device(db, u, now=NOW))
+        assert dispo == ["f1", "f3"]
+        assert DA.manual_assign(db, "f2", u, "Chef", now=NOW) == (False, "categorie_differente")
+        assert DA.manual_assign(db, "f1", u, "Chef", now=NOW)[0] is True
+
+    def test_toutes_categories_libre_service(self, db):
+        u = self._multi(db, "Tout", ["*"])
+        _fiche(db, "f1", category="PCO.Fourriere", metier=None)
+        _fiche(db, "f2", category="PCO.Flux", metier=None)
+        assert sorted(m["id"] for m in DA.available_for_device(db, u, now=NOW)) == ["f1", "f2"]
+        assert DA.self_assign(db, "f1", u, now=NOW)[0] is True
+
+
 class TestDeclarant:
     """Groupe en mode declarant : ses tablettes ne sont jamais des unites."""
 

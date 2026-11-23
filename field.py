@@ -782,29 +782,124 @@ FIELD_CATEGORY_IDS = {c["id"] for c in FIELD_CATEGORIES}
 # Destinataires d'un SOS en plus de l'equipe de l'emetteur.
 SOS_RESPONDER_CATEGORIES = {"PCO.Securite", "PCO.Secours"}
 
+# Plusieurs categories par unite (08/11/2026) : un groupe de balises
+# (`pco_categories`) et une tablette (`categories`) portent une LISTE de
+# categories, ou ALL_CATEGORIES ("Toutes categories"). Anciens champs
+# `pco_category` / `category` (une seule) toujours lus, et toujours ecrits
+# (premiere categorie) pour les lecteurs historiques.
+ALL_CATEGORIES = "*"
+
+
+def clean_categories(raw):
+    """Saisie (chaine ou liste) -> liste propre : [] (aucune), [ALL_CATEGORIES]
+    ou des ids de FIELD_CATEGORIES sans doublon, ordre conserve. False si une
+    valeur est inconnue."""
+    if raw is None or raw == "":
+        return []
+    items = raw if isinstance(raw, (list, tuple)) else [raw]
+    out = []
+    for it in items:
+        c = str(it or "").strip()
+        if not c:
+            continue
+        if c == ALL_CATEGORIES:
+            return [ALL_CATEGORIES]
+        if c not in FIELD_CATEGORY_IDS:
+            return False
+        if c not in out:
+            out.append(c)
+    return out
+
+
+def _first_concrete(cats):
+    return cats[0] if cats and cats[0] != ALL_CATEGORIES else None
+
+
+def device_category_fields(cats):
+    """Champs d'une tablette pour une liste propre : `categories` et l'ancien
+    `category` (premiere categorie ; None pour aucune ou toutes)."""
+    return {"categories": list(cats), "category": _first_concrete(cats)}
+
+
+def group_category_fields(cats):
+    """Champs d'un groupe de balises : `pco_categories` et l'ancien
+    `pco_category` (premiere categorie ; vide pour aucune ou toutes)."""
+    return {"pco_categories": list(cats), "pco_category": _first_concrete(cats) or ""}
+
+
+def group_categories(group):
+    """Categories d'un groupe de balises : `pco_categories` (liste), a defaut
+    l'ancien `pco_category`. [] = aucune."""
+    g = group or {}
+    cats = g.get("pco_categories")
+    if isinstance(cats, list):
+        cleaned = clean_categories(cats)
+        if cleaned:
+            return cleaned
+    one = g.get("pco_category")
+    return [one] if one else []
+
+
+def covers(cats, category):
+    """Vrai si la liste de categories d'une unite couvre `category`."""
+    if not cats or not category:
+        return False
+    return ALL_CATEGORIES in cats or category in cats
+
+
+def concrete_categories(cats):
+    """Liste des ids reels couverts (ALL_CATEGORIES developpe)."""
+    if ALL_CATEGORIES in (cats or []):
+        return [c["id"] for c in FIELD_CATEGORIES]
+    return list(cats or [])
+
+
+def categories_filter(cats):
+    """Filtre Mongo `category` des fiches couvertes ; None = aucune restriction
+    (toutes categories)."""
+    if ALL_CATEGORIES in (cats or []):
+        return None
+    return cats[0] if len(cats) == 1 else {"$in": list(cats)}
+
 
 def _group_categories(db):
-    """{beacon_group_id: pco_category} depuis la config Anoloc."""
-    config = db["anoloc_config"].find_one({"_id": "global"}, {"beacon_groups": 1}) or {}
-    return {
-        g.get("id"): g.get("pco_category")
-        for g in config.get("beacon_groups", []) or []
-        if g.get("id") and g.get("pco_category")
-    }
+    """{beacon_group_id: [categories]} depuis la config Anoloc (groupes qui en
+    ont au moins une)."""
+    config = db["anoloc_config"].find_one(
+        {"_id": "global"}, {"beacon_groups": 1}) or {}
+    out = {}
+    for g in config.get("beacon_groups", []) or []:
+        cats = group_categories(g)
+        if g.get("id") and cats:
+            out[g["id"]] = cats
+    return out
+
+
+def _device_categories(db, device, group_cats=None):
+    """Categories effectives d'une tablette : celles choisies a l'appairage ou
+    dans Field dispatch (`categories`, a defaut l'ancien `category`), sinon
+    celles de son groupe de balises. [] = aucune restriction pour la tablette
+    elle-meme (comportement historique), mais jamais proposee au PC Org."""
+    if not device:
+        return []
+    cats = device.get("categories")
+    if isinstance(cats, list):
+        cleaned = clean_categories(cats)
+        if cleaned:
+            return cleaned
+    if device.get("category"):
+        return [device["category"]]
+    if group_cats is None:
+        group_cats = _group_categories(db)
+    return list(group_cats.get(device.get("beacon_group_id")) or [])
 
 
 def _device_category(db, device, group_cats=None):
-    """Categorie effective d'une tablette : celle choisie a l'appairage, a
-    defaut celle de son groupe de balises (tablettes appairees avant le choix
-    explicite). None = aucune restriction (comportement historique)."""
-    if not device:
-        return None
-    cat = device.get("category")
-    if cat:
-        return cat
-    if group_cats is None:
-        group_cats = _group_categories(db)
-    return group_cats.get(device.get("beacon_group_id"))
+    """Premiere categorie effective (affichage, compatibilite). Peut valoir
+    ALL_CATEGORIES. None = aucune. Pour un controle, utiliser
+    _device_categories + covers."""
+    cats = _device_categories(db, device, group_cats)
+    return cats[0] if cats else None
 
 
 def _beacon_groups(db):
@@ -1041,21 +1136,22 @@ def _sos_recipients(db, sender, event=None, year=None):
     circuit. `event`/`year` : conserves pour compatibilite, inutilises."""
     group_cats = _group_categories(db)
     groups = _beacon_groups(db)
+    # Equipe de l'emetteur = ses categories ; une unite "Toutes categories"
+    # (ou sans categorie) recoit tous les SOS, qui la concernent toujours.
     wanted = set(SOS_RESPONDER_CATEGORIES)
-    sender_cat = _device_category(db, sender, group_cats)
-    if sender_cat:
-        wanted.add(sender_cat)
+    wanted.update(c for c in _device_categories(db, sender, group_cats) if c != ALL_CATEGORIES)
     sender_keys = {_pair_key(e, y) for e, y in device_pairs(db, sender)}
     out = []
     for o in db["field_devices"].find({
         "_id": {"$ne": sender["_id"]},
         "revoked": {"$ne": True},
-    }, {"_id": 1, "name": 1, "category": 1, "beacon_group_id": 1, "event": 1, "year": 1,
-        "restoredAt": 1}):
+    }, {"_id": 1, "name": 1, "category": 1, "categories": 1, "beacon_group_id": 1,
+        "event": 1, "year": 1, "restoredAt": 1}):
         # Un declarant garde son bouton SOS mais ne recoit pas ceux des autres
         if _device_declarant(db, o, groups):
             continue
-        if _device_category(db, o, group_cats) not in wanted | {None}:
+        o_cats = _device_categories(db, o, group_cats)
+        if o_cats and ALL_CATEGORIES not in o_cats and not (set(o_cats) & wanted):
             continue
         if _device_expired(db, o):
             continue
@@ -1075,6 +1171,8 @@ def _pub_device(device):
         "year": device.get("year"),
         "beacon_group_id": device.get("beacon_group_id"),
         "category": device.get("category"),
+        "categories": clean_categories(device.get("categories")) or (
+            [device["category"]] if device.get("category") else []),
         "metiers": device.get("metiers") or [],
         "created_at": _iso(device.get("createdAt")),
         "last_seen": _iso(device.get("last_seen")),
@@ -1383,6 +1481,9 @@ def field_index():
         return redirect("/field/denied")
     pub = _pub_device(device)
     groups = _beacon_groups(db)
+    # Categories effectives (les siennes, sinon celles du groupe) : pilotent
+    # les categories proposees a la creation de fiche des le chargement.
+    pub["categories_effective"] = _device_categories(db, device)
     pub["declarant"] = _device_declarant(db, device, groups)
     pub["route_piste"] = _device_route_piste(db, device, groups)
     pub["controle"] = _device_controle(db, device, groups)
@@ -1479,7 +1580,8 @@ def field_pair_submit():
         "event": pairing.get("event"),
         "year": pairing.get("year"),
         "beacon_group_id": pairing.get("beacon_group_id"),
-        "category": pairing.get("category"),
+        **device_category_fields(clean_categories(pairing.get("categories")) or (
+            [pairing["category"]] if pairing.get("category") else [])),
         "metiers": pairing.get("metiers") or [],
         "token_hash": token_hash,
         "createdAt": _now(),
@@ -1996,10 +2098,10 @@ def field_create_fiche():
     # Evenement de la fiche : celui de la tablette si c'est une epreuve
     # active, sinon l'evenement courant (bascule SAISON / epreuve).
     event, year = fiche_target_event(db, device)
-    device_category = _device_category(db, device)
-    if device_category and category != device_category:
+    device_cats = _device_categories(db, device)
+    if device_cats and not covers(device_cats, category):
         return jsonify({"ok": False, "error": "category_not_allowed",
-                        "allowed": device_category}), 403
+                        "allowed": device_cats[0], "allowed_list": device_cats}), 403
     now = _now()
     now_local = _now_local()
     ts_str = now_local.isoformat()
@@ -2238,14 +2340,17 @@ def field_my_fiche_finish(fiche_id):
 @field_bp.route("/field/pco-categories", methods=["GET"])
 @field_token_required
 def field_pco_categories():
-    """Categories dans lesquelles cette tablette peut creer des fiches : la
-    sienne seule si elle en a une, sinon les quatre historiques."""
-    cat = _device_category(_get_mongo_db(), request.device)
-    if cat:
-        cats = [c for c in FIELD_CATEGORIES if c["id"] == cat]
+    """Categories dans lesquelles cette tablette peut creer des fiches : les
+    siennes si elle en a (toutes pour "Toutes categories"), sinon les quatre
+    historiques."""
+    dev_cats = _device_categories(_get_mongo_db(), request.device)
+    if dev_cats:
+        ids = concrete_categories(dev_cats)
+        cats = [c for c in FIELD_CATEGORIES if c["id"] in ids]
     else:
         cats = [c for c in FIELD_CATEGORIES if c["legacy"]]
-    return jsonify({"categories": cats, "device_category": cat})
+    return jsonify({"categories": cats, "device_category": dev_cats[0] if dev_cats else None,
+                    "device_categories": dev_cats})
 
 
 @field_bp.route("/field/inbox", methods=["GET"])
@@ -2451,10 +2556,10 @@ def field_photo_send():
     opt_out_fiche = create_fiche_param in {"false", "0"}
     should_create_fiche = bool(category) and not opt_out_fiche
     if should_create_fiche:
-        device_category = _device_category(_get_mongo_db(), device)
-        if device_category and category != device_category:
+        device_cats = _device_categories(_get_mongo_db(), device)
+        if device_cats and not covers(device_cats, category):
             return jsonify({"ok": False, "error": "category_not_allowed",
-                            "allowed": device_category}), 403
+                            "allowed": device_cats[0], "allowed_list": device_cats}), 403
 
     # Multi-photos : champ "photos" (getlist) prioritaire, fallback "photo" (compat).
     photo_files = [pf for pf in request.files.getlist("photos") if pf and pf.filename]
@@ -3320,6 +3425,8 @@ def _pub_pairing(p):
         "year": p.get("year"),
         "beacon_group_id": p.get("beacon_group_id"),
         "category": p.get("category"),
+        "categories": clean_categories(p.get("categories")) or (
+            [p["category"]] if p.get("category") else []),
         "metiers": p.get("metiers") or [],
         "notes": p.get("notes", ""),
         "createdAt": _iso(p.get("createdAt")),
@@ -3403,6 +3510,7 @@ def field_admin_beacon_groups():
             "color": g.get("color") or "#6366f1",
             "icon": g.get("icon") or "location_on",
             "pco_category": g.get("pco_category"),
+            "pco_categories": group_categories(g),
             "declarant": bool(g.get("declarant")),
             "route_piste": bool(g.get("route_piste")),
             "controle": bool(g.get("controle")),
@@ -3445,12 +3553,13 @@ def field_admin_pairings_create():
     event = (data.get("event") or "").strip()
     year = str(data.get("year") or "").strip()
     beacon_group_id = (data.get("beacon_group_id") or "").strip()
-    category = (data.get("category") or "").strip()
+    # `categories` (liste, "*" = toutes) ; ancien client : `category` seule
+    categories = clean_categories(data["categories"] if "categories" in data else data.get("category"))
     notes = (data.get("notes") or "").strip()
 
     if not name:
         return jsonify({"ok": False, "error": "missing_name"}), 400
-    if category and category not in FIELD_CATEGORY_IDS:
+    if categories is False:
         return jsonify({"ok": False, "error": "invalid_category"}), 400
     if not event or not year:
         return jsonify({"ok": False, "error": "missing_event_year"}), 400
@@ -3466,8 +3575,8 @@ def field_admin_pairings_create():
     grp = next((g for g in config.get("beacon_groups", []) or [] if g.get("id") == beacon_group_id), None)
     if not grp:
         return jsonify({"ok": False, "error": "unknown_beacon_group"}), 400
-    # Sans choix explicite, la tablette prend la categorie de son groupe.
-    category = category or grp.get("pco_category") or None
+    # Sans choix explicite, la tablette prend les categories de son groupe.
+    categories = categories or group_categories(grp)
 
     # Le nom ne doit pas collisionner avec une balise anoloc ou une autre tablette
     if _label_conflict(db, name, event, year):
@@ -3489,7 +3598,7 @@ def field_admin_pairings_create():
         "event": event,
         "year": year,
         "beacon_group_id": beacon_group_id,
-        "category": category,
+        **device_category_fields(categories),
         "metiers": _clean_metiers(data.get("metiers")),
         "notes": notes,
         "createdAt": _now(),
@@ -3631,6 +3740,7 @@ def field_admin_devices_list():
     for d in db["field_devices"].find(query).sort("createdAt", -1):
         pub = _pub_device_admin(d)
         pub["category_effective"] = _device_category(db, d, group_cats)
+        pub["categories_effective"] = _device_categories(db, d, group_cats)
         devices.append(pub)
     return jsonify({"devices": devices, "categories": FIELD_CATEGORIES})
 
@@ -3703,23 +3813,26 @@ def field_admin_device_rename(device_id):
 @field_bp.route("/field/admin/devices/<device_id>/category", methods=["POST"])
 @admin_required
 def field_admin_device_category(device_id):
-    """Change la categorie d'une tablette : elle ne voit et ne cree plus que
-    des fiches de cette categorie. Chaine vide = categorie du groupe."""
+    """Change les categories d'une tablette : elle ne voit, ne cree et ne
+    recoit plus que des fiches de ces categories. Body : `categories` (liste,
+    ["*"] = toutes) ou, ancien client, `category`. Liste vide = categories du
+    groupe."""
     try:
         oid = ObjectId(device_id)
     except Exception:
         return jsonify({"ok": False, "error": "invalid_id"}), 400
     data = request.get_json(silent=True) or {}
-    category = (data.get("category") or "").strip()
-    if category and category not in FIELD_CATEGORY_IDS:
+    categories = clean_categories(data["categories"] if "categories" in data else data.get("category"))
+    if categories is False:
         return jsonify({"ok": False, "error": "invalid_category"}), 400
 
     db = _get_mongo_db()
-    res = db["field_devices"].update_one({"_id": oid}, {"$set": {"category": category or None}})
+    res = db["field_devices"].update_one({"_id": oid}, {"$set": device_category_fields(categories)})
     if res.matched_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
     device = db["field_devices"].find_one({"_id": oid})
-    return jsonify({"ok": True, "category_effective": _device_category(db, device)})
+    return jsonify({"ok": True, "category_effective": _device_category(db, device),
+                    "categories_effective": _device_categories(db, device)})
 
 
 @field_bp.route("/field/admin/devices/<device_id>/metiers", methods=["POST"])
@@ -4970,7 +5083,9 @@ def field_my_fiches():
     # Relire le device pour avoir le statut et la categorie frais (un admin
     # peut changer la categorie pendant que la tablette tourne).
     dev_fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
-    device_category = _device_category(db, dev_fresh)
+    device_cats = _device_categories(db, dev_fresh)
+    device_category = device_cats[0] if device_cats else None
+    cat_filter = categories_filter(device_cats) if device_cats else None
     declarant = _device_declarant(db, dev_fresh)
 
     pairs = device_fiche_pairs(db, dev_fresh)
@@ -4987,12 +5102,13 @@ def field_my_fiches():
         # Un declarant n'a pas de fiches (ses constats vivent dans
         # `declarations`, /field/declarations) : seulement son propre SOS.
         and_parts.append({"content_category.field_sos": True})
-    elif device_category:
-        # Une tablette ne voit que les fiches de sa categorie. Exceptions :
-        # son propre SOS (toujours PCO.Secours) et la fiche sur laquelle elle
-        # est engagee, au cas ou le PC Org en changerait la categorie.
+    elif cat_filter is not None:
+        # Une tablette ne voit que les fiches de ses categories ("Toutes
+        # categories" : aucun filtre). Exceptions : son propre SOS (toujours
+        # PCO.Secours) et la fiche sur laquelle elle est engagee, au cas ou
+        # le PC Org en changerait la categorie.
         and_parts.append({"$or": [
-            {"category": device_category},
+            {"category": cat_filter},
             {"content_category.field_sos": True},
             {"_id": dev_fresh.get("active_fiche_id") or "__none__"},
         ]})
@@ -5034,6 +5150,12 @@ def field_my_fiches():
 
     open_list = [pub(f) for f in db["pcorg"].find(open_query).sort("ts", -1).limit(200)]
     closed_list = [pub(f) for f in db["pcorg"].find(closed_query).sort("close_ts", -1).limit(50)]
+
+    # Categorie qui decide de la cloture par l'unite : celle de sa fiche
+    # active (une unite peut porter plusieurs categories), sinon la premiere.
+    active_id = str(dev_fresh.get("active_fiche_id") or "")
+    active_cat = next((f.get("category") for f in open_list if f.get("id") == active_id), None)
+    close_cat = active_cat or (device_category if device_category != ALL_CATEGORIES else None)
 
     # Determiner le tracking_mode effectif (purge watchers expires)
     tracking_mode = _effective_tracking_mode(db, device["_id"], dev_fresh)
@@ -5081,6 +5203,7 @@ def field_my_fiches():
         "test_mode": bool(dev_fresh.get("test_mode")),
         "device_name": name,
         "device_category": device_category,
+        "device_categories": device_cats,
         "device_metiers": dev_fresh.get("metiers") or [],
         "declarant": declarant,
         # Acces piste des itineraires (groupe de balises, decoche a chaud)
@@ -5089,9 +5212,10 @@ def field_my_fiches():
         "controle": _device_controle(db, dev_fresh),
         # Proposition automatique en attente de reponse (compte a rebours)
         "proposal": None if declarant else DA.proposal_for_device(db, dev_fresh),
-        # Cloture par l'unite autorisee pour sa categorie (fin avec issue)
-        "self_close": bool(not declarant and device_category and DA.category_config(
-            DA.get_config(db), device_category).get("self_close")),
+        # Cloture par l'unite autorisee pour la categorie de sa fiche active
+        # (a defaut, sa premiere categorie) : fin avec issue
+        "self_close": bool(not declarant and close_cat and DA.category_config(
+            DA.get_config(db), close_cat).get("self_close")),
         "device_status": dev_fresh.get("status") or "patrouille",
         "active_fiche_id": dev_fresh.get("active_fiche_id"),
         "tracking_mode": tracking_mode,

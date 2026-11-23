@@ -225,7 +225,7 @@ class TestCategorieTablette:
                        json={"category": "PCO.Securite", "text": "x"})
         assert rep.status_code == 403
         assert rep.get_json() == {"ok": False, "error": "category_not_allowed",
-                                  "allowed": "PCO.Technique"}
+                                  "allowed": "PCO.Technique", "allowed_list": ["PCO.Technique"]}
 
     def test_categories_proposees(self, env):
         _as_tablet(env, "tok1")
@@ -272,6 +272,110 @@ class TestCategorieTablette:
                        json={"category": "PCO.Inconnue"})
         assert rep.status_code == 400
         assert rep.get_json()["error"] == "invalid_category"
+        rep = env.post("/field/admin/devices/%s/category" % ("0" * 24),
+                       json={"categories": ["PCO.Securite", "PCO.Inconnue"]})
+        assert rep.status_code == 400
+
+
+class TestPlusieursCategories:
+    """08/11/2026 : une unite porte plusieurs categories, ou "*" (toutes)."""
+
+    def _add(self, **doc):
+        base = {"event": "E", "year": "2026", "revoked": False}
+        env_fake_app["db"]["field_devices"].docs.append(dict(base, **doc))
+
+    def test_nettoyage(self):
+        assert field.clean_categories(None) == []
+        assert field.clean_categories("PCO.Flux") == ["PCO.Flux"]
+        assert field.clean_categories(["PCO.Flux", "", "PCO.Flux", "PCO.Secours"]) == ["PCO.Flux", "PCO.Secours"]
+        assert field.clean_categories(["PCO.Flux", "*"]) == ["*"]
+        assert field.clean_categories(["PCO.Inconnue"]) is False
+        assert field.device_category_fields(["*"]) == {"categories": ["*"], "category": None}
+        assert field.group_category_fields(["PCO.Flux", "PCO.Secours"]) == {
+            "pco_categories": ["PCO.Flux", "PCO.Secours"], "pco_category": "PCO.Flux"}
+
+    def test_couverture(self):
+        assert field.covers(["PCO.Flux", "PCO.Securite"], "PCO.Securite")
+        assert not field.covers(["PCO.Flux"], "PCO.Securite")
+        assert field.covers(["*"], "PCO.Fourriere")
+        assert not field.covers([], "PCO.Flux")
+        assert field.categories_filter(["PCO.Flux"]) == "PCO.Flux"
+        assert field.categories_filter(["PCO.Flux", "PCO.Securite"]) == {"$in": ["PCO.Flux", "PCO.Securite"]}
+        assert field.categories_filter(["*"]) is None
+
+    def test_groupe_a_plusieurs_categories_herite(self, env):
+        db = env_fake_app["db"]
+        db["anoloc_config"].docs[0]["beacon_groups"].append(
+            {"id": "grp-multi", "pco_category": "PCO.Securite",
+             "pco_categories": ["PCO.Securite", "PCO.Technique"]})
+        self._add(_id="dev9", name="Multi", beacon_group_id="grp-multi")
+        dev = db["field_devices"].find_one({"_id": "dev9"})
+        assert field._device_categories(db, dev) == ["PCO.Securite", "PCO.Technique"]
+        # Ancien groupe a une categorie : inchange
+        assert field._device_categories(db, db["field_devices"].find_one({"_id": "dev2"})) == ["PCO.Securite"]
+
+    def test_missions_de_toutes_ses_categories(self, env):
+        db = env_fake_app["db"]
+        db["field_devices"].update_one({"_id": "dev1"}, {"$set": {
+            "categories": ["PCO.Technique", "PCO.Securite"]}})
+        _as_tablet(env, "tok1")
+        data = env.get("/field/my-fiches", headers=JSON).get_json()
+        assert data["device_categories"] == ["PCO.Technique", "PCO.Securite"]
+        assert sorted(f["id"] for f in data["open"]) == ["f1", "f2", "f3"]
+        # Creation : refusee hors de ses categories, liste renvoyee
+        rep = env.post("/field/create-fiche", headers=JSON, json={"category": "PCO.Flux", "text": "x"})
+        assert rep.status_code == 403
+        assert rep.get_json()["allowed_list"] == ["PCO.Technique", "PCO.Securite"]
+        cats = env.get("/field/pco-categories", headers=JSON).get_json()["categories"]
+        assert [c["id"] for c in cats] == ["PCO.Securite", "PCO.Technique"]
+
+    def test_toutes_categories(self, env):
+        db = env_fake_app["db"]
+        db["pcorg"].docs.append({"_id": "f4", "event": "E", "year": 2026, "status_code": 1,
+                                 "category": "PCO.Fourriere", "text": "vehicule",
+                                 "content_category": {"patrouille": "Tech 1"}})
+        db["field_devices"].update_one({"_id": "dev1"}, {"$set": {"categories": ["*"], "category": None}})
+        _as_tablet(env, "tok1")
+        data = env.get("/field/my-fiches", headers=JSON).get_json()
+        assert sorted(f["id"] for f in data["open"]) == ["f1", "f2", "f3", "f4"]
+        cats = env.get("/field/pco-categories", headers=JSON).get_json()["categories"]
+        assert len(cats) == len(field.FIELD_CATEGORIES)
+
+    def test_sos_vers_toutes_categories(self, env):
+        db = env_fake_app["db"]
+        self._add(_id="dev9", name="Polyvalent", categories=["*"])
+        self._add(_id="dev10", name="Flux Secu", categories=["PCO.Flux", "PCO.Securite"])
+        flux = db["field_devices"].find_one({"_id": "dev5"})
+        names = sorted(d["name"] for d in field._sos_recipients(db, flux))
+        # Polyvalent ("*") et Flux Secu (Securite + equipe Flux) recoivent ;
+        # Tech 1 (Technique seule) non
+        assert "Polyvalent" in names and "Flux Secu" in names
+        assert "Tech 1" not in names
+
+    def test_unites_proposees_au_pc_org(self, env, monkeypatch):
+        import anoloc
+        db = env_fake_app["db"]
+        cfg = db["anoloc_config"].docs[0]
+        cfg["enabled"] = True
+        cfg["beacon_groups"] = [
+            {"id": "grp-a", "pco_categories": ["PCO.Securite", "PCO.Flux"],
+             "anoloc_device_ids": ["b1"], "device_labels": {"b1": "Moto 1"}},
+            {"id": "grp-b", "pco_categories": ["*"], "anoloc_device_ids": ["b2"],
+             "device_labels": {"b2": "Chef"}},
+            {"id": "grp-c", "pco_category": "PCO.Secours", "anoloc_device_ids": ["b3"]},
+        ]
+        tab = {"_id": "t1", "name": "Tab", "categories": ["PCO.Technique", "PCO.Secours"]}
+        monkeypatch.setattr(anoloc, "_get_mongo_db", lambda: db)
+        monkeypatch.setattr(anoloc, "_field_tablets_seeing_pair_by_group", lambda *a: {"grp-c": [tab]})
+        flask_app = Flask(__name__)
+        with flask_app.test_request_context("/anoloc/vehicles-by-category?event=E&year=2026"):
+            data = anoloc.anoloc_vehicles_by_category().get_json()
+        labels = {cat: sorted(u["label"] for u in units) for cat, units in data.items()}
+        assert labels["PCO.Securite"] == ["Chef", "Moto 1"]
+        assert labels["PCO.Flux"] == ["Chef", "Moto 1"]
+        assert labels["PCO.Fourriere"] == ["Chef"]
+        assert labels["PCO.Secours"] == ["Chef", "Tab", "b3"]
+        assert labels["PCO.Technique"] == ["Chef", "Tab"]
 
 
 class TestModeDeclarant:

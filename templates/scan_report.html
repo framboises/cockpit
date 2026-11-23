@@ -211,6 +211,28 @@
     .scan-note.ok { background: rgba(74,222,128,.09);
       border: 1px solid rgba(74,222,128,.3); color: #4ade80; }
 
+    /* --- Format lu et colonnes (journaux de scans) --------------------- */
+    .scan-format { background: #1a2231; border: 1px solid #2a3548;
+      border-radius: 7px; padding: 9px 12px; margin-bottom: 12px;
+      font-size: 12.5px; color: #c8d6ea; }
+    .scan-format summary { cursor: pointer; font-weight: 600; color: #e6ecf5; }
+    .scan-format-stats { font-size: 11.5px; color: #8aa0bd; margin: 8px 0 4px; }
+    .scan-format-grid, .scan-format-values { display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 8px 12px; margin-top: 10px; }
+    .scan-format-grid label, .scan-format-values label { display: flex;
+      flex-direction: column; gap: 3px; font-size: 11px; color: #8aa0bd; }
+    .scan-format-values label.scan-check { flex-direction: row; gap: 7px;
+      align-items: center; font-size: 12px; color: #c8d6ea; }
+    .scan-format select { width: 100%; padding: 6px 8px; background: #0f1620;
+      border: 1px solid #2a3548; border-radius: 5px; color: #e6ecf5;
+      font-size: 12.5px; font-family: inherit; }
+    .scan-format-opts { display: flex; flex-direction: column; gap: 5px;
+      margin-top: 10px; }
+    .scan-format-opts label { display: flex; flex-direction: row; gap: 7px;
+      align-items: center; font-size: 12px; cursor: pointer; }
+    .scan-format-go { margin-top: 12px; }
+
     /* --- Grille de mapping --------------------------------------------- */
     /* 4 colonnes : unite | categorie | collection geo | entite */
     .scanmap-row { display: grid; grid-template-columns: 1.35fr .85fr .75fr 1.5fr;
@@ -378,16 +400,20 @@
       <!-- etape 1 : depot du fichier -->
       <div id="scan-step-file">
         <div class="scan-note info">
-          Le fichier doit suivre le format d'export Sirius (zone / porte / device,
-          pas de 15 min). Le <a href="/scan-report/template.xlsx" style="color:inherit;text-decoration:underline;">modele</a>
-          decrit les regles en detail.
+          Deux familles de fichiers sont reconnues automatiquement :
+          la <strong>matrice Sirius</strong> (zone / porte / device, pas de 15 min, cf.
+          <a href="/scan-report/template.xlsx" style="color:inherit;text-decoration:underline;">modele</a>)
+          et tout <strong>journal de scans</strong> a une ligne par passage
+          (Weezevent, export brut...) : les colonnes date, point de controle, sens,
+          terminal et code-barre sont reperees d'apres leurs en-tetes et leur contenu,
+          et restent modifiables apres lecture.
         </div>
         <div class="scan-drop" id="scan-drop">
           <span class="material-symbols-outlined">cloud_upload</span>
           <div><strong>Choisir un fichier</strong> ou le deposer ici</div>
-          <div style="font-size:11.5px;margin-top:5px;">.xlsx ou .xlsm, 25 Mo maximum</div>
+          <div style="font-size:11.5px;margin-top:5px;">.xlsx, .xlsm, .csv ou .txt, 200 Mo maximum</div>
         </div>
-        <input type="file" id="scan-file-input" accept=".xlsx,.xlsm" hidden>
+        <input type="file" id="scan-file-input" accept=".xlsx,.xlsm,.csv,.txt" hidden>
         <div class="scan-progress" id="scan-upload-progress" hidden>
           <div class="scan-progress-bar"><div class="scan-progress-fill"></div></div>
           <div class="scan-progress-info">
@@ -395,10 +421,13 @@
             <span id="scan-upload-pct">0 %</span>
           </div>
         </div>
+        <!-- colonnes a completer quand un journal n'a pas pu etre lu -->
+        <div id="scan-format-fix"></div>
       </div>
 
       <!-- etape 2 : apercu -->
       <div id="scan-step-preview" hidden>
+        <div id="scan-format-block"></div>
         <div id="scan-preview-notes"></div>
         <div class="scan-tiles" id="scan-preview-tiles"></div>
         <div class="form-row">
@@ -406,6 +435,21 @@
             <input type="text" id="scan-race" class="form-input"
                    placeholder="2024-04-20T15:00:00">
           </label>
+        </div>
+        <div class="form-row">
+          <label class="scan-check" style="display:flex;flex-direction:row;gap:7px;align-items:center;font-size:12.5px;">
+            <input type="checkbox" id="scan-reset-on">
+            <span>Remettre les presents a zero chaque nuit a</span>
+            <input type="number" id="scan-reset-hour" min="0" max="23" value="5"
+                   class="form-input" style="width:64px;">
+            <span>h</span>
+          </label>
+          <div style="font-size:11.5px;color:#8aa0bd;margin-top:4px;">
+            Evenement de journee avec evacuation le soir sans scan de sortie
+            (GP Explorer) : sans remise a zero, les presents s'accumulent d'un
+            jour a l'autre. Laisser decoche pour un evenement de 24 h, ou le
+            public dort dans l'enceinte.
+          </div>
         </div>
         <div id="scan-unresolved-block" hidden>
           <div class="scanmap-head">

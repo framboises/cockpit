@@ -361,6 +361,37 @@
 
   var editingGroupIdx = null;
 
+  // Categories PCO du groupe : plusieurs cases, ou "Toutes" ("*", exclusive).
+  // Ancien groupe : `pco_category` seule.
+  function groupCategories(grp) {
+    if (grp && Array.isArray(grp.pco_categories) && grp.pco_categories.length) return grp.pco_categories;
+    return grp && grp.pco_category ? [grp.pco_category] : [];
+  }
+
+  function setPcoCategories(form, cats) {
+    var boxes = form.querySelectorAll('input[name="pco_categories"]');
+    Array.prototype.forEach.call(boxes, function (cb) { cb.checked = (cats || []).indexOf(cb.value) !== -1; });
+    var wrap = $("#bg-pco-categories");
+    if (wrap && !wrap._wired) {
+      wrap._wired = true;
+      wrap.addEventListener("change", function (e) {
+        var t = e.target;
+        if (!t || t.name !== "pco_categories" || !t.checked) return;
+        Array.prototype.forEach.call(form.querySelectorAll('input[name="pco_categories"]'), function (cb) {
+          if (cb !== t && (t.value === "*" || cb.value === "*")) cb.checked = false;
+        });
+      });
+    }
+  }
+
+  function getPcoCategories(form) {
+    var out = [];
+    Array.prototype.forEach.call(form.querySelectorAll('input[name="pco_categories"]'), function (cb) {
+      if (cb.checked) out.push(cb.value);
+    });
+    return out.indexOf("*") !== -1 ? ["*"] : out;
+  }
+
   function openGroupModal(idx) {
     editingGroupIdx = idx;
     var modal = $("#anoloc-group-modal");
@@ -378,16 +409,14 @@
       $('input[name="icon"]', form).value = grp.icon || "location_on";
       $('input[name="color"]', form).value = grp.color || "#6366f1";
       form.elements.enabled.checked = grp.enabled !== false;
-      var pcoCatSel = $('select[name="pco_category"]', form);
-      if (pcoCatSel) pcoCatSel.value = grp.pco_category || "";
+      setPcoCategories(form, groupCategories(grp));
       $('input[name="declarant"]', form).checked = !!grp.declarant;
       $('input[name="route_piste"]', form).checked = !!grp.route_piste;
       $('input[name="controle"]', form).checked = !!grp.controle;
     } else {
       title.textContent = "Nouveau groupe de balises";
       $('input[name="id"]', form).value = "";  // forcer id vide pour nouveau groupe
-      var pcoCatSel = $('select[name="pco_category"]', form);
-      if (pcoCatSel) pcoCatSel.value = "";
+      setPcoCategories(form, []);
     }
 
     var search = $("#bg-search");
@@ -653,8 +682,7 @@
       while (usedIds.indexOf(id) !== -1) { id += "-" + Math.random().toString(36).substr(2, 4); }
     }
 
-    var pcoCatEl = $('select[name="pco_category"]', form);
-    var pcoCategory = pcoCatEl ? pcoCatEl.value : "";
+    var pcoCategories = getPcoCategories(form);
 
     var grpData = {
       id: id,
@@ -664,7 +692,9 @@
       anoloc_device_ids: deviceIds,
       device_labels: deviceLabels,
       enabled: enabled,
-      pco_category: pcoCategory,
+      // Liste ("*" = toutes) ; le serveur tient a jour l'ancien pco_category
+      pco_categories: pcoCategories,
+      pco_category: pcoCategories[0] && pcoCategories[0] !== "*" ? pcoCategories[0] : "",
       declarant: $('input[name="declarant"]', form).checked,
       route_piste: $('input[name="route_piste"]', form).checked,
       controle: $('input[name="controle"]', form).checked,

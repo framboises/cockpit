@@ -244,6 +244,12 @@
 .it-ts-panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .it-ts-panel .btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; }
 .it-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: middle; margin-right: 6px; }
+.it-swatch.is-dash { width: 18px; height: 0; border-radius: 0; border-top: 4px dashed currentColor; }
+/* Test de trajet : voies, regles, portails et pictos estompes, seuls les
+   trajets (calque itTest) restent nets */
+.it-map.is-testing .leaflet-overlay-pane,
+.it-map.is-testing .leaflet-itBarriers-pane,
+.it-map.is-testing .leaflet-marker-pane { opacity: 0.25; transition: opacity 0.2s; }
 .it-ts-table td { padding: 7px 8px; }
 .it-ts-table input { margin: 0; }
 

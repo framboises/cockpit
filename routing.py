@@ -245,7 +245,9 @@ def _build_avoid_locations(alerts):
 # Appel Valhalla
 # ---------------------------------------------------------------------------
 
-def _call_valhalla(from_pt, to_pt, waypoints, mode, avoids):
+def _call_valhalla(from_pt, to_pt, waypoints, mode, avoids, recipe=None):
+    """recipe : recette Valhalla imposee (ex. pieton du testeur), sinon celle
+    du mode vehicule."""
     locations = [{"lat": from_pt[0], "lon": from_pt[1], "type": "break"}]
     for wp in (waypoints or []):
         ll = _parse_latlng(wp)
@@ -258,7 +260,7 @@ def _call_valhalla(from_pt, to_pt, waypoints, mode, avoids):
         "directions_options": {"units": "kilometers"},
         "id": "cockpit-routing",
     }
-    payload.update(VA.route_recipe(mode))
+    payload.update(recipe or VA.route_recipe(mode))
 
     # Evitements Waze : modes normaux seulement (le god passe dans les bouchons)
     avoid_locations = []
@@ -496,8 +498,12 @@ def cockpit_route():
 @routing_bp.route("/api/admin/itineraire/route-test", methods=["POST"])
 @admin_required
 def route_test_all_modes():
-    """Testeur du moteur (/admin/itineraire) : A -> B dans les 4 modes, sur
-    le scenario charge, sans evitement Waze ni repli trait droit.
+    """Testeur du moteur (/admin/itineraire) : A -> B dans les 4 modes
+    vehicule plus a pied, sur le scenario charge, sans evitement Waze ni
+    repli trait droit.
+
+    Pieton : costing "pedestrian" sans recette, il applique de lui-meme les
+    regles du scenario (fermer, interdire pietons) ; jamais piste ni god.
 
     Body JSON : {from: [lat,lng], to: [lat,lng]}
     """
@@ -508,18 +514,20 @@ def route_test_all_modes():
         return jsonify({"ok": False, "error": "invalid_coordinates"}), 400
 
     def one(mode):
-        resp, err = _call_valhalla(from_pt, to_pt, [], mode, [])
+        recipe = {"costing": "pedestrian"} if mode == "pedestrian" else VA.route_recipe(mode)
+        resp, err = _call_valhalla(from_pt, to_pt, [], mode, [], recipe=recipe)
         if resp is None:
             return {"mode": mode, "ok": False, "error": err or "no_route"}
         out = _format_valhalla_response(resp, mode=mode)
         if out is None:
             return {"mode": mode, "ok": False, "error": "no_route"}
         out["ok"] = True
-        out["costing"] = VA.route_recipe(mode).get("costing")
+        out["costing"] = recipe.get("costing")
         return out
 
-    with ThreadPoolExecutor(max_workers=len(VA.ROUTE_MODES)) as pool:
-        results = list(pool.map(one, VA.ROUTE_MODES))
+    modes = list(VA.ROUTE_MODES) + ["pedestrian"]
+    with ThreadPoolExecutor(max_workers=len(modes)) as pool:
+        results = list(pool.map(one, modes))
     return jsonify({"ok": True, "results": results})
 
 

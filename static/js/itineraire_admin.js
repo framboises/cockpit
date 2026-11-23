@@ -21,7 +21,13 @@
   var API = "/api/admin/itineraire";
   var MODE_LABELS = window.__itModeLabels || {};
   var MODES = ["normal", "normal_piste", "god", "god_piste"];
-  var MODE_COLORS = { normal: "#2563eb", normal_piste: "#0891b2", god: "#dc2626", god_piste: "#f59e0b" };
+  // Test de trajet : 4 modes vehicule + a pied. Couleurs choisies hors de
+  // celles des regles (rouge, orange, vert, bleu, violet, gris, jaune) ;
+  // pendant le test, les regles passent en transparence (.is-testing).
+  var TEST_MODES = MODES.concat(["pedestrian"]);
+  var MODE_COLORS = { normal: "#db2777", normal_piste: "#0891b2", god: "#111827", god_piste: "#9a3412", pedestrian: "#4d7c0f" };
+  var MODE_DASH = { normal_piste: "12 8", god_piste: "12 8", pedestrian: "1 9" };
+  if (!MODE_LABELS.pedestrian) MODE_LABELS.pedestrian = "A pied";
   var ACCESS_COLORS = { fermer: "#dc2626", interdire: "#f59e0b", ouvrir: "#16a34a" };
   var RULE_COLOR = "#7c3aed";       // regle sans acces (sens, vitesse, tags)
   var RACEWAY_COLOR = "#2563eb";
@@ -865,6 +871,10 @@
     // cliquables) ; en SVG, seuls les cercles captent le clic.
     M.map.createPane("itBarriers").style.zIndex = 450;
     M.barrierRenderer = L.svg({ pane: "itBarriers" });
+    // Trajets testes : au-dessus de tout le reste, qui s'estompe pendant le test
+    M.map.createPane("itTest").style.zIndex = 640;
+    M.map.getPane("itTest").style.pointerEvents = "none";
+    M.testRenderer = L.svg({ pane: "itTest" });
     baseLayers(M.map);
     M.map.setView(CIRCUIT_CENTER, 14);
     M.groups = {
@@ -1845,16 +1855,20 @@
     var M = S.m;
     M.groups.test.clearLayers();
     var bounds = [];
+    var opt = { pane: "itTest", renderer: M.testRenderer, interactive: false };
     (M.tres || []).slice().reverse().forEach(function (r) {
       if (!r.ok || M.thidden[r.mode]) return;
       var pts = decodePolyline6(r.polyline);
       if (pts.length < 2) return;
-      L.polyline(pts, { color: MODE_COLORS[r.mode], weight: r.mode.indexOf("god") === 0 ? 7 : 5, opacity: 0.85,
-        dashArray: r.mode.slice(-6) === "_piste" ? "12 8" : null, interactive: false }).addTo(M.groups.test);
+      var w = r.mode.indexOf("god") === 0 ? 7 : r.mode === "pedestrian" ? 6 : 5;
+      // Liseré blanc dessous : le trait se detache des voies estompees
+      L.polyline(pts, Object.assign({ color: "#ffffff", weight: w + 4, opacity: 0.9 }, opt)).addTo(M.groups.test);
+      L.polyline(pts, Object.assign({ color: MODE_COLORS[r.mode] || "#000000", weight: w, opacity: 0.95,
+        dashArray: MODE_DASH[r.mode] || null, lineCap: "round" }, opt)).addTo(M.groups.test);
       bounds = bounds.concat(pts);
     });
-    if (M.ta) L.circleMarker(M.ta, { radius: 8, fillColor: "#16a34a", color: "#fff", weight: 3, fillOpacity: 1, interactive: false }).addTo(M.groups.test);
-    if (M.tb) L.circleMarker(M.tb, { radius: 8, fillColor: "#dc2626", color: "#fff", weight: 3, fillOpacity: 1, interactive: false }).addTo(M.groups.test);
+    if (M.ta) L.circleMarker(M.ta, Object.assign({ radius: 8, fillColor: "#16a34a", color: "#fff", weight: 3, fillOpacity: 1 }, opt)).addTo(M.groups.test);
+    if (M.tb) L.circleMarker(M.tb, Object.assign({ radius: 8, fillColor: "#dc2626", color: "#fff", weight: 3, fillOpacity: 1 }, opt)).addTo(M.groups.test);
     if (fit && bounds.length) M.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
   }
 
@@ -1863,19 +1877,21 @@
     box.appendChild(h("div", { className: "it-b-head" }, [icon("science"), h("strong", { text: "Tester un trajet" }),
       iconBtn("close", "Quitter le test", function () { toggleTest(false); })]));
     box.appendChild(h("div", { className: "it-hint", text: !M.ta ? "Cliquer le depart sur la carte." : !M.tb ? "Cliquer l'arrivee." :
-      M.tres ? "Cliquer la carte pour un nouveau depart." : "Calcul dans les quatre modes..." }));
+      M.tres ? "Cliquer la carte pour un nouveau depart." : "Calcul dans les quatre modes vehicule et a pied..." }));
     box.appendChild(h("div", { className: "it-hint it-b-warn", text: "Calcul sur le scenario CHARGE : les modifications non chargees n'y sont pas encore." }));
     if (!M.tres) return;
     var t = h("table", { className: "it-table it-ts-table" });
     var tb = h("tbody");
-    MODES.forEach(function (m) {
+    TEST_MODES.forEach(function (m) {
       var r = M.tres.filter(function (x) { return x.mode === m; })[0];
+      // Service pas a jour (pas de ligne a pied) : rien a afficher
+      if (!r && m === "pedestrian") return;
       var cb = h("input", { type: "checkbox", title: "Afficher" });
       cb.checked = !M.thidden[m];
       cb.addEventListener("change", function () { M.thidden[m] = !cb.checked; drawTest(); });
       tb.appendChild(h("tr", null, [
         h("td", null, cb),
-        h("td", null, [h("span", { className: "it-swatch", style: { background: MODE_COLORS[m] } }), MODE_LABELS[m] || m]),
+        h("td", null, [h("span", { className: "it-swatch" + (MODE_DASH[m] ? " is-dash" : ""), style: { color: MODE_COLORS[m], background: MODE_DASH[m] ? "transparent" : MODE_COLORS[m] } }), MODE_LABELS[m] || m]),
         h("td", { text: !r ? "-" : r.ok ? ((r.distance_m || 0) / 1000).toFixed(2) + " km" : (r.error === "no_route" ? "aucun chemin" : "indisponible") }),
         h("td", { text: r && r.ok ? fmtMin(r.duration_s) : "-" }),
         h("td", { text: r && r.ok && r.uses_raceway ? "piste" : "" }),

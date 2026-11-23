@@ -251,10 +251,14 @@ def _tablet_to_device(tablet):
         if last_seen.tzinfo is None:
             last_seen = last_seen.replace(tzinfo=timezone.utc)
     online = False
+    age = None
     if last_seen:
         age = (datetime.now(timezone.utc) - last_seen).total_seconds()
         if age < 120:  # 2 min => online
             online = True
+    # Meme regle que les balises (balises_core._is_stale) : hors ligne depuis
+    # plus de 24 h (ou jamais vue) = plus de pin sur la carte (08/11/2026).
+    stale = B._is_stale(online, age)
     bat = last_pos.get("battery")
     try:
         bat_int = int(round(float(bat))) if bat is not None else None
@@ -282,6 +286,8 @@ def _tablet_to_device(tablet):
         "last_real_at": last_seen.isoformat() if last_seen else "",
         "collected_at": last_seen.isoformat() if last_seen else "",
         "online": online,
+        "stale": stale,
+        "last_at": last_seen.isoformat() if last_seen else None,
         "kind": "tablet",
         "patrol_status": patrol_status,
         "patrol_status_since": status_since_iso,
@@ -468,8 +474,11 @@ def anoloc_trail():
 
 @anoloc_bp.route("/anoloc/vehicles-by-category")
 def anoloc_vehicles_by_category():
-    """Retourne {category: [{id, label}, ...]} pour les groupes avec pco_category.
+    """Retourne {category: [{id, label}, ...]} pour les groupes qui ont des
+    categories. Une unite a plusieurs categories (groupe `pco_categories` ou
+    tablette `categories`, "*" = toutes) figure dans chacune.
     Inclut aussi les tablettes Field, meme si l integration anoloc est desactivee."""
+    import field as _F
     db = _get_mongo_db()
     config = db["anoloc_config"].find_one({"_id": "global"}) or {}
     anoloc_enabled = bool(config.get("enabled"))
@@ -478,29 +487,29 @@ def anoloc_vehicles_by_category():
     result = {}
     seen = {}  # category -> set of device ids (deduplicate)
 
+    def _add(cats, key, entry):
+        for cat in _F.concrete_categories(cats):
+            if cat not in result:
+                result[cat] = []
+                seen[cat] = set()
+            if key in seen[cat]:
+                continue
+            seen[cat].add(key)
+            result[cat].append(dict(entry))
+
     if anoloc_enabled:
         for grp in config.get("beacon_groups", []):
             if grp.get("enabled") is False:
                 continue
-            cat = grp.get("pco_category")
-            if not cat:
+            cats = _F.group_categories(grp)
+            if not cats:
                 continue
             if visible_groups is not None and grp["id"] not in visible_groups:
                 continue
 
             dev_labels = grp.get("device_labels") or {}
-            if cat not in result:
-                result[cat] = []
-                seen[cat] = set()
-
             for dev_id in grp.get("anoloc_device_ids", []):
-                if dev_id in seen[cat]:
-                    continue
-                seen[cat].add(dev_id)
-                result[cat].append({
-                    "id": dev_id,
-                    "label": dev_labels.get(dev_id, dev_id),
-                })
+                _add(cats, dev_id, {"id": dev_id, "label": dev_labels.get(dev_id, dev_id)})
 
     # Fusion tablettes Field qui voient event/year (field.device_pairs : leur
     # appairage + les evenements actifs ; une tablette SAISON est proposee sur
@@ -509,9 +518,9 @@ def anoloc_vehicles_by_category():
     year = request.args.get("year")
     tablets_by_group = _field_tablets_seeing_pair_by_group(db, event, year)
     cat_by_group = {
-        g["id"]: g.get("pco_category")
+        g["id"]: _F.group_categories(g)
         for g in (config.get("beacon_groups", []) or [])
-        if g.get("enabled") is not False and g.get("pco_category")
+        if g.get("enabled") is not False and _F.group_categories(g)
     }
     declarant_groups = {
         g["id"] for g in (config.get("beacon_groups", []) or [])
@@ -524,22 +533,13 @@ def anoloc_vehicles_by_category():
         if gid in declarant_groups:
             continue
         for t in tablets:
-            # Categorie choisie a l'appairage, a defaut celle du groupe : une
-            # tablette n'est proposee que sur les fiches de sa categorie.
-            cat = t.get("category") or cat_by_group.get(gid)
-            if not cat:
+            # Categories choisies a l'appairage, a defaut celles du groupe : une
+            # tablette n'est proposee que sur les fiches de ses categories.
+            cats = _F._device_categories(db, t, cat_by_group)
+            if not cats:
                 continue
-            if cat not in result:
-                result[cat] = []
-                seen[cat] = set()
             label = t.get("name") or "?"
-            if label in seen[cat]:
-                continue
-            seen[cat].add(label)
-            result[cat].append({
-                "id": "field:" + str(t.get("_id")),
-                "label": label,
-            })
+            _add(cats, label, {"id": "field:" + str(t.get("_id")), "label": label})
 
     return jsonify(result)
 
@@ -765,7 +765,14 @@ def anoloc_config_save():
     # Balises Teltonika : libelle de reference = parc (balises_devices), recopie
     # dans device_labels (main courante, collisions de noms Field)
     tlt = B.devices_by_id(db)
+    import field as _F
     for g in deduped_groups:
+        # Categories du groupe (liste, "*" = toutes) : valeurs inconnues
+        # ecartees, ancien `pco_category` tenu a jour (premiere categorie)
+        brut = g.get("pco_categories") if isinstance(g.get("pco_categories"), list) else g.get("pco_category")
+        brut = brut if isinstance(brut, list) else [brut]
+        cats = _F.clean_categories([c for c in brut if _F.clean_categories(c) is not False])
+        g.update(_F.group_category_fields(cats or []))
         labels = dict(g.get("device_labels") or {})
         for did in g.get("anoloc_device_ids") or []:
             if B.is_teltonika_id(did) and did in tlt:

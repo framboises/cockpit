@@ -254,12 +254,32 @@ def wants_auto(cfg, fiche):
 # Candidats
 # ---------------------------------------------------------------------------
 
-def _device_metiers_ok(device, metier):
+def _category_metiers(db, category):
+    """Metiers (sous-classifications de pcorg_lists) d'une categorie, normalises."""
+    doc = db["pcorg_config"].find_one({"_id": "pcorg_lists"}, {"sous_classifications": 1}) or {}
+    items = (doc.get("sous_classifications") or {}).get(category) or []
+    return {_norm(it.get("label") if isinstance(it, dict) else it) for it in items}
+
+
+def _device_metiers_ok(device, metier, db=None, category=None, cats=None):
+    """Metier de la fiche couvert par l'unite. Liste vide = tous.
+
+    Unite a plusieurs categories (`cats`, 08/11/2026) : ses metiers sont
+    choisis par categorie. Une categorie dont AUCUN metier n'est coche reste
+    "tous metiers" : un agent Technique / Electricite engage aussi en Securite
+    recoit toutes les fiches Securite. Unite a une seule categorie : regle
+    historique (seuls ses metiers)."""
     metiers = device.get("metiers") or []
     if not metier or not metiers:
         return True
     target = _norm(metier)
-    return any(_norm(m) == target for m in metiers)
+    if any(_norm(m) == target for m in metiers):
+        return True
+    multi = cats is not None and (len(cats) > 1 or "*" in cats)
+    if multi and db is not None and category:
+        ref = _category_metiers(db, category)
+        return not any(_norm(m) in ref for m in metiers)
+    return False
 
 
 def _proposal_pending(device, now):
@@ -305,7 +325,9 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
             continue
         if d.get("test_mode"):     # tablette d'essai (Field dispatch) : jamais une vraie fiche
             continue
-        if F._device_category(db, d, group_cats) != category:
+        # Une unite a plusieurs categories est candidate sur chacune
+        d_cats = F._device_categories(db, d, group_cats)
+        if not F.covers(d_cats, category):
             continue
         if (d.get("status") or "patrouille") != "patrouille":
             continue
@@ -314,7 +336,7 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
             continue
         if _proposal_pending(d, now):
             continue
-        if not _device_metiers_ok(d, metier):
+        if not _device_metiers_ok(d, metier, db, category, d_cats):
             continue
         # Intrusion camera : zone de competence de la tablette couvrant la
         # camera (tablette sans zone : partout)
@@ -678,7 +700,7 @@ def manual_assign(db, fiche_id, device, by_name, now=None):
         return False, "unite_invalide"
     if F._device_declarant(db, device):
         return False, "unite_invalide"
-    if F._device_category(db, device) != fiche.get("category"):
+    if not F.covers(F._device_categories(db, device), fiche.get("category")):
         return False, "categorie_differente"
     name = device.get("name") or "?"
     cur = ((fiche.get("dispatch") or {}).get("current") or {})
@@ -742,11 +764,10 @@ def available_for_device(db, device, limit=100, now=None):
     fiches ouvertes, les nouvelles n'apparaissaient plus."""
     F = _field()
     now = now or _now()
-    cat = F._device_category(db, device)
-    if not cat or F._device_declarant(db, device):
+    cats = F._device_categories(db, device)
+    if not cats or F._device_declarant(db, device):
         return []
-    out = []
-    for f in db["pcorg"].find({
+    q = {
         "$and": [
             EC.pairs_filter(F.device_fiche_pairs(db, device, now)),
             {"$or": [{"content_category.patrouille": {"$in": ["", None]}},
@@ -754,11 +775,16 @@ def available_for_device(db, device, limit=100, now=None):
             # Fiche d'une patrouille programmee : jamais une mission a prendre
             {"content_category.patrol_run": {"$exists": False}},
         ],
-        "category": cat, "status_code": {"$ne": 10},
+        "status_code": {"$ne": 10},
         "ts": {"$gte": now - timedelta(days=AVAILABLE_MAX_AGE_DAYS)},
-    }).sort("ts", -1).limit(300):
+    }
+    # Ses categories ("Toutes categories" : fiches PCO de toute categorie)
+    cat_filter = F.categories_filter(cats)
+    q["category"] = cat_filter if cat_filter is not None else {"$regex": "^PCO"}
+    out = []
+    for f in db["pcorg"].find(q).sort("ts", -1).limit(300):
         cc = f.get("content_category") or {}
-        if not _device_metiers_ok(device, cc.get("sous_classification")):
+        if not _device_metiers_ok(device, cc.get("sous_classification"), db, f.get("category"), cats):
             continue
         point = _fiche_point(f)
         d = f.get("dispatch") or {}
@@ -803,9 +829,11 @@ def self_assign(db, fiche_id, device, now=None):
         return False, "unite_invalide"
     if not F.device_matches_pair(db, fresh, fiche.get("event"), fiche.get("year"), now):
         return False, "evenement_different"
-    if F._device_category(db, fresh) != fiche.get("category"):
+    fresh_cats = F._device_categories(db, fresh)
+    if not F.covers(fresh_cats, fiche.get("category")):
         return False, "categorie_differente"
-    if not _device_metiers_ok(fresh, (fiche.get("content_category") or {}).get("sous_classification")):
+    if not _device_metiers_ok(fresh, (fiche.get("content_category") or {}).get("sous_classification"),
+                              db, fiche.get("category"), fresh_cats):
         return False, "metier_different"
     name = fresh.get("name") or "?"
     n = PH.append_entry(
@@ -1118,7 +1146,7 @@ BOARD_FICHE_PROJECTION = {
     "_hist_n": {"$size": {"$ifNull": ["$comment_history", []]}},
 }
 BOARD_DEVICE_PROJECTION = {
-    "name": 1, "event": 1, "year": 1, "category": 1, "beacon_group_id": 1,
+    "name": 1, "event": 1, "year": 1, "category": 1, "categories": 1, "beacon_group_id": 1,
     "metiers": 1, "status": 1, "status_since": 1, "active_fiche_id": 1,
     "last_seen": 1, "last_position": 1, "pending_proposal": 1, "restoredAt": 1,
 }
@@ -1188,6 +1216,7 @@ def _pub_unit(db, d, now, group_cats):
         "id": str(d["_id"]),
         "name": d.get("name"),
         "category": F._device_category(db, d, group_cats),
+        "categories": F._device_categories(db, d, group_cats),
         "metiers": d.get("metiers") or [],
         "status": d.get("status") or "patrouille",
         "status_since": _iso(d.get("status_since")),
@@ -1252,7 +1281,8 @@ def dispatch_board():
     units = []
     for d in devices:
         x = _pub_unit(db, d, now, group_cats)
-        if x["category"] in cats:
+        # Unite rangee dans la file de chaque categorie geree qu'elle couvre
+        if any(F.covers(x["categories"], c) for c in cats):
             x["event"] = d.get("event")
             x["year"] = d.get("year")
             units.append(x)
