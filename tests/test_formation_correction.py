@@ -218,7 +218,10 @@ def test_patrouilles_mixte():
     n = len(banque.charger()["patrouilles"]["INCIDENTS"])
     assert r["detail"]["traites"] == n - 1
     assert r["detail"]["erreurs"] == 1
-    assert r["score"] == round((n - 1 - 0.5) / n * 100)
+    # la Moto envoyee a tort y va vraiment (temps perdu, elle repart de la T23) : ses envois
+    # suivants peuvent ne plus etre les plus proches, d'ou le calcul sur les points obtenus
+    assert r["detail"]["points"] <= n - 1
+    assert r["score"] == round((r["detail"]["points"] - 0.5) / n * 100) < 100
 
 
 # ---------------------------------------------------------------- acces

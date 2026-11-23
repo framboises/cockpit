@@ -751,6 +751,23 @@
       "motif": "escorte d'un convoi officiel, hors du plan"
      }
     ]
+   },
+   {
+    "id": "M2",
+    "name": "Moto 2",
+    "cls": "mot",
+    "type": "Flux",
+    "pos": [
+     2,
+     2
+    ],
+    "indispo": [
+     {
+      "de": 95,
+      "a": 120,
+      "motif": "escorte de la navette du personnel, hors du plan"
+     }
+    ]
    }
   ],
   "INCIDENTS": [
@@ -764,7 +781,7 @@
     "type": "Sécurité",
     "txt": "Rixe devant la buvette",
     "zone": "Maison Blanche",
-    "dl": 17,
+    "dl": 25,
     "sp": 20
    },
    {
@@ -777,7 +794,7 @@
     "type": "Technique",
     "txt": "Barrière couchée allée 12",
     "zone": "Grand Paddock",
-    "dl": 20,
+    "dl": 28,
     "sp": 12
    },
    {
@@ -790,7 +807,7 @@
     "type": "Secours",
     "txt": "Spectateur inconscient en bas de la T23",
     "zone": "Tribunes",
-    "dl": 13,
+    "dl": 21,
     "sp": 25
    },
    {
@@ -803,7 +820,7 @@
     "type": "Sécurité",
     "txt": "Intrusion par la clôture",
     "zone": "Accès Est",
-    "dl": 13,
+    "dl": 21,
     "sp": 10
    },
    {
@@ -816,7 +833,7 @@
     "type": "Flux",
     "txt": "Bouchon à l'entrée du parking",
     "zone": "Parking Sud",
-    "dl": 17,
+    "dl": 25,
     "sp": 12
    },
    {
@@ -855,7 +872,7 @@
     "type": "Secours",
     "txt": "Enfant blessé près de la grande roue",
     "zone": "Village",
-    "dl": 13,
+    "dl": 21,
     "sp": 18
    },
    {
@@ -868,7 +885,7 @@
     "type": "Secours",
     "txt": "Malaise dans la file d'attente de la buvette",
     "zone": "Zone Est",
-    "dl": 10,
+    "dl": 18,
     "sp": 15
    },
    {
@@ -881,7 +898,7 @@
     "type": "Sécurité",
     "txt": "Bousculade devant la buvette",
     "zone": "Zone Est",
-    "dl": 11,
+    "dl": 19,
     "sp": 10
    },
    {
@@ -894,7 +911,7 @@
     "type": "Sécurité",
     "txt": "Vol à l'arraché près des stands",
     "zone": "Village",
-    "dl": 13,
+    "dl": 21,
     "sp": 10
    },
    {
@@ -907,7 +924,7 @@
     "type": "Flux",
     "txt": "Véhicule garé sur l'accès pompiers",
     "zone": "Accès Est",
-    "dl": 13,
+    "dl": 21,
     "sp": 12
    },
    {
@@ -920,7 +937,7 @@
     "type": "Sécurité",
     "txt": "Bagarre au camping, emplacement H12",
     "zone": "Camping Nord",
-    "dl": 13,
+    "dl": 21,
     "sp": 20
    },
    {
@@ -933,7 +950,7 @@
     "type": "Secours",
     "txt": "Chute dans les escaliers de la T23",
     "zone": "Tribunes",
-    "dl": 13,
+    "dl": 21,
     "sp": 18
    },
    {
@@ -946,7 +963,7 @@
     "type": "Technique",
     "txt": "Éclairage en panne sur le parking",
     "zone": "Parking Sud",
-    "dl": 17,
+    "dl": 25,
     "sp": 10
    },
    {
@@ -959,7 +976,7 @@
     "type": "Sécurité",
     "txt": "Spectateur agressif à la buvette",
     "zone": "Zone Est",
-    "dl": 9,
+    "dl": 17,
     "sp": 12
    },
    {
@@ -972,7 +989,7 @@
     "type": "Flux",
     "txt": "Foule qui bloque l'allée des stands",
     "zone": "Grand Paddock",
-    "dl": 15,
+    "dl": 23,
     "sp": 12
    },
    {
@@ -985,7 +1002,7 @@
     "type": "Secours",
     "txt": "Personne tombée, plaie à la tête",
     "zone": "Village",
-    "dl": 10,
+    "dl": 18,
     "sp": 18
    },
    {
@@ -998,7 +1015,7 @@
     "type": "Sécurité",
     "txt": "Vol dans une loge",
     "zone": "Maison Blanche",
-    "dl": 11,
+    "dl": 19,
     "sp": 10
    },
    {
@@ -1011,7 +1028,7 @@
     "type": "Technique",
     "txt": "Fuite d'eau dans les sanitaires de la T23",
     "zone": "Tribunes",
-    "dl": 15,
+    "dl": 23,
     "sp": 10
    },
    {
@@ -1024,7 +1041,7 @@
     "type": "Secours",
     "txt": "Malaise cardiaque sous une tente",
     "zone": "Camping Nord",
-    "dl": 13,
+    "dl": 21,
     "sp": 18
    },
    {
@@ -1037,7 +1054,7 @@
     "type": "Technique",
     "txt": "Portique d'accès en panne",
     "zone": "Accès Est",
-    "dl": 13,
+    "dl": 21,
     "sp": 10
    },
    {
@@ -1076,7 +1093,7 @@
     "type": "Sécurité",
     "txt": "Groupe qui escalade la grille du Village",
     "zone": "Village",
-    "dl": 11,
+    "dl": 19,
     "sp": 12
    },
    {
@@ -1089,7 +1106,7 @@
     "type": "Sécurité",
     "txt": "Personne ivre qui importune des familles",
     "zone": "Maison Blanche",
-    "dl": 13,
+    "dl": 21,
     "sp": 10
    },
    {
@@ -1102,7 +1119,7 @@
     "type": "Secours",
     "txt": "Piéton renversé par une voiture",
     "zone": "Parking Sud",
-    "dl": 10,
+    "dl": 18,
     "sp": 25
    },
    {
@@ -1128,7 +1145,7 @@
     "type": "Sécurité",
     "txt": "Vol de caisse à la buvette",
     "zone": "Zone Est",
-    "dl": 11,
+    "dl": 19,
     "sp": 12
    },
    {
@@ -1167,7 +1184,7 @@
     "type": "Sécurité",
     "txt": "Intrusion en piste depuis l'Accès Est",
     "zone": "Accès Est",
-    "dl": 9,
+    "dl": 17,
     "sp": 12
    },
    {
@@ -1180,7 +1197,7 @@
     "type": "Secours",
     "txt": "Brûlure au stand de restauration",
     "zone": "Grand Paddock",
-    "dl": 10,
+    "dl": 18,
     "sp": 18
    },
    {
@@ -1193,7 +1210,7 @@
     "type": "Sécurité",
     "txt": "Bagarre générale au Village",
     "zone": "Village",
-    "dl": 11,
+    "dl": 19,
     "sp": 20
    },
    {
@@ -1206,7 +1223,7 @@
     "type": "Sécurité",
     "txt": "Intrusion dans le camping",
     "zone": "Camping Nord",
-    "dl": 13,
+    "dl": 21,
     "sp": 12
    },
    {
@@ -1232,7 +1249,7 @@
     "type": "Secours",
     "txt": "Spectateur à terre, ne répond plus",
     "zone": "Accès Est",
-    "dl": 10,
+    "dl": 18,
     "sp": 15
    },
    {
@@ -1245,7 +1262,7 @@
     "type": "Technique",
     "txt": "Panneau d'affichage arraché par le vent",
     "zone": "Grand Paddock",
-    "dl": 13,
+    "dl": 21,
     "sp": 8
    },
    {
@@ -1258,7 +1275,7 @@
     "type": "Flux",
     "txt": "Navette bloquée par des véhicules mal garés",
     "zone": "Zone Est",
-    "dl": 17,
+    "dl": 25,
     "sp": 10
    },
    {
@@ -1271,7 +1288,7 @@
     "type": "Sécurité",
     "txt": "Rixe à la sortie Est",
     "zone": "Accès Est",
-    "dl": 11,
+    "dl": 19,
     "sp": 15
    },
    {
@@ -1284,7 +1301,7 @@
     "type": "Secours",
     "txt": "Spectateur évanoui au Village",
     "zone": "Village",
-    "dl": 10,
+    "dl": 18,
     "sp": 15
    }
   ]

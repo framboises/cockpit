@@ -67,6 +67,7 @@ def test_scenario_long():
     incs = _incidents()
     assert len(incs) >= 40 and max(i["t"] + i["dl"] for i in incs) >= 180
     assert len(_units()) <= 9  # touches 1 a 9
+    assert sum(1 for u in _units() if u["type"] == "Flux") == 2  # 7 incidents de circulation : deux motos
     assert all(isinstance(i.get("sp"), int) and i["sp"] > 0 for i in incs)
 
 
@@ -82,8 +83,10 @@ def test_rejeu_ideal():
     quand = {a["incident"]: (a["moyen"], a["t_ms"]) for a in actions}
     # dilemme Tango : le portail bloque (I7, 12 s) passe avant la coupure (I6, 27 s)
     assert quand["I7"][0] == quand["I6"][0] == "T1" and quand["I7"][1] < quand["I6"][1]
-    # sortie de parking (Flux) pendant l'escorte de Moto 1 (125-165 s) : on attend la moto
-    assert quand["I28"] == ("M1", 165000)
+    # sortie de parking (Flux) pendant l'escorte de Moto 1 (125-165 s) : Moto 2, revenue a 120 s
+    assert quand["I28"][0] == "M2"
+    # car en double file (I24) pendant l'escorte de Moto 2 (95-120 s) : M1 seule, dilemme garde
+    assert quand["I24"][0] == quand["I23"][0] == "M1" and quand["I24"][1] < quand["I23"][1]
 
 
 def test_ordre_d_arrivee_tombe_dans_les_dilemmes():
@@ -97,14 +100,18 @@ def test_ordre_d_arrivee_tombe_dans_les_dilemmes():
 
 def test_lenteur_coute():
     n = len(_incidents())
-    r = patrouilles.rejouer(journal_ideal(reaction_ms=9000), 1.0)
+    r = patrouilles.rejouer(journal_ideal(reaction_ms=12000), 1.0)
     assert r["traites"] < n
 
 
 def test_pas_de_relais_hors_secours():
-    # Flux sans Moto (escorte) : une Patrouille reste une erreur, rien n'est attribue
+    # Flux : une Patrouille reste une erreur, rien n'est attribue (Moto 2 libre, Moto 1 en escorte)
     r = patrouilles.rejouer([{"type": "engager", "moyen": "P1", "incident": "I28", "t_ms": 130000}], 1.0)
     assert r["erreurs"] == 1 and r["traites"] == 0
+    # Flux sans aucune Moto libre (I24, M1 deja partie, M2 en escorte 95-120 s) : toujours une erreur
+    r = patrouilles.rejouer([{"type": "engager", "moyen": "M1", "incident": "I23", "t_ms": 103000},
+                             {"type": "engager", "moyen": "P2", "incident": "I24", "t_ms": 103500}], 1.0)
+    assert r["erreurs"] == 1
 
 
 def test_sur_place_par_incident():
