@@ -57,7 +57,18 @@ def ensure_indexes(db):
         db["envois"].create_index(
             [("campagne", ASCENDING), ("candidat_id", ASCENDING), ("type", ASCENDING)],
             unique=True, partialFilterExpression={"type": typ}, name="uniq_envoi_" + typ)
-    db["essais_connexion"].create_index("t", expireAfterSeconds=900, name="ttl_essais")
+    _ttl(db["essais_connexion"], "t", 86400, "ttl_essais")  # plafond 24 h par e-mail
+    db["essais_connexion"].create_index([("cle", ASCENDING), ("t", ASCENDING)], name="cle_t")
+
+
+def _ttl(coll, champ, secondes, nom):
+    """Index TTL cree ou, s'il existe avec une autre duree, mis a jour (collMod)."""
+    existant = coll.index_information().get(nom)
+    if existant is None:
+        coll.create_index(champ, expireAfterSeconds=secondes, name=nom)
+    elif existant.get("expireAfterSeconds") != secondes:
+        coll.database.command("collMod", coll.name,
+                              index={"name": nom, "expireAfterSeconds": secondes})
 
 
 GABARIT_DEFAUT = {

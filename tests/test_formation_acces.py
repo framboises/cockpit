@@ -492,6 +492,41 @@ def test_valueerror_inattendue_409_requete(app, db, monkeypatch):
     assert r.get_json() == {"ok": False, "error": "requete"}
 
 
+def test_plafond_journalier_email_sans_contournement(db):
+    """Au-dela de 20 echecs sur 24 h pour un e-mail, plus rien ne passe, meme la
+    bonne paire depuis une IP neuve (essais etales pour eviter le seuil 15 min)."""
+    _candidat(db)
+    t0 = datetime.now(timezone.utc) - timedelta(hours=20)
+    for i in range(acces.PLAFOND_EMAIL_JOUR):
+        t = t0 + timedelta(minutes=16 * (i // 5))
+        acces.essayer(db, "f.arbia@gmail.com", "0000", "10.8.%d.1" % i, t)
+    now = datetime.now(timezone.utc)
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.9.0.1", now) == ("bloque", None)
+    # 24 h plus tard, la bonne paire passe a nouveau
+    plus_tard = t0 + timedelta(hours=25)
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "10.9.0.2", plus_tard)[0] == "ok"
+
+
+def test_ipv6_regroupees_par_64(db):
+    """Les adresses IPv6 d'un meme /64 comptent comme une seule IP."""
+    _candidat(db)
+    now = datetime.now(timezone.utc)
+    for i in range(5):
+        acces.essayer(db, "x%d@exemple.fr" % i, "0000", "2001:db8:1:2::%x" % (i + 1), now)
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "2001:db8:1:2::ffff", now) == ("bloque", None)
+    assert acces.essayer(db, "f.arbia@gmail.com", "3179", "2001:db8:1:3::1", now)[0] == "ok"
+
+
+def test_ttl_essais_passe_a_24h(db):
+    """Une base creee avec l'ancien TTL de 15 min est mise a 24 h."""
+    db["essais_connexion"].drop_indexes()
+    db["essais_connexion"].create_index("t", expireAfterSeconds=900, name="ttl_essais")
+    store.ensure_indexes(db)
+    info = db["essais_connexion"].index_information()
+    ttl = [v for v in info.values() if "expireAfterSeconds" in v]
+    assert len(ttl) == 1 and ttl[0]["expireAfterSeconds"] == 86400
+
+
 def test_essais_simultanes_comptes_avant_verification(db):
     """L'essai est enregistre avant le comptage : un 6e essai depuis la meme IP
     est bloque meme avec la bonne paire, une mauvaise paire depuis une IP neuve

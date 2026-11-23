@@ -3,13 +3,15 @@
 - Identification par e-mail (normalise comme a l'import) + 4 derniers chiffres
   du mobile, message d'erreur generique unique.
 - Limitation des essais : 5 echecs sur 15 min pour l'e-mail OU pour l'IP
-  (`request.remote_addr`, jamais X-Forwarded-For) -> blocage temporaire.
-  Chaque echec est un document `essais_connexion` {cle, t} (index TTL 15 min).
+  (`request.remote_addr`, jamais X-Forwarded-For, IPv6 regroupee par /64) ->
+  blocage temporaire ; plafond dur de 20 echecs sur 24 h par e-mail.
+  Chaque echec est un document `essais_connexion` {cle, t} (index TTL 24 h).
 - Jeton de session : JWT HS256 signe par FORMATION_JWT_SECRET, `aud=formation`,
   1 h, portant le candidat (`sub`) et le `sid` de la session active.
 - Fenetre d'ouverture du test, lue dans les reglages.
 """
 import hmac
+import ipaddress
 import os
 import re
 from datetime import timedelta
@@ -25,6 +27,10 @@ MESSAGE_BLOQUE = MESSAGE_GENERIQUE + " Réessayez dans 15 minutes."
 
 SEUIL_ECHECS = 5
 FENETRE_ECHECS = timedelta(minutes=15)
+# Plafond dur par e-mail, que rien ne contourne (pas meme une IP neuve) : sur
+# les 3 jours de la fenetre, au plus ~60 essais sur 10 000 codes possibles.
+PLAFOND_EMAIL_JOUR = 20
+FENETRE_JOUR = timedelta(hours=24)
 DUREE_JETON = timedelta(hours=1)
 AUDIENCE = "formation"
 COOKIE = "formation_session"
@@ -51,7 +57,22 @@ def _secret():
 
 def _cles(email, ip):
     e = normaliser_email(email) or re.sub(r"\s+", "", str(email or "")).lower()[:200]
-    return ["email:" + e, "ip:" + str(ip or "")]
+    return ["email:" + e, "ip:" + _cle_ip(ip)]
+
+
+def _cle_ip(ip):
+    """IPv4 telle quelle ; IPv6 regroupee par /64 (un abonne en dispose d'un
+    entier, chaque adresse ne doit pas offrir de nouveaux essais)."""
+    brut = str(ip or "")
+    try:
+        a = ipaddress.ip_address(brut)
+    except ValueError:
+        return brut
+    if a.version == 4:
+        return str(a)
+    if a.ipv4_mapped is not None:
+        return str(a.ipv4_mapped)
+    return str(ipaddress.ip_network(str(a) + "/64", strict=False))
 
 
 def _compte(db, cle, depuis):
@@ -59,9 +80,12 @@ def _compte(db, cle, depuis):
 
 
 def est_bloque(db, email, ip, now):
-    """>= 5 echecs sur 15 min pour l'e-mail ou pour l'IP."""
+    """>= 5 echecs sur 15 min pour l'e-mail ou pour l'IP, ou >= 20 sur 24 h
+    pour l'e-mail."""
     depuis = now - FENETRE_ECHECS
-    return any(_compte(db, c, depuis) >= SEUIL_ECHECS for c in _cles(email, ip))
+    cle_email = _cles(email, ip)[0]
+    return (any(_compte(db, c, depuis) >= SEUIL_ECHECS for c in _cles(email, ip))
+            or _compte(db, cle_email, now - FENETRE_JOUR) >= PLAFOND_EMAIL_JOUR)
 
 
 def _paire(db, email, tel4):
@@ -90,6 +114,8 @@ def essayer(db, email, tel4, ip, now):
     depuis = now - FENETRE_ECHECS
     n_ip = _compte(db, cle_ip, depuis)
     if n_ip > SEUIL_ECHECS:
+        return "bloque", None
+    if _compte(db, cle_email, now - FENETRE_JOUR) > PLAFOND_EMAIL_JOUR:
         return "bloque", None
     email_bloque = _compte(db, cle_email, depuis) > SEUIL_ECHECS
     cand = _paire(db, email, tel4)
