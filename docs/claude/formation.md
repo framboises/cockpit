@@ -93,3 +93,7 @@ Rappel **Qui fait quoi** (`QUI_FAIT_QUOI` de `core.js`) en haut de la prise de p
 ## Resultat d'un candidat (administration, onglet Resultats)
 
 Liste des candidats qui ont commence, fictifs compris (marques) ; choix de la tentative (en cours de validite ou reinitialisee, par defaut la premiere qui a des scores : un fictif en essais illimites est relu sur sa tentative close). Fiche : score global, score par epreuve face a la **moyenne des vrais candidats** (`/stats` -> `moyennes`, fictifs exclus, global sur les tentatives terminees), ce qui s'est passe en clair (tire de `detail`), alertes traduites ; « Toutes les reponses » ouvre le panneau de detail brut.
+
+## Compte test : passer une epreuve
+
+Candidat fictif en essais illimites seulement (`tentative.peut_sauter`) : la tentative porte `sauts: true` (fige au clic Commencer), `etat_client` expose `peut_passer`, et l'ecran d'introduction de chaque epreuve montre « Passer cette épreuve (compte test) ». `POST /api/epreuve/<id>/passer` : la prochaine `a_faire` seulement, etat `passee` (dans `_FINIES`, sans score ni enonce, drapeau `passee`), hors du score global ; derniere epreuve -> tentative `terminee`. Verifie a chaque saut sur le candidat ET la tentative : un vrai candidat recoit 403 `interdit`, meme si l'un des deux drapeaux est pose a la main.

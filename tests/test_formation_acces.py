@@ -11,7 +11,7 @@ from flask_wtf.csrf import CSRFProtect
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from formation import acces, banque, store
+from formation import acces, banque, store, tentative
 from formation.normalise import normaliser_email, normaliser_tel
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -298,6 +298,58 @@ def test_fenetre_fermee_tentative_en_cours_continue(app, db):
 
 def _illimite(db):
     db["candidats"].update_many({}, {"$set": {"fictif": True, "essais_illimites": True}})
+
+
+def _demarre_compte_test(app, db):
+    _candidat(db)
+    _illimite(db)
+    c = Client(app)
+    c.connexion()
+    r = c.post("/api/commencer", {"accepte": True})
+    assert r.status_code == 200 and r.get_json()["etat"]["peut_passer"] is True
+    return c
+
+
+def test_compte_test_passe_des_epreuves(app, db):
+    c = _demarre_compte_test(app, db)
+    # on ne garde que les patrouilles : tout le reste est passe, dans l'ordre
+    for e in store.EPREUVES:
+        if e == "patrouilles":
+            assert c.post("/api/epreuve/%s/debut" % e).status_code == 200
+            assert c.post("/api/epreuve/%s/fin" % e).status_code == 200
+            continue
+        r = c.post("/api/epreuve/%s/passer" % e)
+        assert r.status_code == 200, r.get_json()
+    t = db["tentatives"].find_one({})
+    assert t["statut"] == "terminee"
+    assert [t["epreuves"][e]["etat"] for e in store.EPREUVES] == [
+        "terminee" if e == "patrouilles" else "passee" for e in store.EPREUVES]
+    assert t["epreuves"]["radio"]["drapeaux"] == ["passee"] and "score" not in t["epreuves"]["radio"]
+    # epreuves passees hors du score global : seules les patrouilles comptent
+    assert tentative.score_global(t, {e: 1 for e in store.EPREUVES}) == t["epreuves"]["patrouilles"]["score"]
+
+
+def test_compte_test_passer_dans_l_ordre(app, db):
+    c = _demarre_compte_test(app, db)
+    assert c.post("/api/epreuve/appel/passer").status_code == 409  # pas la suivante
+    assert c.post("/api/epreuve/radio/debut").status_code == 200
+    assert c.post("/api/epreuve/radio/passer").status_code == 409  # deja commencee
+    assert db["tentatives"].find_one({})["epreuves"]["radio"]["etat"] == "en_cours"
+
+
+def test_vrai_candidat_ne_passe_jamais(app, db):
+    c = _demarre(app, db)
+    assert db["tentatives"].find_one({}).get("sauts") is None
+    r = c.post("/api/epreuve/radio/passer")
+    assert r.status_code == 403 and r.get_json()["error"] == "interdit"
+    # devenu fictif apres avoir commence : la tentative n'a pas le droit, toujours refuse
+    _illimite(db)
+    assert c.post("/api/epreuve/radio/passer").status_code == 403
+    # redevenu vrai candidat en cours de route : refuse aussi
+    db["candidats"].update_many({}, {"$set": {"fictif": False}})
+    db["tentatives"].update_many({}, {"$set": {"sauts": True}})
+    assert c.post("/api/epreuve/radio/passer").status_code == 403
+    assert db["tentatives"].find_one({})["epreuves"]["radio"]["etat"] == "a_faire"
 
 
 def test_fictif_illimite_repart_apres_tentative_terminee(app, db):

@@ -13,7 +13,8 @@
                 logique: "Log.", situations: "Sit."};
   var STATUTS = {non_commence: "Non commencé", en_cours: "En cours", terminee: "Terminé",
                  interrompue: "Interrompu", reinitialisee: "Réinitialisée"};
-  var ETATS_EP = {a_faire: "À faire", en_cours: "En cours", terminee: "Terminée", abandonnee: "Abandonnée"};
+  var ETATS_EP = {a_faire: "À faire", en_cours: "En cours", terminee: "Terminée", abandonnee: "Abandonnée",
+                  passee: "Passée (compte test)"};
   var ERREURS = {
     reply_to_vide: "Renseignez le Reply-To dans les réglages avant d'envoyer.",
     contact_rgpd_vide: "Renseignez le contact RGPD dans les réglages avant d'envoyer.",
@@ -771,7 +772,7 @@
     abandon: "abandonnée", expiree: "temps dépassé", doublon: "réponse envoyée deux fois",
     horodatage_incoherent: "horodatage incohérent", action_inconnue: "réponse hors parcours",
     incident_echu: "envoi après l'échéance", incident_deja_attribue: "incident déjà attribué",
-    moyen_occupe: "moyen pas disponible", incident_en_attente: "envoi pendant un mauvais moyen en route", chemin_impossible: "chemin impossible", incoherente: "incohérence"
+    moyen_occupe: "moyen pas disponible", incident_en_attente: "envoi pendant un mauvais moyen en route", passee: "passée (compte test)", chemin_impossible: "chemin impossible", incoherente: "incohérence"
   };
   var fiche = {id: null, essais: [], t: null};
 
@@ -780,6 +781,7 @@
   function resume(e, ep) {
     if (!ep || ep.etat === "a_faire") return "Pas encore faite.";
     if (ep.etat === "en_cours") return "En cours.";
+    if (ep.etat === "passee") return "Passée (compte test).";
     var d = ep.detail || {}, s = "";
     if (e === "radio") {
       s = d.pris_a_raison + "/" + d.nb_pour_moi + " messages pour lui pris, " + d.pris_a_tort + " pris à tort, " +

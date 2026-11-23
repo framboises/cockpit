@@ -377,6 +377,7 @@
         var e = etatEpreuve(g.id);
         if (e === "terminee") s = "<span class=\"s done\" aria-label=\"faite\">✓</span>";
         else if (e === "abandonnee") s = "<span class=\"s\" aria-label=\"interrompue\">–</span>";
+        else if (e === "passee") s = "<span class=\"s\" aria-label=\"passée\">»</span>";
         else s = "<span class=\"s\" aria-hidden=\"true\">·</span>";
       }
       html += "<li" + (g.id === courant ? " aria-current=\"step\"" : "") + "><span class=\"h\">" + g.h +
@@ -614,7 +615,27 @@
     err.setAttribute("role", "alert");
     corps.appendChild(err);
     document.getElementById("f-go").onclick = function () { demarrer(id, mod); };
+    boutonPasser(row, id);
     focaliserTitre();
+  }
+
+  // Compte test de l'equipe (fictif, essais illimites) : sauter une epreuve pour en essayer une
+  // seule. Le serveur refuse (403) pour un vrai candidat, a qui le bouton n'est jamais montre.
+  function boutonPasser(row, id) {
+    if (!etat || etat.peut_passer !== true) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn ghost";
+    b.textContent = "Passer cette épreuve (compte test)";
+    b.onclick = function () {
+      b.disabled = true;
+      F.api("/api/epreuve/" + id + "/passer", {}).then(function (r) {
+        if (r.status === 200 && r.data && r.data.ok) { aller(r.data.etat); return; }
+        b.disabled = false;
+        rafraichir();
+      });
+    };
+    row.appendChild(b);
   }
 
   function demarrer(id, mod, essai) {

@@ -5,7 +5,8 @@ Une tentative par candidat et campagne (index unique partiel de store) :
 reprises_trace: [{date, epreuve, ip}], epreuves: {id: {etat, debut, fin,
 enonce, actions, score, detail, drapeaux}}}`.
 
-Etats d'une epreuve : a_faire, en_cours, terminee, abandonnee.
+Etats d'une epreuve : a_faire, en_cours, terminee, abandonnee, passee (compte
+test seulement : candidat fictif en essais illimites, `passer_epreuve`).
 Etats d'une tentative : en_cours, terminee, interrompue, reinitialisee.
 
 Decision du DOA (22/11) : une epreuve n'est jamais rejouee. Une epreuve
@@ -34,7 +35,7 @@ from formation import banque, correction, store
 UNE_HEURE = timedelta(hours=1)
 MARGE_EXPIRATION_MS = 60000
 MAX_ACTIONS = 500  # par epreuve : un journal hostile ne remplit pas le document
-_FINIES = ("terminee", "abandonnee")
+_FINIES = ("terminee", "abandonnee", "passee")
 _ESSAIS = 8
 
 
@@ -83,7 +84,12 @@ def etat_client(t):
         courante = _en_cours(t) or _premiere_a_faire(t)
     return {"statut": t["statut"], "epreuve_courante": courante,
             "epreuves": [{"id": e, "etat": t["epreuves"][e]["etat"]} for e in store.EPREUVES],
-            "coef": t["coef"]}
+            "coef": t["coef"], "peut_passer": t.get("sauts") is True}
+
+
+def peut_sauter(candidat):
+    """Compte test de l'equipe : candidat fictif en essais illimites. Jamais un vrai candidat."""
+    return candidat.get("fictif") is True and candidat.get("essais_illimites") is True
 
 
 def _coef(t):
@@ -179,6 +185,8 @@ def commencer(db, candidat, sid, coef_reglage, now):
         "reprises": 0, "reprises_trace": [],
         "epreuves": {e: {"etat": "a_faire", "actions": [], "drapeaux": []} for e in store.EPREUVES},
     }
+    if peut_sauter(candidat):
+        doc["sauts"] = True  # fige au clic Commencer, verifie encore sur le candidat a chaque saut
     try:
         _col(db).insert_one(doc)
     except DuplicateKeyError:
@@ -222,6 +230,31 @@ def debut_epreuve(db, candidat, sid, epreuve, now):
         _charger(db, candidat, sid)  # session remplacee entre-temps -> PermissionError
         raise ValueError("ordre")
     return enonce
+
+
+def passer_epreuve(db, candidat, sid, epreuve, now):
+    """Compte test (fictif, essais illimites) : passe `epreuve`, la prochaine
+    `a_faire`, sans la jouer (etat `passee`, sans score ni enonce ; drapeau
+    `passee`). Derniere epreuve : tentative `terminee`. Un vrai candidat :
+    PermissionError("interdit"), jamais de saut."""
+    if not peut_sauter(candidat):
+        raise PermissionError("interdit")
+    t = _charger(db, candidat, sid)
+    if t.get("sauts") is not True:
+        raise PermissionError("interdit")
+    if epreuve not in store.EPREUVES or _en_cours(t) is not None or _premiere_a_faire(t) != epreuve:
+        raise ValueError("ordre")
+    p = "epreuves.%s." % epreuve
+    s = {p + "etat": "passee", p + "debut": now, p + "fin": now, p + "drapeaux": ["passee"]}
+    if not [x for x in store.EPREUVES if x != epreuve and t["epreuves"][x]["etat"] not in _FINIES]:
+        s.update({"statut": "terminee", "fin": now})
+    r = _col(db).find_one_and_update(
+        {"_id": t["_id"], "statut": "en_cours", "sid": sid, p + "etat": "a_faire"}, {"$set": s},
+        return_document=ReturnDocument.AFTER)
+    if r is None:
+        _charger(db, candidat, sid)
+        raise ValueError("ordre")
+    return etat_client(r)
 
 
 def ecoule_ms(t, epreuve, now):

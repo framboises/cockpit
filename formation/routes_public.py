@@ -275,6 +275,20 @@ def api_action(db, cand, sid, t, now, epreuve):
     return jsonify({"ok": True})
 
 
+@formation_bp.post("/api/epreuve/<epreuve>/passer")
+@api_session
+def api_passer(db, cand, sid, t, now, epreuve):
+    """Compte test de l'equipe seulement (fictif, essais illimites) : epreuve sautee.
+    Un vrai candidat : 403 `interdit`, rien ne change."""
+    try:
+        etat = tentative.passer_epreuve(db, cand, sid, epreuve, now)
+    except PermissionError as e:
+        if str(e) == "interdit":
+            return _err(403, error="interdit")
+        raise
+    return jsonify({"ok": True, "etat": etat})
+
+
 @formation_bp.post("/api/epreuve/<epreuve>/fin")
 @api_session
 def api_fin(db, cand, sid, t, now, epreuve):
