@@ -724,9 +724,13 @@
   // --- Resultats -------------------------------------------------------------------------
 
   var graphiques = [];
+  var moyennes = {};
   function chargerStats() {
+    chargerListeResultats();
     api("GET", "/stats").then(function (s) {
       if (!s.ok) { toast("error", message(s)); return; }
+      moyennes = s.moyennes || {};
+      if (fiche.t) afficherFiche();
       var z = vider($("fa-kpis"));
       z.appendChild(kpi(s.inscrits, "inscrits"));
       z.appendChild(kpi(s.invites, "invités (e-mail parti)"));
@@ -755,6 +759,140 @@
                     scales: {y: {beginAtZero: true, ticks: {precision: 0}}, x: {grid: {display: false}}}}
         }));
       });
+    });
+  }
+
+  // --- Resultat d'un candidat ---------------------------------------------------------------
+  // Fiche lisible d'une tentative (active ou reinitialisee) : score par epreuve face a la
+  // moyenne des vrais candidats, ce qui s'est passe en clair, alertes. Le detail brut
+  // (enonce, actions, corrige) reste dans le panneau « Toutes les réponses ».
+
+  var DRAPEAUX_FR = {
+    abandon: "abandonnée", expiree: "temps dépassé", doublon: "réponse envoyée deux fois",
+    horodatage_incoherent: "horodatage incohérent", action_inconnue: "réponse hors parcours",
+    incident_echu: "envoi après l'échéance", incident_deja_attribue: "incident déjà attribué",
+    moyen_occupe: "moyen pas disponible", incident_en_attente: "envoi pendant un mauvais moyen en route", chemin_impossible: "chemin impossible", incoherente: "incohérence"
+  };
+  var fiche = {id: null, essais: [], t: null};
+
+  function pluriel(n, mot) { return n + " " + mot + (n > 1 ? "s" : ""); }
+
+  function resume(e, ep) {
+    if (!ep || ep.etat === "a_faire") return "Pas encore faite.";
+    if (ep.etat === "en_cours") return "En cours.";
+    var d = ep.detail || {}, s = "";
+    if (e === "radio") {
+      s = d.pris_a_raison + "/" + d.nb_pour_moi + " messages pour lui pris, " + d.pris_a_tort + " pris à tort, " +
+        d.manques + " manqué" + (d.manques > 1 ? "s" : "") + ", " + d.priorites_rapides + " PRIORITÉ prise(s) à temps.";
+    } else if (e === "appel") {
+      s = d.points + "/" + d.max + " points sur les deux appels (" + pluriel(d.repondues, "réponse") + " sur son parcours).";
+    } else if (e === "mc") {
+      s = d.champs_justes + "/" + d.max + " champs justes sur les fiches.";
+    } else if (e === "patrouilles") {
+      var inc = d.detail_incidents || [];
+      var relais = inc.filter(function (i) { return i.statut === "traite" && i.relais; }).length;
+      s = d.traites + "/" + inc.length + " incidents traités à temps, dont " + d.plus_proches +
+        " avec le moyen le plus proche ; " + pluriel(d.erreurs, "erreur") + " de moyen, " + d.manques + " manqué(s)" +
+        (relais ? " ; Patrouille envoyée en relais d'un Secours indisponible." : ".");
+    } else if (e === "acces") {
+      s = d.bonnes + "/" + d.nb + " bonnes décisions" + (d.tardives ? ", " + d.tardives + " trop tardive(s)" : "") + ".";
+    } else if (e === "logique") {
+      s = d.bonnes + "/" + d.nb + " bonnes réponses.";
+    } else if (e === "situations") {
+      s = d.points + "/" + d.max + " points (" + pluriel(d.repondues, "réponse") + ").";
+    }
+    if (s.indexOf("undefined") >= 0) s = "";
+    return (ep.etat === "abandonnee" ? "Abandonnée. " : "") + s;
+  }
+
+  function barre(score, moy) {
+    var borne = function (v) { return Math.max(0, Math.min(100, v)) + "%"; };
+    var v = el("span", {"class": "fa-bar-v" + (score < 50 ? " is-low" : "")});
+    v.style.width = borne(score);  // CSSOM, pas d'attribut style (CSP)
+    var b = el("div", {"class": "fa-bar", title: "Score " + score + (moy === null || moy === undefined ? "" : ", moyenne " + fmtNum(moy))}, [v]);
+    if (moy !== null && moy !== undefined) {
+      var m = el("i", {"class": "fa-bar-m"});
+      m.style.left = borne(moy);
+      b.appendChild(m);
+    }
+    return b;
+  }
+
+  function afficherFiche() {
+    var z = vider($("fa-r-fiche")), t = fiche.t;
+    if (!t) return;
+    var duree = t.debut && t.fin ? fmtDuree((new Date(t.fin) - new Date(t.debut)) / 1000) : "";
+    var g = t.global, mg = moyennes.global;
+    z.appendChild(el("div", {"class": "fa-r-tete"}, [
+      el("div", {"class": "fa-r-global"}, [el("b", {text: g === null || g === undefined ? "-" : fmtNum(g)}),
+        el("span", {text: "score global / 100" + (mg === null || mg === undefined ? "" : " · moyenne " + fmtNum(mg))})]),
+      dl([["Statut", pill(t.statut)], ["Début", fmtDate(t.debut)], ["Durée", duree],
+          ["Coefficient", t.coef && t.coef !== 1 ? "x " + fmtNum(t.coef) + " (aménagement)" : "1"],
+          ["Reprises", String(t.reprises || 0)]])]));
+    var tb = el("tbody");
+    EPREUVES.forEach(function (e) {
+      var ep = (t.epreuves || {})[e] || {};
+      var note = typeof ep.score === "number" && (ep.etat === "terminee" || ep.etat === "abandonnee") ? ep.score : null;
+      var moy = moyennes[e];
+      tb.appendChild(el("tr", null, [
+        el("th", {scope: "row", text: NOMS[e]}),
+        el("td", {"class": "fa-num", text: note === null ? "-" : String(note)}),
+        el("td", {"class": "fa-r-barre"}, [note === null ? null : barre(note, moy)]),
+        el("td", {"class": "fa-num fa-muted", text: moy === null || moy === undefined ? "-" : fmtNum(moy)}),
+        el("td", {text: resume(e, ep)}),
+        el("td", null, (ep.drapeaux || []).map(function (f) { return el("span", {"class": "fa-flag", text: DRAPEAUX_FR[f] || f}); }))]));
+    });
+    z.appendChild(el("div", {"class": "fa-table-wrap fa-r-wrap"}, [el("table", {"class": "fa-table fa-r-table"}, [
+      el("thead", null, [el("tr", null, [el("th", {text: "Épreuve"}), el("th", {"class": "fa-num", text: "Score"}),
+        el("th", {text: ""}), el("th", {"class": "fa-num", text: "Moyenne"}), el("th", {text: "Ce qui s'est passé"}),
+        el("th", {text: "Alertes"})])]), tb])]));
+  }
+
+  function aDesScores(t) {
+    return EPREUVES.some(function (e) { var ep = (t.epreuves || {})[e]; return ep && typeof ep.score === "number"; });
+  }
+
+  function choisirCandidat(id) {
+    fiche = {id: id || null, essais: [], t: null};
+    var zt = $("fa-r-tentative");
+    zt.hidden = true;
+    $("fa-r-detail").disabled = !id;
+    var z = vider($("fa-r-fiche"));
+    if (!id) return;
+    z.appendChild(el("p", {"class": "fa-muted", text: "Chargement..."}));
+    api("GET", "/tentative/" + encodeURIComponent(id)).then(function (d) {
+      if (fiche.id !== id) return;
+      vider(z);
+      if (!d.ok) { z.appendChild(el("p", {text: message(d)})); return; }
+      var essais = [];
+      if (d.tentative) essais.push({t: d.tentative, lib: "Tentative en cours de validité"});
+      (d.historique || []).slice().reverse().forEach(function (h) {
+        essais.push({t: h, lib: "Réinitialisée, commencée le " + fmtDate(h.debut)});
+      });
+      if (!essais.length) { z.appendChild(el("p", {"class": "fa-muted", text: "Aucune tentative."})); return; }
+      fiche.essais = essais;
+      var k = 0;
+      for (var i = 0; i < essais.length; i++) if (aDesScores(essais[i].t)) { k = i; break; }
+      vider(zt);
+      essais.forEach(function (x, i) { zt.appendChild(el("option", {value: String(i), text: x.lib})); });
+      zt.value = String(k);
+      zt.hidden = essais.length < 2;
+      fiche.t = essais[k].t;
+      afficherFiche();
+    });
+  }
+
+  function chargerListeResultats() {
+    api("GET", "/candidats?fictifs=1").then(function (d) {
+      if (!d.ok) return;
+      var sel = $("fa-r-candidat"), garde = sel.value;
+      vider(sel).appendChild(el("option", {value: "", text: "Choisir un candidat..."}));
+      d.candidats.filter(function (l) { return l.statut !== "non_commence" || l.fictif; }).forEach(function (l) {
+        var note = l.global === null || l.global === undefined ? "" : " · " + fmtNum(l.global) + "/100";
+        sel.appendChild(el("option", {value: l.id, text: (l.nom + " " + l.prenom).trim() + " (" + l.email + ")" + note +
+          " · " + (STATUTS[l.statut] || l.statut) + (l.fictif ? " · fictif" : "")}));
+      });
+      if (garde && sel.querySelector('option[value="' + garde + '"]')) sel.value = garde;
     });
   }
 
@@ -834,6 +972,12 @@
       actionCampagne("reprendre", function () { return "Campagne reprise."; }); });
     $("fa-renvoyer").addEventListener("click", renvoyer);
     $("fa-reglages").addEventListener("submit", enregistrerReglages);
+    $("fa-r-candidat").addEventListener("change", function () { choisirCandidat($("fa-r-candidat").value); });
+    $("fa-r-tentative").addEventListener("change", function () {
+      var x = fiche.essais[Number($("fa-r-tentative").value)];
+      if (x) { fiche.t = x.t; afficherFiche(); }
+    });
+    $("fa-r-detail").addEventListener("click", function () { if (fiche.id) ouvrirDetail(fiche.id); });
     chargerBandeau();
     sonderEtat();
     var h = (location.hash || "").slice(1);

@@ -154,6 +154,18 @@
             <p class="fa-muted">Candidats fictifs exclus. Temps moyen : tentatives terminées, temps réel. Exports : identifiant Forms en première colonne pour la jointure.</p>
           </div>
           <div class="fa-card">
+            <div class="fa-card-h">
+              <h2>Résultat d'un candidat</h2>
+              <div class="fa-inline">
+                <select id="fa-r-candidat" aria-label="Candidat"><option value="">Choisir un candidat...</option></select>
+                <select id="fa-r-tentative" aria-label="Tentative" hidden></select>
+                <button class="fa-btn" id="fa-r-detail" disabled><span class="material-symbols-outlined">list_alt</span> Toutes les réponses</button>
+              </div>
+            </div>
+            <p class="fa-muted">Candidats ayant commencé le test, fictifs compris (marqués). Moyenne : vrais candidats seulement.</p>
+            <div id="fa-r-fiche"></div>
+          </div>
+          <div class="fa-card">
             <h2>Distribution des scores par épreuve</h2>
             <div class="fa-charts" id="fa-charts"></div>
           </div>

@@ -23,13 +23,19 @@
     intro: function (el, enonce, coef) {
       F.entete("Des personnes se présentent à l'entrée du Grand Paddock. Laissez entrer ou refusez, en " +
                F.secondes(DELAI / 1000 * coef) + " secondes chacune.");
-      // L'enonce n'est envoye qu'au debut de l'epreuve : la regle detaillee s'affiche avec chaque badge.
+      // Regle de la nuit (couleurs, heure) lue avant de commencer ; les badges ne partent qu'avec l'enonce.
       el.innerHTML = "<div class=\"rules\"><h3>Règles</h3><ul>" +
-        "<li>Une règle d'accès à deux conditions (couleur du badge et heure de validité) est affichée en " +
-        "permanence à côté du badge.</li>" +
         "<li>Pour chaque personne : <b>Laisser entrer</b> ou <b>Refuser</b>, en " +
         F.secondes(DELAI / 1000 * coef) + " secondes au plus.</li>" +
-        "<li>Sans décision dans le temps, la personne suivante se présente.</li></ul></div>";
+        "<li>Sans décision dans le temps, la personne suivante se présente.</li>" +
+        "<li>La règle ci-dessous reste affichée à côté de chaque badge pendant l'épreuve.</li></ul></div>" +
+        "<div class=\"regle-acces\"><p class=\"enreg\">Chargement de la règle d'accès…</p></div>";
+      var zone = el.querySelector(".regle-acces");
+      F.api("/api/entrainement/acces").then(function (r) {
+        var d = r.data;
+        if (r.status === 200 && d && d.ok && d.contenu) zone.innerHTML = regle(d.contenu.couleurs, d.contenu.heure);
+        else if (r.status !== 401) zone.innerHTML = "<p class=\"enreg\">La règle s'affichera avec le premier badge.</p>";
+      });
     },
     jouer: function (el, enonce, coef, fini) {
       var badges = enonce.badges || [], k = 0, delai = DELAI * coef;

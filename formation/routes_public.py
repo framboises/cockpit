@@ -32,7 +32,7 @@ MAX_ACTION_OCTETS = 16 * 1024
 # Refus des regles du passage unique (tentative.py) transmis tels quels au client
 CODES_REFUS = ("ordre", "etat", "donnees", "tentative")
 logger = logging.getLogger(__name__)
-ENTRAINEMENTS = ("radio", "patrouilles")
+ENTRAINEMENTS = ("radio", "patrouilles", "acces")
 _PARIS = ZoneInfo("Europe/Paris")
 
 
@@ -292,12 +292,15 @@ def api_csrf():
 
 @formation_bp.get("/api/entrainement/<nom>")
 def api_entrainement(nom):
-    """Contenu d'entrainement (radio, patrouilles) : rien n'est enregistre."""
+    """Contenu d'entrainement (radio, patrouilles) ou regle d'acces a lire avant
+    l'epreuve (couleurs et heure seulement, jamais les badges) : rien n'est enregistre."""
     if _candidat_du_cookie(store.get_db()) is None:
         return _erreur_session()
     if nom not in ENTRAINEMENTS:
         return _err(404, error="entrainement")
     b = banque.charger()
+    if nom == "acces":
+        return jsonify({"ok": True, "contenu": {"couleurs": b["acces"]["couleurs"], "heure": b["acces"]["heure"]}})
     contenu = b["entrainement"][nom]
     if nom == "patrouilles":
         # Plan et moyens de l'epreuve, incidents d'entrainement seulement : ceux de

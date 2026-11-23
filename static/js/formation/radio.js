@@ -6,7 +6,7 @@
 (function () {
   "use strict";
   var F = window.Formation;
-  var PREMIER = 800, CADENCE = 4000, CADENCE_PRIO = 3200, SEUIL_PRIO = 2000;
+  var PREMIER = 800, CADENCE = 8000, CADENCE_PRIO = 6400, SEUIL_PRIO = 2000;
 
   function horaires(messages) {
     var t = PREMIER, out = [];

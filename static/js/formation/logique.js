@@ -1,17 +1,18 @@
 /* Epreuve 6 : la releve, logique (maquette, RENDER.logic). Questions et choix
  * melanges par le serveur, sans la bonne reponse. Chaque choix envoie
- * {type: "reponse", question, choix}. Compte a rebours visible de 4 min x coef ;
+ * {type: "reponse", question, choix}. Compte a rebours visible de 2 min 30 x coef ;
  * a zero, l'epreuve se termine. Aucune coloration : « Réponse enregistrée ». */
 (function () {
   "use strict";
   var F = window.Formation;
-  var DUREE = 240000;
+  var DUREE = 150000;  // 30 s par question (23/11/2026, 4 min avant), = correction.LOGIQUE_DUREE
 
   F.epreuves.logique = {
     intro: function (el, enonce, coef) {
       F.entete("Pendant la relève de 3 h, cinq questions de logique. Toutes les données sont dans l'énoncé.");
       el.innerHTML = "<div class=\"rules\"><h3>Règles</h3><ul><li>Une seule bonne réponse par question.</li>" +
-        "<li>" + F.duree(DUREE * coef) + " pour l'ensemble. Le temps démarre quand vous cliquez sur " +
+        "<li>" + F.duree(DUREE * coef) + " pour l'ensemble, soit environ " +
+        F.secondes(DUREE / 5000 * coef) + " secondes par question. Le temps démarre quand vous cliquez sur " +
         "« Commencer l'épreuve ».</li><li>Une réponse donnée est définitive.</li></ul></div>";
     },
     jouer: function (el, enonce, coef, fini) {

@@ -23,7 +23,7 @@
     intro: function (el) {
       F.entete("Des messages arrivent. Pour chacun, remplissez la fiche de main courante correspondante.");
       el.innerHTML = "<div class=\"rules\"><h3>La fiche de main courante</h3><ul>" +
-        "<li>Pour chaque message : la catégorie, le lieu, l'heure (hh:mm) et le moyen qui parle ou intervient.</li>" +
+        "<li>Pour chaque message : la catégorie, le lieu, l'heure (hh:mm) et l'appelant (l'équipe qui vous appelle).</li>" +
         "<li>Les définitions des catégories sont affichées avec chaque message.</li>" +
         "<li>Prenez le temps de lire le message en entier avant d'enregistrer la fiche.</li></ul></div>";
     },
@@ -41,7 +41,7 @@
           "<label>Catégorie<select name=\"cat\">" + options(noms) + "</select></label>" +
           "<label>Lieu<select name=\"zone\">" + options(enonce.zones) + "</select></label>" +
           "<label>Heure (hh:mm)<input name=\"heure\" inputmode=\"numeric\" placeholder=\"00:00\" maxlength=\"5\"></label>" +
-          "<label>Moyen<select name=\"moyen\">" + options(enonce.moyens) + "</select></label></form>" +
+          "<label>Appelant<select name=\"moyen\">" + options(enonce.moyens) + "</select></label></form>" +
           "<details class=\"rules\" open><summary>Catégories de la main courante</summary>" + cats + "</details>" +
           "<div class=\"row actions\"><button class=\"btn\" type=\"button\">Enregistrer la fiche</button></div>" +
           "<p class=\"enreg\" role=\"status\"></p>";

@@ -86,9 +86,9 @@ def test_radio_indicatif_pc_org():
 
 def test_radio_affichages_cadence():
     aff = correction.radio_affichages_ms()
-    assert aff["r01"] == (800, 4800)
-    assert aff["r05"] == (800 + 4 * 4000, 800 + 4 * 4000 + 3200)
-    assert aff["r14"][1] == correction.duree_min_ms("radio", 1.0) == 55200
+    assert aff["r01"] == (800, 8800)
+    assert aff["r05"] == (800 + 4 * 8000, 800 + 4 * 8000 + 6400)
+    assert aff["r14"][1] == correction.duree_min_ms("radio", 1.0) == 800 + 2 * 54400
 
 
 # ---------------------------------------------------------------- appel
@@ -199,30 +199,26 @@ def test_mc_mixte():
 
 # ---------------------------------------------------------------- patrouilles
 
-# Journal glouton de la maquette (voir test_rejeu_glouton) : chaque incident est
-# engage a son ouverture, tous les moyens du bon type sont alors libres.
-# Journal ideal : le moyen admissible le plus proche a l'ouverture de chaque incident ;
-# I6 (enfant blesse) pendant l'indisponibilite de Secours 1 : Patrouille 1 en relais.
-GLOUTON = [("I1", "P2", 2000), ("I2", "T1", 10000), ("I3", "S1", 20000), ("I4", "M1", 30000),
-           ("I5", "P2", 40000), ("I6", "P1", 50000), ("I7", "T1", 60000), ("I8", "P2", 68000)]
-
-
-def _glouton():
-    return [{"type": "engager", "incident": i, "moyen": m, "t_ms": t} for i, m, t in GLOUTON]
+# Journal ideal (test_formation_patrouilles.journal_ideal) : le moyen admissible le
+# plus proche, le plus urgent d'abord, une Patrouille en relais d'un Secours introuvable.
+def _ideal():
+    from test_formation_patrouilles import journal_ideal
+    return journal_ideal()
 
 
 def test_patrouilles_parfait():
-    r = correction.score("patrouilles", _glouton(), 1.0)
+    r = correction.score("patrouilles", _ideal(), 1.0)
     assert r["score"] == 100
 
 
 def test_patrouilles_mixte():
-    actions = [a for a in _glouton() if a["incident"] != "I3"]
-    actions.append({"type": "engager", "moyen": "M1", "incident": "I3", "t_ms": 20500})
+    actions = [a for a in _ideal() if a["incident"] != "I3"]
+    actions.append({"type": "engager", "moyen": "M1", "incident": "I3", "t_ms": 15500})
     r = correction.score("patrouilles", actions, 1.0)
-    assert r["detail"]["traites"] == 7
+    n = len(banque.charger()["patrouilles"]["INCIDENTS"])
+    assert r["detail"]["traites"] == n - 1
     assert r["detail"]["erreurs"] == 1
-    assert r["score"] == 81  # (7 - 0.5) / 8 * 100 = 81.25
+    assert r["score"] == round((n - 1 - 0.5) / n * 100)
 
 
 # ---------------------------------------------------------------- acces
@@ -250,7 +246,7 @@ def test_acces_parfait():
 def test_acces_mixte():
     faux = {"b01", "b02", "b03"}
     r = correction.score("acces", _journal_acces(lambda b: 1 - b["ok"] if b["id"] in faux else b["ok"]), 1.0)
-    assert r["score"] == 70
+    assert r["score"] == 85  # 3 fautes sur 20 badges
 
 
 def test_acces_decision_tardive_fausse():
@@ -258,7 +254,7 @@ def test_acces_decision_tardive_fausse():
     actions = _journal_acces(lambda b: b["ok"], delai_ms=6200)
     r = correction.score("acces", actions, 1.0)
     assert r["score"] == 0
-    assert r["detail"]["tardives"] == 10
+    assert r["detail"]["tardives"] == 20
     # 5,9 s : dans la marge
     assert correction.score("acces", _journal_acces(lambda b: b["ok"], delai_ms=5900), 1.0)["score"] == 100
     # le meme delai reel de 6,2 s est dans les temps a coef 1.33 (4,66 s de jeu)
@@ -293,14 +289,14 @@ def test_acces_decision_sans_affichage_comptee():
     # badge_affiche n'est plus requis : seul l'ordre fixe et les decisions comptent
     actions = [{"type": "decision", "badge": "b01", "decision": 1, "t_ms": 100}]
     r = correction.score("acces", actions, 1.0)
-    assert r["score"] == 10
+    assert r["score"] == 5
 
 
 def test_acces_doublon():
     actions = [{"type": "decision", "badge": "b01", "decision": 1, "t_ms": 100},
                {"type": "decision", "badge": "b01", "decision": 0, "t_ms": 200}]
     r = correction.score("acces", actions, 1.0)
-    assert r["score"] == 10
+    assert r["score"] == 5
     assert "doublon" in r["drapeaux"]
 
 
@@ -324,9 +320,9 @@ def test_logique_mixte():
 
 def test_reponse_hors_delai_logique_ignoree():
     actions = _bonnes_logique()
-    actions[4]["t_ms"] = 240001
+    actions[4]["t_ms"] = 150001
     assert correction.score("logique", actions, 1.0)["score"] == 80
-    # a coef 1.33 la meme reponse est dans les 4 min x 1.33
+    # a coef 1.33 la meme reponse est dans les 2 min 30 x 1.33
     assert correction.score("logique", actions, 1.33)["score"] == 100
 
 
@@ -357,12 +353,15 @@ def test_sans_reponse_zero():
 
 
 def test_durees():
-    assert correction.duree_min_ms("radio", 1.33) == round(55200 * 1.33)
-    assert correction.duree_max_ms("radio", 1.0) == 60200
-    assert correction.duree_min_ms("patrouilles", 1.0) == 68000
-    assert correction.duree_max_ms("patrouilles", 1.0) == 115000
-    assert correction.duree_max_ms("acces", 1.0) == 65000
-    assert correction.duree_max_ms("logique", 1.0) == 245000
+    assert correction.duree_min_ms("radio", 1.33) == round(109600 * 1.33)
+    assert correction.duree_max_ms("radio", 1.0) == 114600
+    inc = banque.charger()["patrouilles"]["INCIDENTS"]
+    assert correction.duree_min_ms("patrouilles", 1.0) == inc[-1]["t"] * 1000
+    fin = max(i["t"] + i["dl"] for i in inc)
+    assert correction.duree_max_ms("patrouilles", 1.0) == fin * 1000 + 10000 + 5000
+    assert fin >= 180  # scenario long (23/11/2026)
+    assert correction.duree_max_ms("acces", 1.0) == 125000
+    assert correction.duree_max_ms("logique", 1.0) == 155000
     assert correction.duree_max_ms("mc", 1.33) == round(600000 * 1.33) + 5000
     assert correction.duree_min_ms("logique", 1.0) is None
 

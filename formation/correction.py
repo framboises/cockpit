@@ -47,12 +47,12 @@ import math
 from formation import banque, patrouilles
 
 RADIO_PREMIER = 800
-RADIO_CADENCE = 4000
-RADIO_CADENCE_PRIO = 3200
+RADIO_CADENCE = 8000  # doublee le 23/11/2026 (canal trop rapide), meme valeur que radio.js
+RADIO_CADENCE_PRIO = 6400
 RADIO_SEUIL_PRIO = 2000
 ACCES_DELAI = 5000
 ACCES_MARGE = 1000  # transition de 450 ms + reseau, en ms de jeu
-LOGIQUE_DUREE = 240000
+LOGIQUE_DUREE = 150000  # 30 s par question (23/11/2026, 240000 avant), = DUREE de logique.js
 PLAFOND_QUESTIONS = 600000
 
 EPREUVES = ("radio", "appel", "mc", "patrouilles", "acces", "logique", "situations")
@@ -363,6 +363,12 @@ def score(epreuve, actions, coef):
     return {"score": _arrondi(pct), "detail": detail, "drapeaux": drapeaux}
 
 
+def patrouilles_duree_jeu_ms():
+    """Duree de jeu des patrouilles : derniere echeance + 10 s (meme calcul que
+    dureeMax de patrouilles.js ; avant le 23/11/2026, 110 s fixes)."""
+    return max(i["t"] + i["dl"] for i in banque._banque()["patrouilles"]["INCIDENTS"]) * 1000 + 10000
+
+
 def duree_min_ms(epreuve, coef):
     """Duree minimale reelle d'une epreuve temps reel (None pour les autres)."""
     if epreuve == "radio":
@@ -378,7 +384,7 @@ def duree_max_ms(epreuve, coef):
     if epreuve == "radio":
         return duree_min_ms("radio", coef) + 5000
     if epreuve == "patrouilles":
-        return round(110000 * coef) + 5000
+        return round(patrouilles_duree_jeu_ms() * coef) + 5000
     if epreuve == "acces":
         return round(len(banque._banque()["acces"]["badges"]) * (ACCES_DELAI * coef + 1000)) + 5000
     if epreuve == "logique":

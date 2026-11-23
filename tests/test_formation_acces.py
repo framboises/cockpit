@@ -605,6 +605,12 @@ def test_entrainement(app, db):
     for k in ("RW", "CL", "PASS", "TRAV", "MAPZONES", "UNITS"):
         assert ent[k] == banque.charger()["patrouilles"][k]
     assert [i["id"] for i in ent["INCIDENTS"]] == ["E1"]
+    # regle d'acces lue avant l'epreuve : couleurs et heure, jamais les badges (ni `ok`)
+    r = c.get("/api/entrainement/acces")
+    assert r.status_code == 200
+    a = banque.charger()["acces"]
+    assert r.get_json()["contenu"] == {"couleurs": a["couleurs"], "heure": a["heure"]}
+    assert "badges" not in r.get_data(as_text=True) and a["badges"][0]["num"] not in r.get_data(as_text=True)
     assert c.get("/api/entrainement/logique").status_code == 404
     assert db["tentatives"].count_documents({}) == 0
 

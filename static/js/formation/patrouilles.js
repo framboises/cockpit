@@ -4,15 +4,17 @@
  * temps ecoule et jamais par accumulation de setInterval. Temps de jeu
  * tj = (performance.now() - t0) / coef ; incident ouvert a T = t * 1000, echeance
  * D = T + dl * 1000 ; engagement valide -> arrivee = tj + (cases du chemin) * PAS_MS,
- * traite si arrivee <= D, moyen libre a arrivee + SUR_PLACE_MS. Position d'un pion =
+ * traite si arrivee <= D, moyen libre a arrivee + sp (temps sur place de l'incident,
+ * SUR_PLACE_MS par defaut). Position d'un pion =
  * fonction pure (heure d'engagement, chemin, maintenant). Sous node, le moteur
  * s'exporte (module.exports) : tests/test_formation_patrouilles_js.py le compare au rejeu.
  *
  * Interface (section 2) : selection incident -> moyen ou moyen -> incident (reclic =
- * deselection), glisser-deposer (Pointer Events), touches 1 a 5, trajet en pointilles.
+ * deselection), glisser-deposer (Pointer Events), touches 1 a 9, trajet en pointilles.
  * Envois : {type: "engager", moyen, incident, t_ms} pour un engagement valide ; pour un
- * moyen d'une autre specialite, le meme "engager" (le rejeu le compte en erreur, sans
- * autre effet) suivi d'un {type: "refus", moyen, incident, t_ms} (trace, non note).
+ * moyen d'une autre specialite, le meme "engager" (le rejeu le compte en erreur ; le moyen
+ * y va quand meme, l'incident reste bloque jusqu'a son arrivee puis se rouvre, compte
+ * rendu « rien a faire ») suivi d'un {type: "refus", moyen, incident, t_ms} (trace, non note).
  * Rien n'est envoye pour un moyen occupe ou un incident clos. */
 (function () {
   "use strict";
@@ -20,6 +22,7 @@
   // ------------------------------------------------------------ 1. moteur pur
 
   var PAS_MS = 430, SUR_PLACE_MS = 4000;
+  var COMPTE_RENDU_MS = 2000;  // comme patrouilles.COMPTE_RENDU_MS : mauvais moyen arrive, rend compte, puis libre
   var TYPE_RELAIS = {"Secours": "Sécurité"};  // comme patrouilles.TYPE_RELAIS
   var VOISINS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -70,8 +73,11 @@
     });
     (incidents || []).forEach(function (x) {
       var t = x.t * 1000;
+      // sp : temps sur place (s), comme patrouilles.sur_place_ms
+      var sp = typeof x.sp === "number" && isFinite(x.sp) && x.sp >= 0 ? x.sp * 1000 : SUR_PLACE_MS;
       var inc = {id: x.id, type: x.type, txt: x.txt, zone: x.zone, pos: [x.pos[0], x.pos[1]],
-                 T: t, D: t + x.dl * 1000, moyen: null, arrivee: null, plus_proche: null, relais: false};
+                 T: t, D: t + x.dl * 1000, sp: sp, moyen: null, arrivee: null, plus_proche: null, relais: false,
+                 bloque: 0, faux: null, mauvais: []};  // faux : {moyen, arrivee} du mauvais moyen en route
       e.incs.push(inc);
       e.i[inc.id] = inc;
     });
@@ -104,10 +110,27 @@
     if (t < inc.T) return "pas_ouvert";
     if (t >= inc.D) return "echu";
     if (inc.moyen !== null) return "attribue";
+    if (t < inc.bloque) return "en_attente";
     if (!libre(u, t)) return "occupe";
     var admis = typeAdmis(e, inc.type, t);
-    if (u.type !== admis) { e.erreurs++; return "mauvais_type"; }
-    var trajet = chemin(e.plan, u.pos, inc.pos);
+    var trajet;
+    if (u.type !== admis) {
+      e.erreurs++;
+      trajet = chemin(e.plan, u.pos, inc.pos);
+      if (trajet) {  // il y va quand meme : temps perdu (comme patrouilles.rejouer)
+        var arr = t + (trajet.length - 1) * PAS_MS;
+        inc.bloque = arr;
+        inc.faux = {moyen: u.id, arrivee: arr};
+        inc.mauvais.push(u.id);
+        u.trajet = trajet;
+        u.depart = t;
+        u.arrivee = arr;
+        u.pos = [inc.pos[0], inc.pos[1]];
+        u.libre_a = arr + COMPTE_RENDU_MS;
+      }
+      return "mauvais_type";
+    }
+    trajet = chemin(e.plan, u.pos, inc.pos);
     if (!trajet) return "sans_chemin";
     var cases = trajet.length - 1, meilleur = cases;
     e.units.forEach(function (v) {
@@ -124,7 +147,7 @@
     u.depart = t;
     u.arrivee = arrivee;
     u.pos = [inc.pos[0], inc.pos[1]];
-    u.libre_a = arrivee + SUR_PLACE_MS;
+    u.libre_a = arrivee + inc.sp;
     return "ok";
   }
 
@@ -135,6 +158,7 @@
       if (inc.arrivee <= inc.D) return tj < inc.arrivee ? "route" : "traite";
       return tj < inc.D ? "route" : "manque";
     }
+    if (tj < inc.bloque) return tj < inc.D ? "route" : "manque";  // mauvais moyen en route
     return tj < inc.D ? "ouvert" : "manque";
   }
 
@@ -164,7 +188,8 @@
     var detail = e.incs.map(function (inc) {
       var ok = inc.moyen !== null && inc.arrivee <= inc.D;
       return {id: inc.id, statut: ok ? "traite" : "manque", moyen: inc.moyen, arrivee: inc.arrivee,
-              plus_proche: inc.moyen !== null ? inc.plus_proche : null, relais: !!inc.relais};
+              plus_proche: inc.moyen !== null ? inc.plus_proche : null, relais: !!inc.relais,
+              mauvais_moyens: inc.mauvais.slice()};
     });
     var traites = detail.filter(function (d) { return d.statut === "traite"; }).length;
     var proches = detail.filter(function (d) { return d.statut === "traite" && d.plus_proche; }).length;
@@ -189,7 +214,12 @@
   var COULEURS = {pat: "#2E8BF0", tan: "#8A6BE0", sec: "#E5534B", mot: "#1FA38A"};
   var LEGENDE = [["pat", "P", "Patrouille", "sécurité"], ["tan", "T", "Tango", "technique"],
                  ["sec", "S", "Secours", "blessés, malaises"], ["mot", "M", "Moto", "circulation, parkings"]];
-  var DUREE_MAX = 110000;  // ms de jeu (correction.duree_max_ms, hors marge reseau)
+  // Duree de jeu : derniere echeance + 10 s (correction.patrouilles_duree_jeu_ms, hors marge reseau)
+  function dureeMax(incidents) {
+    var fin = 0;
+    (incidents || []).forEach(function (i) { fin = Math.max(fin, i.t + i.dl); });
+    return fin * 1000 + 10000;
+  }
 
   function regles() {
     return "<div class=\"rules\"><h3>Règles</h3><ul>" +
@@ -197,16 +227,21 @@
       "un compte à rebours.</li>" +
       "<li>Pour envoyer un moyen : cliquez sur l'incident puis sur le moyen, ou sur le moyen puis sur " +
       "l'incident. Vous pouvez aussi faire glisser le moyen sur l'incident. Un second clic annule la " +
-      "sélection. Touches <b>1</b> à <b>5</b> : choisir un moyen, dans l'ordre de la liste.</li>" +
+      "sélection. Touches <b>1</b>, <b>2</b>, <b>3</b>… : choisir un moyen, dans l'ordre de la liste.</li>" +
       "<li>Chaque moyen a sa spécialité : <b>Patrouille</b> sécurité, <b>Tango</b> technique, " +
       "<b>Secours</b> blessés et malaises, <b>Moto</b> circulation et parkings. Un moyen d'une autre " +
-      "spécialité est refusé et compte comme une erreur.</li>" +
+      "spécialité y va quand même, constate sur place qu'il ne peut rien faire et vous rend compte : " +
+      "le temps est perdu, l'incident reste à traiter, et c'est une erreur.</li>" +
       "<li>Envoyez toujours le moyen <b>le plus proche</b> parmi ceux qui sont disponibles : c'est noté.</li>" +
       "<li>Un blessé ne reste jamais sans personne : si aucun <b>Secours</b> n'est disponible, envoyez " +
       "une <b>Patrouille</b> en premier intervenant.</li>" +
       "<li>Les moyens avancent case par case. La <b>piste</b> ne se traverse qu'aux deux passerelles. Les " +
       "cases hachurées sont en travaux.</li>" +
-      "<li>Un moyen engagé reste quelques secondes sur place avant d'être de nouveau disponible.</li>" +
+      "<li>Un moyen engagé reste <b>sur place</b> avant d'être de nouveau disponible : le temps est indiqué " +
+      "sur chaque incident (une bagarre retient une patrouille plus longtemps qu'une barrière). Quand deux " +
+      "incidents attendent le même moyen, pensez à celui qui expire en premier.</li>" +
+      "<li>Un moyen peut être appelé <b>hors du plan</b> : il est indisponible un moment. Sans moyen de la bonne " +
+      "spécialité, attendez qu'il se libère (seul un blessé justifie d'envoyer une Patrouille).</li>" +
       "<li>Objectif : traiter un maximum d'incidents avant la fin de leur compte à rebours.</li></ul></div>";
   }
 
@@ -295,7 +330,7 @@
       var cd = noeud("span", "cd");
       top.appendChild(cd);
       it.appendChild(top);
-      it.appendChild(noeud("span", "txt", inc.txt + " · " + inc.zone));
+      it.appendChild(noeud("span", "txt", inc.txt + " · " + inc.zone + " · sur place " + Math.round(inc.sp / 1000) + " s"));
       var ro = noeud("span", "top ro");
       ro.hidden = true;
       it.appendChild(ro);
@@ -366,13 +401,22 @@
           opts.envoyer({type: "engager", moyen: u.id, incident: inc.id, t_ms: tMs});
           opts.envoyer({type: "refus", moyen: u.id, incident: inc.id, t_ms: tMs});
         }
-        F.son.bip(200, 0.18, "sawtooth");
-        var relais = propre(TYPE_RELAIS, inc.type) && TYPE_RELAIS[inc.type] === u.type;
-        F.toast(relais ? "Un Secours est disponible : envoyez-le sur " + inc.id + "." :
-                u.name + " ne traite pas ce type d'incident (" + inc.type + ").");
-        refusVisuel(u);
+        if (inc.faux && inc.faux.moyen === u.id && inc.faux.arrivee > tMs / coef) {
+          // Il part comme pour un bon envoi ; il ne rendra compte qu'une fois sur place (maj).
+          F.son.bip(1100, 0.05);
+          annoncer(u.name + " engagé sur " + inc.id + ".");
+          sel.inc = null;
+        } else {  // aucun chemin : refus immediat, le moyen ne bouge pas
+          F.son.bip(200, 0.18, "sawtooth");
+          F.toast(u.name + " ne traite pas ce type d'incident (" + inc.type + ").");
+          refusVisuel(u);
+          sel.inc = inc;
+        }
         sel.unit = null;
-        sel.inc = inc;  // l'incident reste choisi : il reste a envoyer le bon moyen
+      } else if (code === "en_attente") {
+        F.toast(e.u[inc.faux.moyen].name + " est en route sur " + inc.id + " : attendez son compte rendu.");
+        sel.unit = null;
+        sel.inc = null;
       } else if (code === "occupe") {
         F.toast(u.name + " n'est pas disponible.");
         sel.unit = null;
@@ -389,7 +433,8 @@
       if (termine) return;
       var st = etatIncident(inc, tJeu());
       if (st !== "ouvert") {
-        if (st === "route") F.toast(e.u[inc.moyen].name + " est déjà engagé sur " + inc.id + ".");
+        if (st === "route") F.toast(e.u[inc.moyen !== null ? inc.moyen : inc.faux.moyen].name +
+                                    " est déjà engagé sur " + inc.id + ".");
         return;
       }
       if (sel.unit) { tenter(sel.unit, inc); return; }
@@ -537,8 +582,23 @@
         } else {
           texte(v.cd, st === "traite" ? "Traité" : st === "manque" ? "Manqué" : "");
         }
+        // Mauvais moyen arrive : il rend compte qu'il ne peut rien faire, l'incident se rouvre.
+        if (inc.faux && !inc.faux.annonce && tj >= inc.faux.arrivee) inc.faux.annonce = tj >= inc.D ? "muet" : "a_dire";
+        if (inc.faux && inc.faux.annonce === "a_dire") {  // expire en route : le « manqué » suffit
+          inc.faux.annonce = "dit";
+          var fm = e.u[inc.faux.moyen];
+          var relaisRefuse = propre(TYPE_RELAIS, inc.type) && TYPE_RELAIS[inc.type] === fm.type;
+          var cr = fm.name + " sur " + inc.id + " : " + (relaisRefuse
+            ? "il faut un Secours, un Secours était disponible. Envoyez-le."
+            : "rien à faire, ce n'est pas pour nous (" + inc.type + "). Envoyez le bon moyen.");
+          F.son.bip(200, 0.18, "sawtooth");
+          F.toast(cr);
+          annoncer(cr);
+          refusVisuel(fm);
+        }
         var ro = "";
         if (inc.moyen !== null && actif) ro = e.u[inc.moyen].name + " en route";
+        else if (inc.faux && tj < inc.faux.arrivee && actif) ro = e.u[inc.faux.moyen].name + " en route";
         texte(v.ro, ro);
         cacher(v.ro, !ro);
         if (st !== "attente") visibles.push([actif ? 0 : 1, actif ? inc.D : -inc.D, k, inc]);
@@ -663,7 +723,7 @@
         envoyer: function (a) { F.action("patrouilles", a); }
       });
       // Duree maximale (x coef) : l'epreuve se clot meme si un incident reste ouvert.
-      F.chrono(DUREE_MAX * coef, F.t0, g, function () { jeu.fin(); fini(); });
+      F.chrono(dureeMax(enonce.INCIDENTS) * coef, F.t0, g, function () { jeu.fin(); fini(); });
     }
   };
 })();

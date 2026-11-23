@@ -346,7 +346,7 @@
     "<li><b>Tango</b> 1, 2… : technique (barrière, éclairage, électricité).</li>" +
     "<li><b>Secours</b> 1, 2… : blessés, malaises.</li>" +
     "<li><b>Moto</b> 1, 2… : circulation, parkings.</li>" +
-    "<li><b>Placiers du Houx</b>, <b>Accueil porte 9</b>, <b>Sécurité camping</b>, <b>Accueil tribune</b> : " +
+    "<li><b>Placiers du Houx</b>, <b>Porte Est</b>, <b>Camping du Houx</b>, <b>Chef de poste Tribune 40</b> :" +
     "équipes de terrain du secteur Sud-Est. Elles aussi vous appellent.</li></ul></details>";
 
   var stage = null, etat = null, courant = null, avisMontre = false;

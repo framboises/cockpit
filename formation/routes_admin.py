@@ -288,11 +288,20 @@ def api_stats():
     durees = [(_utc(t["fin"]) - _utc(t["debut"])).total_seconds() for t in tents
               if t["statut"] == "terminee" and t.get("fin") and t.get("debut")]
     distribution = {e: [0] * 10 for e in store.EPREUVES}
+    notes = {e: [] for e in store.EPREUVES}
     for t in tents:
         for e, s in _scores(t).items():
             if s is not None:
                 distribution[e][min(9, max(0, s // 10))] += 1
+                notes[e].append(s)
+    pond = store.reglages(db)["ponderations"]
+    globaux = [g for g in (tentative.score_global(t, pond) for t in tents if t["statut"] == "terminee")
+               if g is not None]
+    # Reperes de la fiche individuelle (vrais candidats seulement, fictifs exclus)
+    moyennes = {e: _arrondi(sum(v) / len(v)) if v else None for e, v in notes.items()}
+    moyennes["global"] = _arrondi(sum(globaux) / len(globaux)) if globaux else None
     return jsonify({"ok": True, "inscrits": len(ids), "invites": len(ids & invites),
+                    "moyennes": moyennes,
                     "commences": len(tents), "termines": n["terminee"],
                     "interrompus": n["interrompue"], "en_cours": n["en_cours"],
                     "temps_moyen_s": int(round(sum(durees) / len(durees))) if durees else None,

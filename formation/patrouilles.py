@@ -16,17 +16,24 @@ au temps ecoule et non par accumulation de setInterval) :
   n'est pas un objet, id non texte, `t_ms` invalide ou non fini -> ignore, drapeau) :
   * incident inconnu, pas encore ouvert (t < T_i), echu (t >= D_i) ou deja
     attribue -> ignore, drapeau ;
+  * mauvais moyen deja en route sur l'incident (t < bloque_jusqua) -> ignore,
+    drapeau `incident_en_attente` (on attend son compte rendu) ;
   * moyen inconnu -> ignore, drapeau ;
   * aucun chemin -> ignore, drapeau `chemin_impossible` ;
   * moyen encore occupe (t < libre_a) ou indisponible (fenetre `indispo` du
     scenario, en secondes, `de <= t/1000 < a`) -> ignore, drapeau `moyen_occupe` ;
-  * type du moyen different du type de l'incident -> une erreur, rien d'autre
-    (l'incident reste ouvert, le moyen ne bouge pas). Exception : incident
+  * type du moyen different du type de l'incident -> une erreur, et le moyen y
+    va quand meme (23/11/2026) : il arrive a `t + cases * PAS_MS`, rend compte
+    qu'il ne peut rien faire et se libere COMPTE_RENDU_MS plus tard, sur place.
+    D'ici son arrivee l'incident reste bloque (`bloque_jusqua`) : le temps est
+    perdu ; ensuite il est de nouveau ouvert jusqu'a son echeance. Sans chemin :
+    l'erreur seule, le moyen ne bouge pas. Exception : incident
     `Secours` sans aucun moyen Secours libre a t -> une Patrouille (Securite)
     est acceptee en premier intervenant (`relais`) ;
   * sinon l'incident est attribue : `arrivee = t + (cases du chemin) * PAS_MS`,
     traite si `arrivee <= D_i`, le moyen est sur place (`pos = incident`) et
-    libre a `arrivee + SUR_PLACE_MS`. `plus_proche` : aucun moyen admissible
+    libre a `arrivee + sp_i` (`sp` de l'incident en secondes, SUR_PLACE_MS par
+    defaut : une rixe retient une patrouille plus longtemps qu'une barriere). `plus_proche` : aucun moyen admissible
     (meme regle de type, libre a t) n'avait un chemin plus court.
 - Incident jamais traite (pas attribue, ou attribue mais arrive trop tard) : manque.
 - Points : 1 par incident traite par le moyen le plus proche, POINTS_PAS_LE_PLUS_PROCHE
@@ -39,6 +46,7 @@ from formation import banque
 
 PAS_MS = 430
 SUR_PLACE_MS = 4000
+COMPTE_RENDU_MS = 2000  # mauvais moyen arrive : rend compte qu'il ne peut rien faire, puis libre
 POINTS_PAS_LE_PLUS_PROCHE = 0.5
 TYPE_RELAIS = {"Secours": "Sécurité"}  # incident sans moyen libre de son type -> type admis en relais
 
@@ -81,6 +89,12 @@ def chemin(a, b):
     return None
 
 
+def sur_place_ms(inc):
+    """Temps sur place de l'incident (`sp`, secondes de jeu), SUR_PLACE_MS par defaut."""
+    sp = inc.get("sp")
+    return sp * 1000 if isinstance(sp, (int, float)) and not isinstance(sp, bool) and sp >= 0 else SUR_PLACE_MS
+
+
 def libre(u, t):
     """Moyen libre au temps de jeu `t` (ms) : fin de sa mission et hors fenetre `indispo`."""
     if t < u["libre_a"]:
@@ -107,7 +121,8 @@ def rejouer(actions, coef, incidents=None):
                        "indispo": [(w["de"] * 1000, w["a"] * 1000) for w in u.get("indispo") or []]}
              for u in p["UNITS"]}
     etat = {iid: {"id": iid, "statut": "manque", "moyen": None, "arrivee_ms": None,
-                  "plus_proche": None, "relais": False} for iid in incs}
+                  "plus_proche": None, "relais": False, "mauvais_moyens": []} for iid in incs}
+    bloque = {iid: 0.0 for iid in incs}  # arrivee du mauvais moyen en route (ms de jeu)
     erreurs = ignores = 0
     drapeaux = []
 
@@ -143,6 +158,10 @@ def rejouer(actions, coef, incidents=None):
             ignores += 1
             drapeau("incident_deja_attribue")
             continue
+        if t < bloque[inc["id"]]:
+            ignores += 1
+            drapeau("incident_en_attente")
+            continue
         if not libre(u, t):
             ignores += 1
             drapeau("moyen_occupe")
@@ -150,6 +169,13 @@ def rejouer(actions, coef, incidents=None):
         admis = type_admis(units, inc["type"], t)
         if u["type"] != admis:
             erreurs += 1
+            trajet = chemin(u["pos"], inc["pos"])
+            if trajet is not None:  # il y va quand meme : temps perdu pour l'incident et pour lui
+                arrivee = t + (len(trajet) - 1) * PAS_MS
+                bloque[inc["id"]] = arrivee
+                e["mauvais_moyens"].append(uid)
+                u["pos"] = tuple(inc["pos"])
+                u["libre_a"] = arrivee + COMPTE_RENDU_MS
             continue
         trajet = chemin(u["pos"], inc["pos"])
         if trajet is None:
@@ -168,7 +194,7 @@ def rejouer(actions, coef, incidents=None):
         if arrivee <= ech:
             e["statut"] = "traite"
         u["pos"] = tuple(inc["pos"])
-        u["libre_a"] = arrivee + SUR_PLACE_MS
+        u["libre_a"] = arrivee + sur_place_ms(inc)
 
     detail = [etat[iid] for iid in incs]
     traites = sum(1 for d in detail if d["statut"] == "traite")

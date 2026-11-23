@@ -92,24 +92,36 @@ def _cas():
         for _ in range(5):
             cas.append({"coef": coef, "incidents": ent, "actions": _journal_aleatoire(rng, ent, coef, 6)})
     # Bord : arrivee exactement a l'echeance (traite), engagement exactement a l'echeance (echu)
-    t = 32000 - 8 * patrouilles.PAS_MS
+    d1 = _ech("I1")
+    t = d1 - 8 * patrouilles.PAS_MS
     cas.append({"coef": 1.0, "actions": [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": t}]})
-    cas.append({"coef": 1.0, "actions": [{"type": "engager", "moyen": "P2", "incident": "I1", "t_ms": 32000}]})
-    cas.append({"coef": 1.33, "actions": [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": 32000 * 1.33 - 1}]})
-    # Relais : patrouille sur l'enfant blesse pendant l'indisponibilite de Secours 1, et juste avant
+    cas.append({"coef": 1.0, "actions": [{"type": "engager", "moyen": "P2", "incident": "I1", "t_ms": d1}]})
+    cas.append({"coef": 1.33, "actions": [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": d1 * 1.33 - 1}]})
+    # Relais : patrouille sur le malaise I9, S1 hors du plan (40-115 s), S2 libre ou deja engage
     for coef in (1.0, 1.33):
-        for t in (43999, 44000, 51000):
-            cas.append({"coef": coef, "actions": [
-                {"type": "engager", "moyen": "P2", "incident": "I6", "t_ms": t * coef},
-                {"type": "engager", "moyen": "S1", "incident": "I6", "t_ms": (t + 10) * coef}]})
+        for s2 in (False, True):
+            for t in (46000, 47000, 55000):
+                acts = [{"type": "engager", "moyen": "S2", "incident": "I8", "t_ms": 43000 * coef}] if s2 else []
+                cas.append({"coef": coef, "actions": acts + [
+                    {"type": "engager", "moyen": "P2", "incident": "I9", "t_ms": t * coef},
+                    {"type": "engager", "moyen": "S1", "incident": "I9", "t_ms": (t + 10) * coef}]})
+    # Le journal du candidat ideal, a plusieurs vitesses
+    from test_formation_patrouilles import journal_ideal
+    for r_ms in (1500, 4000, 9000):
+        cas.append({"coef": 1.0, "actions": journal_ideal(reaction_ms=r_ms)})
     return cas
+
+
+def _ech(iid):
+    i = next(x for x in _plan()["INCIDENTS"] if x["id"] == iid)
+    return (i["t"] + i["dl"]) * 1000
 
 
 def test_moteur_js_identique_au_rejeu():
     cas = _cas()
     resultats = _node(_plan(), cas)
     assert len(resultats) == len(cas)
-    vus = {"traite": 0, "erreur": 0, "ignore": 0, "relais": 0, "pas_le_plus_proche": 0}
+    vus = {"traite": 0, "erreur": 0, "ignore": 0, "relais": 0, "pas_le_plus_proche": 0, "mauvais_en_route": 0}
     for c, js in zip(cas, resultats):
         py = patrouilles.rejouer(c["actions"], c["coef"], incidents=c.get("incidents"))
         for k in ("traites", "manques", "erreurs", "ignores", "plus_proches"):
@@ -117,6 +129,8 @@ def test_moteur_js_identique_au_rejeu():
         for dj, dp in zip(js["detail"], py["detail_incidents"]):
             assert dj["id"] == dp["id"] and dj["statut"] == dp["statut"] and dj["moyen"] == dp["moyen"], c
             assert dj["plus_proche"] == dp["plus_proche"] and dj["relais"] == dp["relais"], c
+            assert dj["mauvais_moyens"] == dp["mauvais_moyens"], c
+            vus["mauvais_en_route"] += len(dp["mauvais_moyens"])
             vus["relais"] += 1 if dp["relais"] and dp["statut"] == "traite" else 0
             vus["pas_le_plus_proche"] += 1 if dp["plus_proche"] is False else 0
             if dp["arrivee_ms"] is not None:
@@ -129,7 +143,7 @@ def test_moteur_js_identique_au_rejeu():
 
 
 def test_moteur_js_coef_allonge_echeances():
-    t = 32000 + 2000 - 8 * patrouilles.PAS_MS
+    t = _ech("I1") + 2000 - 8 * patrouilles.PAS_MS
     a = [{"type": "engager", "moyen": "P1", "incident": "I1", "t_ms": t}]
     r1, r133 = _node(_plan(), [{"coef": 1.0, "actions": a}, {"coef": 1.33, "actions": a}])
     assert r1["traites"] == 0 and r133["traites"] == 1
