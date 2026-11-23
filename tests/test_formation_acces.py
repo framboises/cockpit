@@ -337,6 +337,56 @@ def test_compte_test_passer_dans_l_ordre(app, db):
     assert db["tentatives"].find_one({})["epreuves"]["radio"]["etat"] == "en_cours"
 
 
+def test_compte_test_aller_a_une_epreuve(app, db):
+    c = _demarre_compte_test(app, db)
+    # droit aux patrouilles : radio, appel, mc passees
+    r = c.post("/api/test/aller/patrouilles")
+    assert r.status_code == 200, r.get_json()
+    etat = r.get_json()["etat"]
+    assert etat["epreuve_courante"] == "patrouilles"
+    assert [x["etat"] for x in etat["epreuves"][:3]] == ["passee"] * 3
+    assert c.post("/api/epreuve/patrouilles/debut").status_code == 200
+    assert c.post("/api/epreuve/patrouilles/fin").status_code == 200
+    # on y retourne : elle repart de zero, journal vide, meme pendant une epreuve en cours
+    assert c.post("/api/epreuve/acces/debut").status_code == 200
+    r = c.post("/api/test/aller/patrouilles")
+    assert r.get_json()["etat"]["epreuve_courante"] == "patrouilles"
+    t = db["tentatives"].find_one({})
+    assert t["epreuves"]["patrouilles"] == {"etat": "a_faire", "actions": [], "drapeaux": []}
+    assert t["epreuves"]["acces"]["etat"] == "passee"
+    # tentative terminee : elle repart aussi
+    for e in store.EPREUVES[store.EPREUVES.index("patrouilles"):]:
+        if db["tentatives"].find_one({})["epreuves"][e]["etat"] == "a_faire":
+            c.post("/api/epreuve/%s/passer" % e)
+    assert db["tentatives"].find_one({})["statut"] == "terminee"
+    r = c.post("/api/test/aller/radio")
+    assert r.status_code == 200 and r.get_json()["etat"]["statut"] == "en_cours"
+    assert r.get_json()["etat"]["epreuve_courante"] == "radio"
+    assert c.post("/api/test/aller/inconnue").status_code == 409
+
+
+def test_compte_test_remise_a_zero(app, db):
+    c = _demarre_compte_test(app, db)
+    c.post("/api/epreuve/radio/passer")
+    r = c.post("/api/test/remise-a-zero")
+    assert r.status_code == 200, r.get_json()
+    etat = r.get_json()["etat"]
+    assert etat["statut"] == "en_cours" and etat["epreuve_courante"] == "radio" and etat["peut_passer"] is True
+    assert [t["statut"] for t in db["tentatives"].find({}).sort("debut", 1)] == ["reinitialisee", "en_cours"]
+    # la meme session continue : on joue la nouvelle tentative sans se reconnecter
+    assert c.post("/api/epreuve/radio/debut").status_code == 200
+
+
+def test_vrai_candidat_ni_aller_ni_remise_a_zero(app, db):
+    c = _demarre(app, db)
+    for chemin in ("/api/test/aller/patrouilles", "/api/test/remise-a-zero"):
+        r = c.post(chemin)
+        assert r.status_code == 403 and r.get_json()["error"] == "interdit"
+    t = db["tentatives"].find_one({})
+    assert t["statut"] == "en_cours" and t["epreuves"]["radio"]["etat"] == "a_faire"
+    assert db["tentatives"].count_documents({}) == 1
+
+
 def test_vrai_candidat_ne_passe_jamais(app, db):
     c = _demarre(app, db)
     assert db["tentatives"].find_one({}).get("sauts") is None

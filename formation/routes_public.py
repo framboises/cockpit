@@ -289,6 +289,31 @@ def api_passer(db, cand, sid, t, now, epreuve):
     return jsonify({"ok": True, "etat": etat})
 
 
+def _compte_test(appel):
+    """Action du compte test : 403 `interdit` pour un vrai candidat, rien ne change."""
+    try:
+        return jsonify({"ok": True, "etat": appel()})
+    except PermissionError as e:
+        if str(e) == "interdit":
+            return _err(403, error="interdit")
+        raise
+
+
+@formation_bp.post("/api/test/aller/<epreuve>")
+@api_session
+def api_aller(db, cand, sid, t, now, epreuve):
+    """Compte test : aller a une epreuve (clic sur son nom dans le deroule)."""
+    return _compte_test(lambda: tentative.aller_a_epreuve(db, cand, sid, epreuve, now))
+
+
+@formation_bp.post("/api/test/remise-a-zero")
+@api_session
+def api_remise_a_zero(db, cand, sid, t, now):
+    """Compte test : tentative reinitialisee et nouvelle tentative aussitot."""
+    coef = store.reglages(db).get("coef_amenagement")
+    return _compte_test(lambda: tentative.remise_a_zero(db, cand, sid, coef, now))
+
+
 @formation_bp.post("/api/epreuve/<epreuve>/fin")
 @api_session
 def api_fin(db, cand, sid, t, now, epreuve):

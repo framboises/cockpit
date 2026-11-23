@@ -257,6 +257,54 @@ def passer_epreuve(db, candidat, sid, epreuve, now):
     return etat_client(r)
 
 
+def _charger_compte_test(db, candidat, sid):
+    """Tentative du compte test (en cours ou terminee), de la session active, avec le droit de saut."""
+    if not peut_sauter(candidat):
+        raise PermissionError("interdit")
+    t = active(db, _cid(candidat))
+    if t is None or t["statut"] not in ("en_cours", "terminee"):
+        raise ValueError("tentative")
+    if t.get("sid") != sid:
+        raise PermissionError("session")
+    if t.get("sauts") is not True:
+        raise PermissionError("interdit")
+    return t
+
+
+def aller_a_epreuve(db, candidat, sid, epreuve, now):
+    """Compte test : aller directement a `epreuve`, en avant ou en arriere. Elle
+    repart de zero (`a_faire`, journal vide) ; les epreuves d'avant encore a faire
+    et une epreuve en cours sont `passee` ; une tentative terminee repart. Les
+    epreuves deja jouees apres elle gardent leur resultat."""
+    t = _charger_compte_test(db, candidat, sid)
+    if epreuve not in store.EPREUVES:
+        raise ValueError("ordre")
+    i = store.EPREUVES.index(epreuve)
+    passee = lambda: {"etat": "passee", "actions": [], "debut": now, "fin": now, "drapeaux": ["passee"]}
+    s = {"statut": "en_cours", "fin": None,
+         "epreuves.%s" % epreuve: {"etat": "a_faire", "actions": [], "drapeaux": []}}
+    for k, x in enumerate(store.EPREUVES):
+        etat = t["epreuves"][x]["etat"]
+        if x != epreuve and (etat == "en_cours" or (k < i and etat == "a_faire")):
+            s["epreuves.%s" % x] = passee()
+    r = _col(db).find_one_and_update({"_id": t["_id"], "sid": sid, "statut": t["statut"]}, {"$set": s},
+                                     return_document=ReturnDocument.AFTER)
+    if r is None:
+        raise ValueError("ordre")
+    return etat_client(r)
+
+
+def remise_a_zero(db, candidat, sid, coef_reglage, now):
+    """Compte test : la tentative est reinitialisee (conservee, journalisee) et une
+    neuve commence aussitot, sur la meme session."""
+    _charger_compte_test(db, candidat, sid)
+    try:
+        reinitialiser(db, _cid(candidat), "remise a zero (compte test)", "compte test", now)
+    except ValueError:
+        pass  # deja reinitialisee par une requete concurrente
+    return commencer(db, candidat, sid, coef_reglage, now)
+
+
 def ecoule_ms(t, epreuve, now):
     """Ms serveur ecoulees depuis le debut de `epreuve` si elle est en cours, 0
     sinon (premier demarrage)."""

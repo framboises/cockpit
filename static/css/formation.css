@@ -58,6 +58,12 @@ h2:focus{outline:none}
 .nav .t{font-size:.88rem;font-weight:500}
 .nav .s{margin-left:auto;font-family:var(--mono);font-size:.74rem;color:var(--muted)}
 .nav .s.done{color:var(--ok)}
+/* Compte test : epreuves cliquables et remise a zero */
+.nav button.aller{background:none;border:0;padding:0;margin:0;color:var(--fg);font:inherit;font-size:.88rem;
+  font-weight:500;text-align:left;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.nav button.aller:hover,.nav button.aller:focus-visible{color:var(--accent)}
+.nav .compte-test{font-size:.72rem;color:var(--muted);margin:6px 2px 0}
+.nav .raz{margin-top:4px;align-self:flex-start}
 
 .stage{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;min-width:0}
 .stage-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}

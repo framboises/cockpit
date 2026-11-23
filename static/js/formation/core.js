@@ -380,10 +380,49 @@
         else if (e === "passee") s = "<span class=\"s\" aria-label=\"passée\">»</span>";
         else s = "<span class=\"s\" aria-hidden=\"true\">·</span>";
       }
+      var titre = "<span class=\"t\">" + F.esc(g.t) + "</span>";
+      // Compte test : chaque epreuve du deroule est un bouton pour y aller directement.
+      if (compteTest() && EPREUVES.indexOf(g.id) >= 0) {
+        titre = "<button type=\"button\" class=\"t aller\" data-aller=\"" + g.id + "\" title=\"Aller à cette épreuve " +
+          "(compte test)\">" + F.esc(g.t) + "</button>";
+      }
       html += "<li" + (g.id === courant ? " aria-current=\"step\"" : "") + "><span class=\"h\">" + g.h +
-        "</span><span class=\"t\">" + F.esc(g.t) + "</span>" + s + "</li>";
+        "</span>" + titre + s + "</li>";
     });
-    nav.innerHTML = html + "</ol>";
+    html += "</ol>";
+    if (compteTest()) {
+      html += "<p class=\"compte-test\">Compte test : cliquez sur une épreuve pour y aller.</p>" +
+        "<button type=\"button\" class=\"btn ghost raz\" id=\"f-raz\">Remise à zéro</button>";
+    }
+    nav.innerHTML = html;
+    if (compteTest() && !nav.dataset.ecoute) {
+      nav.dataset.ecoute = "1";  // un seul ecouteur : la nav est redessinee a chaque ecran
+      nav.addEventListener("click", function (ev) {
+        var b = ev.target.closest ? ev.target.closest("button") : null;
+        if (!b || b.disabled) return;
+        if (b.id === "f-raz") actionTest(b, "/api/test/remise-a-zero");
+        else if (b.getAttribute("data-aller")) actionTest(b, "/api/test/aller/" + b.getAttribute("data-aller"));
+      });
+    }
+  }
+
+  function compteTest() { return !!(etat && etat.peut_passer === true); }
+
+  // Compte test : saut vers une epreuve ou remise a zero, puis l'ecran qui en decoule.
+  // L'epreuve en cours est abandonnee cote client (minuteurs arretes) : le serveur l'a passee.
+  function actionTest(bouton, chemin) {
+    bouton.disabled = true;
+    F.api(chemin, {}).then(function (r) {
+      if (r.status === 200 && r.data && r.data.ok) {
+        F.toutArreter();
+        garde = false;
+        avisMontre = true;  // pas d'avis « épreuve interrompue » pour un saut volontaire
+        aller(r.data.etat);
+        return;
+      }
+      bouton.disabled = false;
+      F.toast("Action impossible pour le moment.");
+    });
   }
 
   // Prepare l'ecran `id` : nav, horloge, en-tete et corps vides. Renvoie le corps.
